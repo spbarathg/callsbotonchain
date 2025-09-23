@@ -149,9 +149,9 @@ async def worker(
             if _recent_seen(mint):
                 continue
             
-            # Hourly rate limiting (atomic)
-            if not await _try_acquire_hourly_slot():
-                logging.info("⏸️  Hourly limit reached, skipping token %s", mint[:8])
+            # Early non-atomic guard to skip work if we're likely over limit
+            if not _check_hourly_limit():
+                logging.info("⏸️  Hourly limit reached (%d/%d)", _hourly_count, MAX_TOKENS_PER_HOUR)
                 continue
                 
             lp_sol = float(item.get("lp_sol") or 0.0)
@@ -172,7 +172,10 @@ async def worker(
                 "ts": item.get("ts"),
             }
 
-            # Slot already acquired above; proceed with analysis
+            # Acquire hourly slot atomically right before expensive RPC analysis
+            if not await _try_acquire_hourly_slot():
+                logging.info("⏸️  Hourly limit reached after LP checks, skipping %s", mint[:8])
+                continue
 
             # Track analysis time
             analysis_start = time.time()
