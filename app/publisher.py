@@ -36,6 +36,14 @@ class Publisher:
         # In-process publish dedup (TTL seconds)
         self._dedup_ttl_s: int = int(os.getenv("PUBLISH_DEDUP_TTL_S", "600"))
         self._recent: Dict[str, int] = {}
+        
+        # API rate limiting and caching
+        self._api_cache: Dict[str, Dict[str, Any]] = {}
+        self._cache_ttl_s: int = int(os.getenv("API_CACHE_TTL_S", "30"))  # 30s cache
+        self._last_dex_call: float = 0.0
+        self._last_gecko_call: float = 0.0
+        self._dex_delay_s: float = float(os.getenv("DEX_DELAY_S", "0.5"))
+        self._gecko_delay_s: float = float(os.getenv("GECKO_DELAY_S", "0.5"))
 
     async def start(self) -> None:
         # HTTP session for Telegram if configured
@@ -162,7 +170,39 @@ class Publisher:
         lp_sol = float(data.get("lp_sol") or 0.0)
         top1 = float(data.get("top1_pct") or 0.0)
         momentum = int(data.get("momentum_score") or 0)
-        market_cap = lp_sol * 2 * 150  # Rough MC estimate (2x LP * SOL price)
+        # Prefer live data from DexScreener; fallback to GeckoTerminal. Do NOT use rough estimates.
+        total_supply = float(data.get("total_supply") or 0.0)
+        live_pair = await self._fetch_live_pair(mint)
+        market_cap = None
+        live_lp_sol = None
+        mc_source = None
+        if live_pair:
+            market_cap = self._derive_market_cap_usd(live_pair, total_supply)
+            # Liquidity in SOL (if priceUsd known)
+            liq_usd = float(((live_pair.get("liquidity") or {}).get("usd") or 0.0))
+            price_usd = float(live_pair.get("priceUsd") or 0.0)
+            sol_price_env = float(os.getenv("SOL_PRICE_USD", "150"))
+            denom = price_usd if price_usd > 0 else sol_price_env
+            if denom > 0 and liq_usd > 0:
+                live_lp_sol = liq_usd / denom
+            if market_cap and market_cap > 0:
+                mc_source = "DexScreener"
+        if not market_cap:
+            gecko = await self._fetch_gecko_token(mint)
+            if gecko:
+                market_cap = self._derive_mc_from_gecko(gecko, total_supply)
+                # Liquidity USD → SOL if possible using priceUsd
+                try:
+                    liq_usd = float(gecko.get("reserve_in_usd") or 0.0)
+                    price_usd = float(gecko.get("price_usd") or 0.0)
+                    sol_price_env = float(os.getenv("SOL_PRICE_USD", "150"))
+                    denom = price_usd if price_usd > 0 else sol_price_env
+                    if denom > 0 and liq_usd > 0:
+                        live_lp_sol = liq_usd / denom
+                except Exception:
+                    pass
+                if market_cap and market_cap > 0:
+                    mc_source = "GeckoTerminal"
         
         # Determine signal strength emoji
         if score >= 9:
@@ -184,12 +224,18 @@ class Publisher:
         esc = html.escape
         
         # Minimalistic format inspired by reference
+        # Show full Contract Address (CA) in a copy-friendly code block
+        mc_str = self._format_usd_short(market_cap) if market_cap else "N/A"
+        ts_str = time.strftime("%H:%M:%S UTC", time.gmtime())
+        source_suffix = f" ({mc_source}, {ts_str})" if mc_source else ""
+
         text = f"""{strength_emoji} <b>{signal_type}</b> {strength_emoji}
 
 🎯 <b>${mint[:6]}...{mint[-4:]}</b>
+🧾 CA: <code>{esc(mint)}</code>
 
-💎 MC: ${market_cap/1000:.0f}K
-💧 LP: {lp_sol:.1f} SOL  
+💎 MC: {mc_str}{source_suffix}
+💧 LP: {(live_lp_sol if live_lp_sol is not None else lp_sol):.1f} SOL  
 📊 Score: <b>{score:.1f}/10</b>
 ⚡ Mom: {momentum}  •  🏛️ Top1: {top1*100:.0f}%
 
@@ -212,7 +258,143 @@ class Publisher:
             logging.debug("Telegram request error: %s", e)
             await metrics_collector.record_api_health("telegram", "error", error=True)
 
+    # ---------- Internals ----------
+    async def _fetch_live_pair(self, mint: str) -> Optional[Dict[str, Any]]:
+        """Fetch the highest-liquidity DexScreener pair for a mint with caching and rate limiting."""
+        try:
+            if not self._http:
+                return None
+            
+            # Check cache first
+            cache_key = f"dex_{mint}"
+            now = time.time()
+            if cache_key in self._api_cache:
+                cached_data = self._api_cache[cache_key]
+                if now - cached_data.get("timestamp", 0) < self._cache_ttl_s:
+                    return cached_data.get("data")
+            
+            # Rate limiting
+            if now - self._last_dex_call < self._dex_delay_s:
+                await asyncio.sleep(self._dex_delay_s - (now - self._last_dex_call))
+            self._last_dex_call = time.time()
+            
+            timeout = aiohttp.ClientTimeout(total=6)
+            url = f"https://api.dexscreener.com/latest/dex/tokens/{mint}"
+            async with self._http.get(url, timeout=timeout) as resp:
+                if resp.status != 200:
+                    return None
+                data = await resp.json()
+            pairs = (data or {}).get("pairs") or []
+            best_pair: Optional[Dict[str, Any]] = None
+            best_liq = 0.0
+            for p in pairs:
+                try:
+                    liq = float(((p.get("liquidity") or {}).get("usd") or 0.0))
+                    if liq > best_liq:
+                        best_liq = liq
+                        best_pair = p
+                except Exception:
+                    continue
+            
+            # Cache the result
+            if best_pair:
+                self._api_cache[cache_key] = {
+                    "data": best_pair,
+                    "timestamp": now
+                }
+            
+            return best_pair
+        except Exception:
+            return None
+
+    async def _fetch_gecko_token(self, mint: str) -> Optional[Dict[str, Any]]:
+        """Fetch token info from GeckoTerminal (Solana network) with caching and rate limiting."""
+        try:
+            if not self._http:
+                return None
+            
+            # Check cache first
+            cache_key = f"gecko_{mint}"
+            now = time.time()
+            if cache_key in self._api_cache:
+                cached_data = self._api_cache[cache_key]
+                if now - cached_data.get("timestamp", 0) < self._cache_ttl_s:
+                    return cached_data.get("data")
+            
+            # Rate limiting
+            if now - self._last_gecko_call < self._gecko_delay_s:
+                await asyncio.sleep(self._gecko_delay_s - (now - self._last_gecko_call))
+            self._last_gecko_call = time.time()
+            
+            timeout = aiohttp.ClientTimeout(total=6)
+            url = f"https://api.geckoterminal.com/api/v2/networks/solana/tokens/{mint}"
+            headers = {"accept": "application/json"}
+            async with self._http.get(url, headers=headers, timeout=timeout) as resp:
+                if resp.status != 200:
+                    return None
+                data = await resp.json()
+            # GeckoTerminal wraps data under data->attributes
+            d = (data or {}).get("data") or {}
+            attrs = d.get("attributes") or {}
+            # Normalize fields - check multiple possible field names for liquidity
+            out = {
+                "price_usd": attrs.get("price_usd"),
+                "fdv": attrs.get("fdv_usd") or attrs.get("fdv"),
+                "market_cap": attrs.get("market_cap_usd") or attrs.get("market_cap"),
+                "reserve_in_usd": (attrs.get("reserve_in_usd") or 
+                                 attrs.get("liquidity_usd") or 
+                                 attrs.get("liquidity") or
+                                 attrs.get("reserve_usd") or
+                                 attrs.get("pool_liquidity_usd")),
+            }
+            
+            # Cache the result
+            if out.get("price_usd") or out.get("market_cap"):
+                self._api_cache[cache_key] = {
+                    "data": out,
+                    "timestamp": now
+                }
+            
+            return out
+        except Exception:
+            return None
+
+    def _derive_mc_from_gecko(self, gecko: Dict[str, Any], total_supply: float) -> Optional[float]:
+        try:
+            mc = gecko.get("market_cap") or gecko.get("fdv")
+            if isinstance(mc, (int, float)) and mc > 0:
+                return float(mc)
+            price_usd = float(gecko.get("price_usd") or 0.0)
+            if price_usd > 0 and total_supply > 0:
+                return float(price_usd * total_supply)
+            return None
+        except Exception:
+            return None
+
+    def _derive_market_cap_usd(self, pair: Dict[str, Any], total_supply: float) -> Optional[float]:
+        try:
+            mc = pair.get("marketCap") or pair.get("fdv")
+            if isinstance(mc, (int, float)) and mc > 0:
+                return float(mc)
+            price_usd = float(pair.get("priceUsd") or 0.0)
+            if price_usd > 0 and total_supply > 0:
+                return float(price_usd * total_supply)
+            return None
+        except Exception:
+            return None
+
+    def _format_usd_short(self, value: float) -> str:
+        try:
+            v = float(value)
+            if v >= 1_000_000_000:
+                return f"${v/1_000_000_000:.1f}B"
+            if v >= 1_000_000:
+                return f"${v/1_000_000:.0f}M"
+            if v >= 1_000:
+                return f"${v/1_000:.0f}K"
+            return f"${v:.0f}"
+        except Exception:
+            return "$-"
+
 
 __all__ = ["Publisher"]
-
-

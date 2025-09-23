@@ -57,6 +57,7 @@ class OnchainMonitor:
                 web.get("/stats", self._stats),
                 web.get("/signals", self._recent_signals),
                 web.get("/tokens", self._recent_tokens),
+                web.get("/test/{mint}", self._test_live_data),
                 web.post("/webhook", self._webhook),
             ]
         )
@@ -209,6 +210,62 @@ class OnchainMonitor:
             
         except Exception as e:
             logging.error("Recent tokens endpoint failed: %s", e)
+            return web.json_response({"error": str(e)}, status=500)
+
+    async def _test_live_data(self, request: web.Request) -> web.Response:
+        """Test endpoint to verify live data fetching for a given mint."""
+        try:
+            mint = request.match_info["mint"]
+            
+            # Basic validation
+            if not mint or len(mint) < 32:
+                return web.json_response({"error": "Invalid mint address"}, status=400)
+            
+            # Import here to avoid circular imports
+            from .publisher import Publisher
+            
+            # Create a temporary publisher instance for testing
+            publisher = Publisher()
+            await publisher.start()
+            
+            try:
+                # Test DexScreener
+                dex_pair = await publisher._fetch_live_pair(mint)
+                dex_data = {}
+                if dex_pair:
+                    dex_data = {
+                        "price_usd": dex_pair.get("priceUsd"),
+                        "market_cap": dex_pair.get("marketCap"),
+                        "fdv": dex_pair.get("fdv"),
+                        "liquidity_usd": dex_pair.get("liquidity", {}).get("usd"),
+                        "source": "DexScreener"
+                    }
+                
+                # Test GeckoTerminal
+                gecko_data = await publisher._fetch_gecko_token(mint)
+                gecko_result = {}
+                if gecko_data:
+                    gecko_result = {
+                        "price_usd": gecko_data.get("price_usd"),
+                        "market_cap": gecko_data.get("market_cap"),
+                        "fdv": gecko_data.get("fdv"),
+                        "liquidity_usd": gecko_data.get("reserve_in_usd"),
+                        "source": "GeckoTerminal"
+                    }
+                
+                return web.json_response({
+                    "mint": mint,
+                    "timestamp": int(time.time()),
+                    "dex_data": dex_data,
+                    "gecko_data": gecko_result,
+                    "status": "success"
+                })
+                
+            finally:
+                await publisher.stop()
+                
+        except Exception as e:
+            logging.error("Test live data endpoint failed: %s", e)
             return web.json_response({"error": str(e)}, status=500)
 
     async def _webhook(self, request: web.Request) -> web.Response:
