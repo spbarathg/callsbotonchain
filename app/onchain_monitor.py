@@ -7,6 +7,11 @@ from typing import Any, Dict, List, Optional, Set
 import aiohttp
 from aiohttp import web
 
+try:
+    import base58
+except ImportError:
+    base58 = None
+
 from .metrics import metrics_collector
 
 
@@ -59,8 +64,16 @@ class OnchainMonitor:
             "raydium_initializations": 0,
             "meteora_initializations": 0,
             "duplicate_skips": 0,
-            "error_transactions": 0
+            "error_transactions": 0,
+            "invalid_mints": 0,
+            "missing_creation_logs": 0,
+            "instruction_position_issues": 0,
+            "cleanup_runs": 0
         }
+        
+        # Time-based cleanup tracking
+        self._last_cleanup_time = time.time()
+        self._cleanup_interval = 3600  # 1 hour cleanup interval
 
     async def start(self) -> None:
         """Start the webhook server."""
@@ -142,6 +155,10 @@ class OnchainMonitor:
         expired_mints = [mint for mint, timestamp in self._seen_mints.items() if timestamp < cutoff]
         for mint in expired_mints:
             del self._seen_mints[mint]
+            
+        self._stats["cleanup_runs"] += 1
+        if expired_mints:
+            logging.info("Cleaned up %d expired mints from cache", len(expired_mints))
         
     async def _handle_webhook(self, request: web.Request) -> web.Response:
         """Handle incoming webhook events."""
@@ -181,9 +198,11 @@ class OnchainMonitor:
                 await metrics_collector.record_error("json_parse_error", str(e))
                 return web.Response(status=400, text="Invalid JSON")
                 
-            # Cleanup old mints periodically (every 100 requests)
-            if len(self._seen_mints) > 0 and len(self._seen_mints) % 100 == 0:
+            # Time-based cleanup (every hour)
+            now = time.time()
+            if now - self._last_cleanup_time > self._cleanup_interval:
                 self._cleanup_old_mints()
+                self._last_cleanup_time = now
                 
             # Process events
             events = self._extract_events(payload)
@@ -200,12 +219,12 @@ class OnchainMonitor:
                 except asyncio.QueueFull:
                     # Try with timeout as fallback
                     try:
-                        await asyncio.wait_for(self.queue.put(event), timeout=0.1)
+                        await asyncio.wait_for(self.queue.put(event), timeout=0.5)  # Increased timeout
                         processed_count += 1
                         await metrics_collector.record_webhook_request()
                     except asyncio.TimeoutError:
                         await metrics_collector.record_error("queue_full", "Queue overflow")
-                        logging.warning("Queue full, dropping event")
+                        logging.warning("Queue full, dropping event after 0.5s timeout")
                     
             return web.Response(status=200, text=f"Processed {processed_count} events")
             
@@ -266,6 +285,7 @@ class OnchainMonitor:
         # Extract mint address
         mint = self._extract_mint_address(payload)
         if not mint:
+            self._stats["invalid_mints"] += 1
             return events
             
         # Deduplicate with TTL
@@ -308,50 +328,114 @@ class OnchainMonitor:
         """Validate program-specific rules for new token launches."""
         
         if program_id == "6EF8rrecthR5DkVKMzskHPBxdLHMpWFqcFvXVvLCADx":  # Pump.fun
-            # Must be first buy transaction - check for creation log
+            # Enhanced Pump.fun validation: check for creation log + ensure it's truly first buy
             logs = payload.get("logs", [])
+            creation_log_found = False
+            
             for log in logs:
                 if "creating bonding curve" in log.lower():
-                    return True
-            # Alternative: check if accounts are newly created
-            # This is a simplified check - in production you might want more sophisticated logic
+                    creation_log_found = True
+                    break
+            
+            if not creation_log_found:
+                self._stats["missing_creation_logs"] += 1
+                logging.debug("Pump.fun transaction missing creation log - likely normal buy")
+                return False
+                
+            # Additional check: ensure this is the first buy for this mint
+            mint = self._extract_mint_address(payload)
+            if mint and mint in self._seen_mints:
+                logging.debug("Pump.fun mint already seen - not first buy: %s", mint[:8])
+                return False
+                
             return True
             
         elif program_id == "675kPX9MHTjS2zt1qfr1NYHuzeLXf3w7T8vQ1F8VxEZ":  # Raydium V4
-            # initialize2 instruction should be first
+            # Scan all instructions, prioritize first
             instructions = payload.get("instructions", [])
-            if instructions and instructions[0].get("instruction", {}).get("name") == "initialize2":
+            if not instructions:
+                return False
+                
+            # Check if first instruction matches
+            if instructions[0].get("instruction", {}).get("name") == "initialize2":
                 return True
                 
+            # Fallback: scan all instructions for initialize2
+            for instruction in instructions:
+                if instruction.get("instruction", {}).get("name") == "initialize2":
+                    self._stats["instruction_position_issues"] += 1
+                    logging.debug("Raydium initialize2 found in non-first position")
+                    return True
+                    
+            logging.debug("Raydium transaction missing initialize2 instruction")
+            return False
+                
         elif program_id == "7xKXGhFZKS1tZa6kFmf1zz55KjKnb5qTgzoBDLmqLwzw":  # Meteora DLMM
-            # initialize_pool instruction should be first
+            # Scan all instructions, prioritize first
             instructions = payload.get("instructions", [])
-            if instructions and instructions[0].get("instruction", {}).get("name") == "initialize_pool":
+            if not instructions:
+                return False
+                
+            # Check if first instruction matches
+            if instructions[0].get("instruction", {}).get("name") == "initialize_pool":
                 return True
+                
+            # Fallback: scan all instructions for initialize_pool
+            for instruction in instructions:
+                if instruction.get("instruction", {}).get("name") == "initialize_pool":
+                    self._stats["instruction_position_issues"] += 1
+                    logging.debug("Meteora initialize_pool found in non-first position")
+                    return True
+                    
+            logging.debug("Meteora transaction missing initialize_pool instruction")
+            return False
                 
         return False
         
     def _extract_mint_address(self, payload: Dict[str, Any]) -> Optional[str]:
-        """Extract mint address from transaction payload."""
-        # Try tokenTransfers first
+        """Extract mint address from transaction payload with validation."""
+        # Try tokenTransfers first (most reliable)
         if payload.get("tokenTransfers"):
             for transfer in payload["tokenTransfers"]:
-                if transfer.get("mint"):
-                    return transfer["mint"]
+                mint = transfer.get("mint")
+                if mint and self._is_valid_mint_address(mint):
+                    return mint
                     
         # Try tokenMint field
         if payload.get("tokenMint"):
-            return payload["tokenMint"]
+            mint = payload["tokenMint"]
+            if self._is_valid_mint_address(mint):
+                return mint
             
-        # Try accountKeys for newly created accounts
+        # Try accountKeys for newly created accounts (fallback)
         account_keys = payload.get("accountKeys", [])
         if account_keys:
             # Look for mint accounts (typically the first few accounts)
             for account in account_keys[:5]:  # Check first 5 accounts
-                if isinstance(account, str) and len(account) == 44:  # Base58 address length
+                if isinstance(account, str) and self._is_valid_mint_address(account):
                     return account
                     
         return None
+        
+    def _is_valid_mint_address(self, address: str) -> bool:
+        """Validate if address is a proper Solana mint address."""
+        if not isinstance(address, str):
+            return False
+            
+        # Check length (Solana addresses are 32 bytes = 44 base58 chars)
+        if len(address) != 44:
+            return False
+            
+        # Check if it's valid base58
+        if base58 is None:
+            # Fallback: just check length if base58 not available
+            return True
+            
+        try:
+            decoded = base58.b58decode(address)
+            return len(decoded) == 32
+        except Exception:
+            return False
         
     async def _handle_health(self, request: web.Request) -> web.Response:
         """Health check endpoint."""
