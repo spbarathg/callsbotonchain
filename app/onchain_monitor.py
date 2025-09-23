@@ -385,7 +385,7 @@ class OnchainMonitor:
         try:
             self.queue.put_nowait(event)
             return web.json_response({"status": "queued", "mint": mint})
-            except asyncio.QueueFull:
+        except asyncio.QueueFull:
             return web.Response(status=503, text="Queue full")
 
 

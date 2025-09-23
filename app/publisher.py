@@ -298,18 +298,18 @@ class Publisher:
                     continue
             
             # Cache the result
-        if best_pair:
-            # Implement LRU cache eviction to prevent unbounded growth
-            if len(self._api_cache) >= self._max_cache_size:
-                # Remove oldest entries (simple FIFO)
-                oldest_key = next(iter(self._api_cache))
-                del self._api_cache[oldest_key]
-            
-            self._api_cache[cache_key] = {
-                "data": best_pair,
-                "timestamp": now
-            }
-            
+            if best_pair:
+                # Implement LRU cache eviction to prevent unbounded growth
+                if len(self._api_cache) >= self._max_cache_size:
+                    # Remove oldest entries (simple FIFO)
+                    oldest_key = next(iter(self._api_cache))
+                    del self._api_cache[oldest_key]
+                
+                self._api_cache[cache_key] = {
+                    "data": best_pair,
+                    "timestamp": now
+                }
+                
             return best_pair
         except Exception as e:
             logging.debug("DexScreener API fetch failed: %s", e)
