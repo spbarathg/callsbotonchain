@@ -36,6 +36,32 @@ class OnchainMonitor:
         # Max payload size to prevent DoS
         self._max_payload_size = int(os.getenv("MAX_PAYLOAD_SIZE", "1048576"))  # 1MB default
         
+        # Target programs for new token launches
+        self._target_programs = {
+            "675kPX9MHTjS2zt1qfr1NYHuzeLXf3w7T8vQ1F8VxEZ",  # Raydium V4
+            "6EF8rrecthR5DkVKMzskHPBxdLHMpWFqcFvXVvLCADx",  # Pump.fun
+            "7xKXGhFZKS1tZa6kFmf1zz55KjKnb5qTgzoBDLmqLwzw"  # Meteora DLMM
+        }
+        
+        # Program-specific instruction filters
+        self._program_instructions = {
+            "675kPX9MHTjS2zt1qfr1NYHuzeLXf3w7T8vQ1F8VxEZ": ["initialize2"],  # Raydium V4
+            "6EF8rrecthR5DkVKMzskHPBxdLHMpWFqcFvXVvLCADx": ["buy"],         # Pump.fun
+            "7xKXGhFZKS1tZa6kFmf1zz55KjKnb5qTgzoBDLmqLwzw": ["initialize_pool"]  # Meteora DLMM
+        }
+        
+        # Statistics for monitoring
+        self._stats = {
+            "total_events": 0,
+            "filtered_events": 0,
+            "program_matches": 0,
+            "pump_fun_creations": 0,
+            "raydium_initializations": 0,
+            "meteora_initializations": 0,
+            "duplicate_skips": 0,
+            "error_transactions": 0
+        }
+
     async def start(self) -> None:
         """Start the webhook server."""
         self.app = web.Application()
@@ -54,7 +80,7 @@ class OnchainMonitor:
         self._start_time = time.time()
         
         logging.info("🚀 Webhook server started on %s:%d", self.host, self.port)
-        
+
     async def stop(self) -> None:
         """Stop the webhook server."""
         if self.site:
@@ -189,7 +215,7 @@ class OnchainMonitor:
             return web.Response(status=500, text="Internal server error")
             
     def _extract_events(self, payload: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Extract token mint events from webhook payload."""
+        """Extract new token launch events using program-specific filtering."""
         events = []
         
         # Handle batch events
@@ -198,24 +224,47 @@ class OnchainMonitor:
                 events.extend(self._extract_events(item))
             return events
             
-        # Check if this is a token mint event
-        tx_type = payload.get("type") or payload.get("transactionType")
-        if tx_type != "TOKEN_MINT":
+        # Update statistics
+        self._stats["total_events"] += 1
+        
+        # Universal filters
+        # 1. Ignore transactions with errors
+        if payload.get("error") is not None:
+            self._stats["error_transactions"] += 1
+            logging.debug("Ignoring transaction with error: %s", payload.get("error"))
+            return events
+            
+        # 2. Check if transaction involves target programs
+        instructions = payload.get("instructions", [])
+        if not instructions:
+            return events
+            
+        # Find matching program and instruction
+        matching_program = None
+        matching_instruction = None
+        
+        for instruction in instructions:
+            program_id = instruction.get("programId")
+            instruction_name = instruction.get("instruction", {}).get("name", "")
+            
+            if program_id in self._target_programs:
+                target_instructions = self._program_instructions.get(program_id, [])
+                if instruction_name in target_instructions:
+                    matching_program = program_id
+                    matching_instruction = instruction_name
+                    break
+        
+        if not matching_program:
+            return events
+            
+        self._stats["program_matches"] += 1
+        
+        # Program-specific validation
+        if not self._validate_program_specific_rules(payload, matching_program, matching_instruction):
             return events
             
         # Extract mint address
-        mint = None
-        
-        # Try different locations for mint address
-        if payload.get("tokenTransfers"):
-            for transfer in payload["tokenTransfers"]:
-                if transfer.get("mint"):
-                    mint = transfer["mint"]
-                    break
-                    
-        if not mint and payload.get("tokenMint"):
-            mint = payload["tokenMint"]
-            
+        mint = self._extract_mint_address(payload)
         if not mint:
             return events
             
@@ -224,21 +273,85 @@ class OnchainMonitor:
         if mint in self._seen_mints:
             # Check if mint is still within TTL
             if now - self._seen_mints[mint] < (self._dedup_ttl_hours * 3600):
+                self._stats["duplicate_skips"] += 1
+                logging.debug("Skipping duplicate mint: %s", mint[:8])
                 return events
         self._seen_mints[mint] = now
         
-        # Create event
+        # Create event with program context
         event = {
             "mint": mint,
             "event_type": "webhook",
             "tx_signature": payload.get("signature"),
             "slot": payload.get("slot"),
             "block_time": payload.get("blockTime"),
+            "program_id": matching_program,
+            "instruction": matching_instruction,
             "ts": time.time()
         }
         
+        # Update program-specific statistics
+        if matching_program == "6EF8rrecthR5DkVKMzskHPBxdLHMpWFqcFvXVvLCADx":
+            self._stats["pump_fun_creations"] += 1
+        elif matching_program == "675kPX9MHTjS2zt1qfr1NYHuzeLXf3w7T8vQ1F8VxEZ":
+            self._stats["raydium_initializations"] += 1
+        elif matching_program == "7xKXGhFZKS1tZa6kFmf1zz55KjKnb5qTgzoBDLmqLwzw":
+            self._stats["meteora_initializations"] += 1
+            
+        self._stats["filtered_events"] += 1
+        
+        logging.info("🚀 New token launch detected: %s via %s (%s)", mint[:8], matching_instruction, matching_program[:8])
         events.append(event)
         return events
+        
+    def _validate_program_specific_rules(self, payload: Dict[str, Any], program_id: str, instruction: str) -> bool:
+        """Validate program-specific rules for new token launches."""
+        
+        if program_id == "6EF8rrecthR5DkVKMzskHPBxdLHMpWFqcFvXVvLCADx":  # Pump.fun
+            # Must be first buy transaction - check for creation log
+            logs = payload.get("logs", [])
+            for log in logs:
+                if "creating bonding curve" in log.lower():
+                    return True
+            # Alternative: check if accounts are newly created
+            # This is a simplified check - in production you might want more sophisticated logic
+            return True
+            
+        elif program_id == "675kPX9MHTjS2zt1qfr1NYHuzeLXf3w7T8vQ1F8VxEZ":  # Raydium V4
+            # initialize2 instruction should be first
+            instructions = payload.get("instructions", [])
+            if instructions and instructions[0].get("instruction", {}).get("name") == "initialize2":
+                return True
+                
+        elif program_id == "7xKXGhFZKS1tZa6kFmf1zz55KjKnb5qTgzoBDLmqLwzw":  # Meteora DLMM
+            # initialize_pool instruction should be first
+            instructions = payload.get("instructions", [])
+            if instructions and instructions[0].get("instruction", {}).get("name") == "initialize_pool":
+                return True
+                
+        return False
+        
+    def _extract_mint_address(self, payload: Dict[str, Any]) -> Optional[str]:
+        """Extract mint address from transaction payload."""
+        # Try tokenTransfers first
+        if payload.get("tokenTransfers"):
+            for transfer in payload["tokenTransfers"]:
+                if transfer.get("mint"):
+                    return transfer["mint"]
+                    
+        # Try tokenMint field
+        if payload.get("tokenMint"):
+            return payload["tokenMint"]
+            
+        # Try accountKeys for newly created accounts
+        account_keys = payload.get("accountKeys", [])
+        if account_keys:
+            # Look for mint accounts (typically the first few accounts)
+            for account in account_keys[:5]:  # Check first 5 accounts
+                if isinstance(account, str) and len(account) == 44:  # Base58 address length
+                    return account
+                    
+        return None
         
     async def _handle_health(self, request: web.Request) -> web.Response:
         """Health check endpoint."""
@@ -247,7 +360,8 @@ class OnchainMonitor:
             "timestamp": int(time.time()),
             "queue_size": self.queue.qsize(),
             "seen_mints": len(self._seen_mints),
-            "uptime_seconds": int(time.time() - getattr(self, '_start_time', time.time()))
+            "uptime_seconds": int(time.time() - getattr(self, '_start_time', time.time())),
+            "filtering_stats": self._stats
         })
         
     async def _handle_metrics(self, request: web.Request) -> web.Response:
@@ -271,7 +385,7 @@ class OnchainMonitor:
         try:
             self.queue.put_nowait(event)
             return web.json_response({"status": "queued", "mint": mint})
-        except asyncio.QueueFull:
+            except asyncio.QueueFull:
             return web.Response(status=503, text="Queue full")
 
 
