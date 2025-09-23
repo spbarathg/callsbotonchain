@@ -34,6 +34,7 @@ DS_MAX_CONCURRENCY = int(os.getenv("DS_MAX_CONCURRENCY", "3"))  # Higher with Pr
 DS_DELAY_S = float(os.getenv("DS_DELAY_S", "0.3"))  # Faster with enhanced stability
 _ds_sem = asyncio.Semaphore(DS_MAX_CONCURRENCY)
 _last_ds_call = 0.0
+_hourly_lock = asyncio.Lock()
 
 
 async def _ds_fetch_best_lp_sol(session: aiohttp.ClientSession, mint: str, sol_price_usd: float = 150.0) -> float:
@@ -112,6 +113,23 @@ def _increment_hourly_count() -> None:
     global _hourly_count
     _hourly_count += 1
 
+
+async def _try_acquire_hourly_slot() -> bool:
+    """Atomically check and consume one hourly processing slot.
+
+    Prevents concurrent workers from overshooting the hourly cap.
+    """
+    global _hourly_count, _hourly_reset_time
+    async with _hourly_lock:
+        now = time.time()
+        if now > _hourly_reset_time:
+            _hourly_count = 0
+            _hourly_reset_time = now + 3600
+        if _hourly_count >= MAX_TOKENS_PER_HOUR:
+            return False
+        _hourly_count += 1
+        return True
+
 async def worker(
     name: str,
     queue: "asyncio.Queue[Dict[str, Any]]",
@@ -131,9 +149,9 @@ async def worker(
             if _recent_seen(mint):
                 continue
             
-            # Hourly rate limiting
-            if not _check_hourly_limit():
-                logging.info("⏸️  Hourly limit reached (%d/%d)", _hourly_count, MAX_TOKENS_PER_HOUR)
+            # Hourly rate limiting (atomic)
+            if not await _try_acquire_hourly_slot():
+                logging.info("⏸️  Hourly limit reached, skipping token %s", mint[:8])
                 continue
                 
             lp_sol = float(item.get("lp_sol") or 0.0)
@@ -154,9 +172,8 @@ async def worker(
                 "ts": item.get("ts"),
             }
 
-            # Increment counter before expensive operations
-            _increment_hourly_count()
-            
+            # Slot already acquired above; proceed with analysis
+
             # Track analysis time
             analysis_start = time.time()
             data = await analyze_token(mint, base_context, session=session)
