@@ -40,6 +40,7 @@ class Publisher:
         # API rate limiting and caching
         self._api_cache: Dict[str, Dict[str, Any]] = {}
         self._cache_ttl_s: int = int(os.getenv("API_CACHE_TTL_S", "30"))  # 30s cache
+        self._max_cache_size: int = int(os.getenv("MAX_CACHE_SIZE", "1000"))  # Prevent unbounded growth
         self._last_dex_call: float = 0.0
         self._last_gecko_call: float = 0.0
         self._dex_delay_s: float = float(os.getenv("DEX_DELAY_S", "0.5"))
@@ -297,14 +298,21 @@ class Publisher:
                     continue
             
             # Cache the result
-            if best_pair:
-                self._api_cache[cache_key] = {
-                    "data": best_pair,
-                    "timestamp": now
-                }
+        if best_pair:
+            # Implement LRU cache eviction to prevent unbounded growth
+            if len(self._api_cache) >= self._max_cache_size:
+                # Remove oldest entries (simple FIFO)
+                oldest_key = next(iter(self._api_cache))
+                del self._api_cache[oldest_key]
+            
+            self._api_cache[cache_key] = {
+                "data": best_pair,
+                "timestamp": now
+            }
             
             return best_pair
-        except Exception:
+        except Exception as e:
+            logging.debug("DexScreener API fetch failed: %s", e)
             return None
 
     async def _fetch_gecko_token(self, mint: str) -> Optional[Dict[str, Any]]:
@@ -356,7 +364,8 @@ class Publisher:
                 }
             
             return out
-        except Exception:
+        except Exception as e:
+            logging.debug("GeckoTerminal API fetch failed: %s", e)
             return None
 
     def _derive_mc_from_gecko(self, gecko: Dict[str, Any], total_supply: float) -> Optional[float]:

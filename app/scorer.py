@@ -20,7 +20,11 @@ def score_token(data: Dict[str, Any]) -> Dict[str, Any]:
     momentum = int(data.get("momentum_score") or 0)
 
     # LP size sweet spot for 50%+ potential (max 4)
-    if 15 <= lp_sol <= 45:
+    # Add minimum LP check to prevent over-scoring extremely low LP tokens
+    if lp_sol < 1.0:
+        score += 0.5
+        reasons.append("LP very low (risky)")
+    elif 15 <= lp_sol <= 45:
         score += 4
         reasons.append("LP perfect (15-45 SOL)")
     elif 8 <= lp_sol <= 65:
@@ -88,6 +92,11 @@ def score_token(data: Dict[str, Any]) -> Dict[str, Any]:
     if not mint_null:
         score -= 1
         reasons.append("Mint authority not renounced")
+    
+    # Additional safety check for extremely low LP with high concentration
+    if lp_sol < 2.0 and top1 > 0.5:
+        score -= 2
+        reasons.append("Very low LP with high concentration (high risk)")
 
     # Transfer fees (tax) penalty
     max_tax_pct = float(os.getenv("MAX_TRANSFER_TAX_PCT", "6"))

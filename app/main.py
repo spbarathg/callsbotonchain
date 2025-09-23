@@ -21,7 +21,10 @@ LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 QUEUE_SIZE = int(os.getenv("QUEUE_SIZE", "1024"))
 WORKERS = int(os.getenv("WORKERS", "4"))
 MIN_LP_SOL = float(os.getenv("MIN_LP_SOL", "5"))
+MAX_LP_SOL = float(os.getenv("MAX_LP_SOL", "500"))
 MAX_TOKENS_PER_HOUR = int(os.getenv("MAX_TOKENS_PER_HOUR", "50"))  # Optimized for Cielo Pro + Helius Pro
+MAX_TOKEN_AGE_HOURS = int(os.getenv("MAX_TOKEN_AGE_HOURS", "2"))
+MIN_SCORE_THRESHOLD = float(os.getenv("MIN_SCORE_THRESHOLD", "7"))
 _hourly_count = 0
 _hourly_reset_time = time.time() + 3600
 
@@ -165,6 +168,19 @@ async def worker(
                     pass
                 if lp_sol < MIN_LP_SOL:
                     continue
+            
+            # Filter out tokens with too high LP (established tokens)
+            if lp_sol > MAX_LP_SOL:
+                logging.debug("Skipping token %s: LP too high (%.1f SOL)", mint[:8], lp_sol)
+                continue
+
+            # Check token age (filter out old tokens)
+            token_ts = item.get("ts", 0)
+            current_time = time.time()
+            token_age_hours = (current_time - token_ts) / 3600
+            if token_age_hours > MAX_TOKEN_AGE_HOURS:
+                logging.debug("Skipping token %s: Too old (%.1f hours)", mint[:8], token_age_hours)
+                continue
 
             base_context = {
                 "lp_sol": lp_sol,
@@ -192,6 +208,11 @@ async def worker(
             await metrics_collector.record_processing_time("scoring", scoring_time)
             
             result = {**data, **scored}
+            
+            # Filter by minimum score threshold
+            if scored.get("score", 0) < MIN_SCORE_THRESHOLD:
+                logging.debug("Skipping token %s: Score too low (%.1f)", mint[:8], scored.get("score", 0))
+                continue
             processing_time_ms = (time.time() - start_time) * 1000
             
             # Create token stats for metrics

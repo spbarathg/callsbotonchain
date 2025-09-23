@@ -26,8 +26,9 @@ def _load_env_file() -> None:
                 if key and (key not in os.environ):
                     os.environ[key] = val
     except Exception as e:
-        # Silent for production, but could log for debugging
-        pass
+        # Log environment loading errors for debugging
+        import logging
+        logging.warning("Failed to load .env file: %s", e)
 
 
 # Load .env before other modules import environment values
