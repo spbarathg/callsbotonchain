@@ -5,6 +5,7 @@ import time
 from typing import Any, Dict, Optional
 
 import aiohttp
+import random
 
 
 # Cielo Pro - Primary smart wallet tracking service
@@ -12,10 +13,52 @@ CIELO_API_KEY = os.getenv("CIELO_API_KEY")
 CIELO_BASE_URL = os.getenv("CIELO_BASE_URL", "https://api.cielo.finance")
 CIELO_TIMEOUT_S = float(os.getenv("CIELO_TIMEOUT_S", "8"))
 CIELO_RETRIES = int(os.getenv("CIELO_RETRIES", "2"))
+CIELO_ENABLE = os.getenv("CIELO_ENABLE", "true").strip().lower() in ("1", "true", "yes", "y")
+
+# Budget controls to protect monthly credits
+CIELO_MAX_CALLS_PER_HOUR = int(os.getenv("CIELO_MAX_CALLS_PER_HOUR", "200"))
+CIELO_MAX_CALLS_PER_DAY = int(os.getenv("CIELO_MAX_CALLS_PER_DAY", "4000"))
+CIELO_SAMPLING_PROB = max(0.0, min(1.0, float(os.getenv("CIELO_SAMPLING_PROB", "1.0"))))
 
 # Rate limiting for Cielo Pro
 CIELO_RATE_LIMIT_S = float(os.getenv("CIELO_RATE_LIMIT_S", "0.1"))  # 10 calls/second max
 _last_cielo_call = 0.0
+_cielo_hourly_calls = 0
+_cielo_hourly_reset = time.time() + 3600
+_cielo_daily_calls = 0
+_cielo_daily_reset = time.time() + 86400
+_cielo_lock = asyncio.Lock()
+
+
+async def _cielo_budget_allow() -> bool:
+    """Atomically check hourly/daily budgets and sampling before calling Cielo.
+
+    Returns True if we should proceed with an API attempt.
+    """
+    global _cielo_hourly_calls, _cielo_hourly_reset, _cielo_daily_calls, _cielo_daily_reset
+
+    if not CIELO_ENABLE:
+        return False
+    # Probabilistic sampling to reduce call volume
+    if CIELO_SAMPLING_PROB < 1.0 and random.random() > CIELO_SAMPLING_PROB:
+        return False
+
+    now = time.time()
+    async with _cielo_lock:
+        if now > _cielo_hourly_reset:
+            _cielo_hourly_calls = 0
+            _cielo_hourly_reset = now + 3600
+        if now > _cielo_daily_reset:
+            _cielo_daily_calls = 0
+            _cielo_daily_reset = now + 86400
+        if _cielo_hourly_calls >= CIELO_MAX_CALLS_PER_HOUR:
+            return False
+        if _cielo_daily_calls >= CIELO_MAX_CALLS_PER_DAY:
+            return False
+        # Reserve one call budget unit for this logical API call.
+        _cielo_hourly_calls += 1
+        _cielo_daily_calls += 1
+        return True
 
 
 async def _cielo_request(
@@ -28,6 +71,10 @@ async def _cielo_request(
     
     if not CIELO_API_KEY:
         logging.warning("CIELO_API_KEY not configured - smart wallet detection disabled")
+        return None
+    # Budget and sampling gates
+    allowed = await _cielo_budget_allow()
+    if not allowed:
         return None
     
     url = f"{CIELO_BASE_URL}{endpoint}"
