@@ -20,22 +20,22 @@ from .metrics import metrics_collector, TokenStats
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 QUEUE_SIZE = int(os.getenv("QUEUE_SIZE", "1024"))
 WORKERS = int(os.getenv("WORKERS", "4"))
-MIN_LP_SOL = float(os.getenv("MIN_LP_SOL", "5"))
-MAX_LP_SOL = float(os.getenv("MAX_LP_SOL", "500"))
-MAX_TOKENS_PER_HOUR = int(os.getenv("MAX_TOKENS_PER_HOUR", "50"))  # Optimized for Cielo Pro + Helius Pro
-MAX_TOKEN_AGE_HOURS = int(os.getenv("MAX_TOKEN_AGE_HOURS", "2"))
-MIN_SCORE_THRESHOLD = float(os.getenv("MIN_SCORE_THRESHOLD", "7"))
+MIN_LP_SOL = float(os.getenv("MIN_LP_SOL", "0.1"))  # Much lower liquidity requirement
+MAX_LP_SOL = float(os.getenv("MAX_LP_SOL", "2000"))  # Much higher liquidity cap
+MAX_TOKENS_PER_HOUR = int(os.getenv("MAX_TOKENS_PER_HOUR", "200"))  # Much higher processing limit
+MAX_TOKEN_AGE_HOURS = int(os.getenv("MAX_TOKEN_AGE_HOURS", "168"))  # 1 week instead of 2 hours
+MIN_SCORE_THRESHOLD = float(os.getenv("MIN_SCORE_THRESHOLD", "1"))  # Much lower score requirement
 _hourly_count = 0
 _hourly_reset_time = time.time() + 3600
 
-# Dedup of processed mints to avoid repeated analysis within a window
-RECENT_TTL_S = int(os.getenv("DEDUP_TTL_S", "900"))
-NON_SIGNAL_DEDUP_TTL_S = int(os.getenv("NON_SIGNAL_DEDUP_TTL_S", "300"))
+# Dedup of processed mints to avoid repeated analysis within a window (relaxed)
+RECENT_TTL_S = int(os.getenv("DEDUP_TTL_S", "300"))  # Shorter dedup window
+NON_SIGNAL_DEDUP_TTL_S = int(os.getenv("NON_SIGNAL_DEDUP_TTL_S", "60"))  # Much shorter for non-signals
 _recent_mints: Dict[str, float] = {}
 
-# Optimized rate limiting for Pro services
-DS_MAX_CONCURRENCY = int(os.getenv("DS_MAX_CONCURRENCY", "3"))  # Higher with Pro reliability
-DS_DELAY_S = float(os.getenv("DS_DELAY_S", "0.3"))  # Faster with enhanced stability
+# Relaxed rate limiting for more processing
+DS_MAX_CONCURRENCY = int(os.getenv("DS_MAX_CONCURRENCY", "10"))  # Much higher concurrency
+DS_DELAY_S = float(os.getenv("DS_DELAY_S", "0.1"))  # Much faster processing
 _ds_sem = asyncio.Semaphore(DS_MAX_CONCURRENCY)
 _last_ds_call = 0.0
 _hourly_lock = asyncio.Lock()

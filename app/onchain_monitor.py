@@ -328,7 +328,8 @@ class OnchainMonitor:
         """Validate program-specific rules for new token launches."""
         
         if program_id == "6EF8rrecthR5DkVKMzskHPBxdLHMpWFqcFvXVvLCADx":  # Pump.fun
-            # Enhanced Pump.fun validation: check for creation log + ensure it's truly first buy
+            # Relaxed Pump.fun validation: accept any buy instruction
+            # Remove strict creation log requirement
             logs = payload.get("logs", [])
             creation_log_found = False
             
@@ -337,58 +338,33 @@ class OnchainMonitor:
                     creation_log_found = True
                     break
             
+            # Accept even if no creation log found (relaxed filtering)
             if not creation_log_found:
                 self._stats["missing_creation_logs"] += 1
-                logging.debug("Pump.fun transaction missing creation log - likely normal buy")
-                return False
+                logging.debug("Pump.fun transaction missing creation log - accepting anyway")
+                # Don't return False - accept the transaction
                 
-            # Additional check: ensure this is the first buy for this mint
-            mint = self._extract_mint_address(payload)
-            if mint and mint in self._seen_mints:
-                logging.debug("Pump.fun mint already seen - not first buy: %s", mint[:8])
-                return False
-                
+            # Remove strict first-buy check (relaxed filtering)
+            # Allow processing even if mint was seen before
             return True
             
         elif program_id == "675kPX9MHTjS2zt1qfr1NYHuzeLXf3w7T8vQ1F8VxEZ":  # Raydium V4
-            # Scan all instructions, prioritize first
+            # Relaxed Raydium validation: accept any instruction
             instructions = payload.get("instructions", [])
             if not instructions:
                 return False
                 
-            # Check if first instruction matches
-            if instructions[0].get("instruction", {}).get("name") == "initialize2":
-                return True
-                
-            # Fallback: scan all instructions for initialize2
-            for instruction in instructions:
-                if instruction.get("instruction", {}).get("name") == "initialize2":
-                    self._stats["instruction_position_issues"] += 1
-                    logging.debug("Raydium initialize2 found in non-first position")
-                    return True
-                    
-            logging.debug("Raydium transaction missing initialize2 instruction")
-            return False
+            # Accept any Raydium instruction (relaxed filtering)
+            return True
                 
         elif program_id == "7xKXGhFZKS1tZa6kFmf1zz55KjKnb5qTgzoBDLmqLwzw":  # Meteora DLMM
-            # Scan all instructions, prioritize first
+            # Relaxed Meteora validation: accept any instruction
             instructions = payload.get("instructions", [])
             if not instructions:
                 return False
                 
-            # Check if first instruction matches
-            if instructions[0].get("instruction", {}).get("name") == "initialize_pool":
-                return True
-                
-            # Fallback: scan all instructions for initialize_pool
-            for instruction in instructions:
-                if instruction.get("instruction", {}).get("name") == "initialize_pool":
-                    self._stats["instruction_position_issues"] += 1
-                    logging.debug("Meteora initialize_pool found in non-first position")
-                    return True
-                    
-            logging.debug("Meteora transaction missing initialize_pool instruction")
-            return False
+            # Accept any Meteora instruction (relaxed filtering)
+            return True
                 
         return False
         
@@ -422,20 +398,27 @@ class OnchainMonitor:
         if not isinstance(address, str):
             return False
             
-        # Check length (Solana addresses are 32 bytes = 44 base58 chars)
-        if len(address) != 44:
+        # Relaxed validation: accept any string that looks like a Solana address
+        # Check minimum length (Solana addresses are at least 32 bytes = 44 base58 chars)
+        if len(address) < 32:
             return False
             
-        # Check if it's valid base58
-        if base58 is None:
-            # Fallback: just check length if base58 not available
-            return True
-            
-        try:
-            decoded = base58.b58decode(address)
-            return len(decoded) == 32
-        except Exception:
+        # Accept any reasonable length address (relaxed filtering)
+        if len(address) > 100:  # Reasonable upper bound
             return False
+            
+        # If base58 is available, do basic validation
+        if base58 is not None:
+            try:
+                decoded = base58.b58decode(address)
+                # Accept any reasonable decoded length (relaxed)
+                return 20 <= len(decoded) <= 50
+            except Exception:
+                # If base58 decode fails, still accept if it looks reasonable
+                return len(address) >= 32
+        else:
+            # Fallback: just check reasonable length
+            return 32 <= len(address) <= 50
         
     async def _handle_health(self, request: web.Request) -> web.Response:
         """Health check endpoint."""
