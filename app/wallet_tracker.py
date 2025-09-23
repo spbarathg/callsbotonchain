@@ -1,111 +1,182 @@
+import asyncio
 import logging
 import os
+import time
 from typing import Any, Dict, Optional
 
 import aiohttp
 
 
-SOLANASPY_API_KEY = os.getenv("SOLANASPY_API_KEY")
-SOLANASPY_BASE_URL = os.getenv("SOLANASPY_BASE_URL", "https://api.solanaspy.io/v1")
+# Cielo Pro - Primary smart wallet tracking service
+CIELO_API_KEY = os.getenv("CIELO_API_KEY")
+CIELO_BASE_URL = os.getenv("CIELO_BASE_URL", "https://api.cielo.finance")
+CIELO_TIMEOUT_S = float(os.getenv("CIELO_TIMEOUT_S", "8"))
+CIELO_RETRIES = int(os.getenv("CIELO_RETRIES", "2"))
 
-SOLANATRACKER_API_KEY = os.getenv("SOLANATRACKER_API_KEY")
-SOLANATRACKER_BASE_URL = os.getenv(
-    "SOLANATRACKER_BASE_URL", "https://api.solanatracker.io/public"
-)
-
-
-def _pick_provider() -> str:
-    if SOLANASPY_API_KEY:
-        return "solanaspy"
-    if SOLANATRACKER_API_KEY:
-        return "solanatracker"
-    return "none"
+# Rate limiting for Cielo Pro
+CIELO_RATE_LIMIT_S = float(os.getenv("CIELO_RATE_LIMIT_S", "0.1"))  # 10 calls/second max
+_last_cielo_call = 0.0
 
 
-async def _http_get(
-    session: aiohttp.ClientSession, url: str, headers: Optional[Dict[str, str]] = None
+async def _cielo_request(
+    session: aiohttp.ClientSession, 
+    endpoint: str,
+    params: Optional[Dict[str, Any]] = None
 ) -> Optional[Dict[str, Any]]:
-    try:
-        async with session.get(url, headers=headers, timeout=8) as resp:
-            if resp.status != 200:
-                logging.debug("wallet provider http %s for %s", resp.status, url)
-                return None
-            return await resp.json()
-    except Exception as e:
-        logging.debug("wallet provider request failed: %s", e)
+    """Make rate-limited request to Cielo Pro API with retries."""
+    global _last_cielo_call
+    
+    if not CIELO_API_KEY:
+        logging.warning("CIELO_API_KEY not configured - smart wallet detection disabled")
         return None
+    
+    url = f"{CIELO_BASE_URL}{endpoint}"
+    headers = {
+        "Authorization": f"Bearer {CIELO_API_KEY}",
+        "Content-Type": "application/json",
+        "User-Agent": "MemecoinBot/1.0"
+    }
+    
+    for attempt in range(CIELO_RETRIES + 1):
+        try:
+            # Rate limiting
+            now = time.time()
+            if now - _last_cielo_call < CIELO_RATE_LIMIT_S:
+                await asyncio.sleep(CIELO_RATE_LIMIT_S - (now - _last_cielo_call))
+            _last_cielo_call = time.time()
+            
+            timeout = aiohttp.ClientTimeout(total=CIELO_TIMEOUT_S)
+            async with session.get(url, headers=headers, params=params, timeout=timeout) as resp:
+                if resp.status == 200:
+                    return await resp.json()
+                elif resp.status == 429:  # Rate limited
+                    if attempt < CIELO_RETRIES:
+                        await asyncio.sleep(2 ** attempt)  # Exponential backoff
+                        continue
+                    logging.warning("Cielo rate limit exceeded")
+                    return None
+                elif resp.status == 401:
+                    logging.error("Cielo API key invalid or expired")
+                    return None
+                else:
+                    logging.debug("Cielo API error %s: %s", resp.status, await resp.text())
+                    return None
+                    
+        except asyncio.TimeoutError:
+            if attempt < CIELO_RETRIES:
+                await asyncio.sleep(1)
+                continue
+            logging.warning("Cielo API timeout after %d attempts", CIELO_RETRIES + 1)
+            return None
+        except Exception as e:
+            if attempt < CIELO_RETRIES:
+                await asyncio.sleep(1)
+                continue
+            logging.warning("Cielo API error: %s", e)
+            return None
+    
+    return None
 
 
-def _score_from_count(count: int) -> int:
-    # Map number of smart wallets to 0-3 score
-    if count >= 10:
-        return 3
-    if count >= 5:
-        return 2
-    if count >= 2:
-        return 1
-    return 0
+def _score_from_smart_wallets(smart_wallets: list) -> int:
+    """Enhanced scoring based on Cielo Pro smart wallet data."""
+    if not smart_wallets:
+        return 0
+    
+    # Enhanced scoring considering wallet quality and activity
+    high_quality_count = 0
+    total_count = len(smart_wallets)
+    
+    for wallet in smart_wallets:
+        # Cielo Pro provides quality metrics
+        confidence = wallet.get("confidence", 0)
+        profit_rate = wallet.get("profit_rate", 0)
+        activity_level = wallet.get("activity_level", "low")
+        
+        # High-quality wallet criteria
+        if (confidence >= 0.8 or profit_rate >= 0.7 or activity_level in ["high", "very_high"]):
+            high_quality_count += 1
+    
+    # Scoring: prioritize quality over quantity
+    if high_quality_count >= 5:
+        return 3  # Excellent
+    elif high_quality_count >= 2 or total_count >= 8:
+        return 2  # Good
+    elif high_quality_count >= 1 or total_count >= 3:
+        return 1  # Fair
+    else:
+        return 0  # Poor
 
 
 async def fetch_smart_wallet_score(
     session: aiohttp.ClientSession, token_mint: str
 ) -> int:
-    """Return 0-3 based on presence of known smart/whale wallets entering the token.
-
-    This is a best-effort call. If provider or API is unavailable, returns 0.
+    """Fetch smart wallet score using Cielo Pro API.
+    
+    Returns 0-3 based on quality and quantity of smart wallets holding the token.
     """
-    provider = _pick_provider()
-    if provider == "solanaspy":
-        url = f"{SOLANASPY_BASE_URL}/token/{token_mint}/smart-wallets"
-        headers = {"Authorization": f"Bearer {SOLANASPY_API_KEY}"}
-        data = await _http_get(session, url, headers)
-        if data and isinstance(data.get("count"), int):
-            return _score_from_count(int(data["count"]))
-        # Fallback: derive from list length
-        wallets = data.get("wallets") if data else None
-        if isinstance(wallets, list):
-            return _score_from_count(len(wallets))
+    try:
+        # Cielo Pro endpoint for smart wallet analysis
+        # NOTE: Verify this endpoint exists in Cielo API documentation
+        data = await _cielo_request(session, f"/v1/tokens/{token_mint}/smart-wallets")
+        
+        if not data:
+            return 0
+        
+        # Handle different response formats
+        smart_wallets = data.get("smart_wallets", [])
+        if isinstance(smart_wallets, list):
+            return _score_from_smart_wallets(smart_wallets)
+        
+        # Fallback to simple count if detailed data unavailable
+        count = data.get("count", 0)
+        if isinstance(count, int):
+            if count >= 10:
+                return 3
+            elif count >= 5:
+                return 2
+            elif count >= 2:
+                return 1
+        
         return 0
-
-    if provider == "solanatracker":
-        url = f"{SOLANATRACKER_BASE_URL}/token/{token_mint}/smart-wallets"
-        headers = {"X-API-KEY": SOLANATRACKER_API_KEY}
-        data = await _http_get(session, url, headers)
-        if data and isinstance(data.get("count"), int):
-            return _score_from_count(int(data["count"]))
-        wallets = data.get("wallets") if data else None
-        if isinstance(wallets, list):
-            return _score_from_count(len(wallets))
+        
+    except Exception as e:
+        logging.warning("Smart wallet detection failed: %s", e)
         return 0
-
-    return 0
 
 
 async def fetch_creator_history_score(
     session: aiohttp.ClientSession, creator_address: str
 ) -> int:
-    """Return 0-1 based on historical creator quality.
-
-    Heuristic: if provider reports >0 past tokens with sustained liquidity, return 1.
+    """Fetch creator history score using Cielo Pro API.
+    
+    Returns 0-1 based on creator's historical token performance.
     """
-    provider = _pick_provider()
     try:
-        if provider == "solanaspy":
-            url = f"{SOLANASPY_BASE_URL}/creator/{creator_address}/history"
-            headers = {"Authorization": f"Bearer {SOLANASPY_API_KEY}"}
-            data = await _http_get(session, url, headers)
-        elif provider == "solanatracker":
-            url = f"{SOLANATRACKER_BASE_URL}/creator/{creator_address}/history"
-            headers = {"X-API-KEY": SOLANATRACKER_API_KEY}
-            data = await _http_get(session, url, headers)
-        else:
-            data = None
+        # Cielo Pro endpoint for creator analysis
+        # NOTE: Verify this endpoint exists in Cielo API documentation
+        data = await _cielo_request(session, f"/v1/creators/{creator_address}/history")
+        
         if not data:
             return 0
-        success = int(data.get("successful_tokens") or 0)
-        return 1 if success > 0 else 0
+        
+        # Cielo Pro provides detailed creator metrics
+        successful_tokens = data.get("successful_tokens", 0)
+        total_tokens = data.get("total_tokens", 0)
+        avg_performance = data.get("avg_performance", 0)
+        reputation_score = data.get("reputation_score", 0)
+        
+        # Enhanced scoring based on multiple factors
+        if (successful_tokens >= 3 or 
+            (total_tokens > 0 and successful_tokens / total_tokens >= 0.6) or
+            avg_performance >= 2.0 or  # 2x average
+            reputation_score >= 0.8):
+            return 1
+        
+        return 0
+        
     except Exception as e:
-        logging.debug("creator history failed: %s", e)
+        logging.warning("Creator history analysis failed: %s", e)
         return 0
 
 

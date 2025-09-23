@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import aiohttp
 
 from . import wallet_tracker
+from .metrics import metrics_collector
 
 
 QUICKNODE_URL: Optional[str] = os.getenv("QUICKNODE_URL")
@@ -14,6 +15,9 @@ RPC_TIMEOUT_S: float = float(os.getenv("RPC_TIMEOUT_S", "12"))
 RPC_RETRIES: int = int(os.getenv("RPC_RETRIES", "2"))
 MOMENTUM_WINDOW_S: float = float(os.getenv("MOMENTUM_WINDOW_S", "600"))
 MOMENTUM_LIMIT: int = int(os.getenv("MOMENTUM_LIMIT", "25"))
+RPC_MAX_CONCURRENCY: int = int(os.getenv("RPC_MAX_CONCURRENCY", "5"))  # Optimized for Pro services
+RPC_DELAY_S: float = float(os.getenv("RPC_DELAY_S", "0.1"))  # Faster with Pro reliability
+_rpc_sem = asyncio.Semaphore(RPC_MAX_CONCURRENCY)
 
 
 async def _rpc_request(
@@ -27,20 +31,43 @@ async def _rpc_request(
     payload = {"jsonrpc": "2.0", "id": 1, "method": method, "params": params}
     attempt = 0
     last_error: Optional[Exception] = None
+    start_time = time.time()
+    
     while attempt <= RPC_RETRIES:
         attempt += 1
         try:
+            # Rate limiting delay for RPC calls
+            if RPC_DELAY_S > 0:
+                await asyncio.sleep(RPC_DELAY_S)
+                
             timeout = aiohttp.ClientTimeout(total=timeout_s)
-            async with session.post(url, json=payload, timeout=timeout) as resp:
-                if resp.status != 200:
-                    text = await resp.text()
-                    raise RuntimeError(f"RPC {method} HTTP {resp.status}: {text}")
-                data = await resp.json()
-                if data.get("error"):
-                    raise RuntimeError(f"RPC {method} error: {data['error']}")
-                return data.get("result")
+            async with _rpc_sem:
+                async with session.post(url, json=payload, timeout=timeout) as resp:
+                    response_time = (time.time() - start_time) * 1000
+                    
+                    if resp.status != 200:
+                        text = await resp.text()
+                        await metrics_collector.record_api_health("quicknode", "error", response_time, error=True)
+                        raise RuntimeError(f"RPC {method} HTTP {resp.status}: {text}")
+                    
+                    data = await resp.json()
+                    if data.get("error"):
+                        await metrics_collector.record_api_health("quicknode", "error", response_time, error=True)
+                        raise RuntimeError(f"RPC {method} error: {data['error']}")
+                    
+                    # Record successful API call
+                    await metrics_collector.record_api_health("quicknode", "healthy", response_time)
+                    return data.get("result")
+                    
         except (asyncio.TimeoutError, aiohttp.ClientError, RuntimeError) as e:
             last_error = e
+            response_time = (time.time() - start_time) * 1000
+            
+            if isinstance(e, asyncio.TimeoutError):
+                await metrics_collector.record_api_health("quicknode", "timeout", response_time, error=True)
+            else:
+                await metrics_collector.record_api_health("quicknode", "error", response_time, error=True)
+            
             is_timeout = isinstance(e, asyncio.TimeoutError) or (
                 isinstance(e, RuntimeError) and "timeout" in str(e).lower()
             )
@@ -52,6 +79,7 @@ async def _rpc_request(
                 await asyncio.sleep(backoff_s)
                 continue
             break
+    
     raise RuntimeError(f"RPC {method} failed after {attempt} attempts: {last_error}")
 
 
@@ -177,15 +205,19 @@ def _compute_momentum(signatures: List[Dict[str, Any]]) -> Dict[str, Any]:
     cutoff = now - MOMENTUM_WINDOW_S
     in_window = [s for s in signatures if isinstance(s.get("blockTime"), int) and s["blockTime"] >= cutoff]
     count = len(in_window) if in_window else len(signatures)
-    # Map count to 0-3 score
+    
+    # Enhanced scoring for 50%+ pump detection
     if count >= 20:
-        score = 3
-    elif count >= 10:
-        score = 2
-    elif count >= 5:
-        score = 1
+        score = 4  # Viral momentum
+    elif count >= 12:
+        score = 3  # Strong momentum  
+    elif count >= 6:
+        score = 2  # Good momentum
+    elif count >= 2:
+        score = 1  # Some momentum
     else:
-        score = 0
+        score = 0  # No momentum
+        
     return {"tx_count": count, "score": score}
 
 

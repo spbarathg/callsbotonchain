@@ -1,6 +1,5 @@
 aiohttp==3.9.5
 aiosqlite==0.20.0
 redis==5.0.8
-telethon==1.36.0
 base58==2.1.1
 
