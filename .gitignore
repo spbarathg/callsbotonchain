@@ -33,6 +33,12 @@ signals.db
 .DS_Store
 Thumbs.db
 
+# Organized directories
+logs/
+data/
+tools/
+app/__pycache__/
+
 # Binaries
 cloudflared.exe
 
