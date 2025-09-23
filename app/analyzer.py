@@ -33,7 +33,8 @@ async def _rpc_request(
     last_error: Optional[Exception] = None
     start_time = time.time()
     
-    while attempt <= RPC_RETRIES:
+    # attempt ranges from 1..RPC_RETRIES inclusive to match configured attempts
+    while attempt < RPC_RETRIES:
         attempt += 1
         try:
             # Rate limiting delay for RPC calls

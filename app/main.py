@@ -27,6 +27,7 @@ _hourly_reset_time = time.time() + 3600
 
 # Dedup of processed mints to avoid repeated analysis within a window
 RECENT_TTL_S = int(os.getenv("DEDUP_TTL_S", "900"))
+NON_SIGNAL_DEDUP_TTL_S = int(os.getenv("NON_SIGNAL_DEDUP_TTL_S", "300"))
 _recent_mints: Dict[str, float] = {}
 
 # Optimized rate limiting for Pro services
@@ -94,9 +95,10 @@ def _recent_seen(mint: str) -> bool:
     return mint in _recent_mints
 
 
-def _recent_add(mint: str) -> None:
+def _recent_add(mint: str, ttl_s: Optional[int] = None) -> None:
     now = time.time()
-    _recent_mints[mint] = now + RECENT_TTL_S
+    ttl = RECENT_TTL_S if ttl_s is None else int(ttl_s)
+    _recent_mints[mint] = now + ttl
 
 
 def _check_hourly_limit() -> bool:
@@ -208,7 +210,7 @@ async def worker(
             processing_successful = True
             
             if result.get("signal"):
-                _recent_add(mint)
+                _recent_add(mint, RECENT_TTL_S)
                 score = float(result.get("score") or 0.0)
                 logging.info("🚀 SIGNAL: %s (Score: %.1f)", mint[:8], score)
                 
@@ -217,6 +219,9 @@ async def worker(
                 await publisher.publish(result)
                 publish_time = (time.time() - publish_start) * 1000
                 await metrics_collector.record_processing_time("publishing", publish_time)
+            else:
+                # Negative result: short-term dedup to avoid repeated reprocessing
+                _recent_add(mint, NON_SIGNAL_DEDUP_TTL_S)
                 
         except Exception as e:
             error_msg = str(e)[:100]
