@@ -8,7 +8,7 @@ from analyze_token import get_token_stats, score_token, calculate_preliminary_sc
 from notify import send_telegram_alert
 from storage import (init_db, has_been_alerted, mark_as_alerted, 
                     record_token_activity, get_token_velocity, should_fetch_detailed_stats)
-from config import HIGH_CONFIDENCE_SCORE, FETCH_INTERVAL
+from config import HIGH_CONFIDENCE_SCORE, FETCH_INTERVAL, DEBUG_PRELIM
 
 # Global flag for graceful shutdown
 shutdown_flag = False
@@ -33,10 +33,8 @@ def run_bot():
         return
     
     cursor = None
-    smart_cursor = None
     processed_count = 0
     alert_count = 0
-    cycle_count = 0
     api_calls_saved = 0  # Track credit optimization
     
     print("🧠 SMART MONEY ENHANCED SOLANA MEMECOIN BOT STARTED!")
@@ -57,34 +55,48 @@ def run_bot():
     
     while not shutdown_flag:
         try:
-            cycle_count += 1
-            is_smart_money_cycle = (cycle_count % 2 == 1)  # Alternate between smart money and general
-            
-            if is_smart_money_cycle:
-                print(f"🧠 SMART MONEY CYCLE {cycle_count} (processed: {processed_count}, alerts: {alert_count}, API calls saved: {api_calls_saved})")
-                feed = fetch_solana_feed(smart_cursor, smart_money_only=True)
-                smart_cursor = feed.get("next_cursor")
-            else:
-                print(f"📡 GENERAL CYCLE {cycle_count} (processed: {processed_count}, alerts: {alert_count}, API calls saved: {api_calls_saved})")
-                feed = fetch_solana_feed(cursor, smart_money_only=False)
-                cursor = feed.get("next_cursor")
+            feed = fetch_solana_feed(cursor)
+            cursor = feed.get("next_cursor")
 
             # Log the number of items returned this cycle for visibility
             items_count = len(feed.get("transactions", []))
-            cycle_name = "SMART MONEY" if is_smart_money_cycle else "GENERAL"
-            print(f"🔎 {cycle_name} FEED ITEMS: {items_count}")
+            print(f"🔎 FEED ITEMS: {items_count}")
             
             if not feed.get("transactions"):
-                cycle_type = "smart money" if is_smart_money_cycle else "general"
-                print(f"📭 No new {cycle_type} transactions found")
+                print(f"📭 No new transactions found")
             
             for tx in feed.get("transactions", []):
                 if shutdown_flag:
                     break
-                    
-                token_address = tx.get("token_address")
-                usd_value = tx.get("usd_value", 0)
                 
+                # Map Cielo feed fields → token + usd
+                # Prefer the non-SOL leg as the token address; choose its USD amount
+                sol_mint = "So11111111111111111111111111111111111111112"
+                t0 = tx.get("token0_address")
+                t1 = tx.get("token1_address")
+                t0_usd = tx.get("token0_amount_usd", 0) or 0
+                t1_usd = tx.get("token1_amount_usd", 0) or 0
+
+                token_address = None
+                usd_value = 0
+                if t0 == sol_mint and t1:
+                    token_address = t1
+                    usd_value = t1_usd
+                elif t1 == sol_mint and t0:
+                    token_address = t0
+                    usd_value = t0_usd
+                else:
+                    # Neither leg is SOL: pick the leg with higher USD
+                    if t1_usd >= t0_usd:
+                        token_address = t1
+                        usd_value = t1_usd
+                    else:
+                        token_address = t0
+                        usd_value = t0_usd
+                
+                # attach usd_value into tx for preliminary scoring
+                tx["usd_value"] = usd_value
+
                 if not token_address or usd_value == 0:
                     continue
 
@@ -95,21 +107,31 @@ def run_bot():
 
                 try:
                     # STEP 1: Calculate preliminary score (NO API CALLS)
-                    preliminary_score = calculate_preliminary_score(tx, smart_money_detected=is_smart_money_cycle)
+                    preliminary_score = calculate_preliminary_score(tx, smart_money_detected=False)
+                    if DEBUG_PRELIM:
+                        print("    ⤷ prelim_debug:", {
+                            'usd_value': round(tx.get('usd_value', 0) or 0, 2),
+                            'token0_usd': round(tx.get('token0_amount_usd', 0) or 0, 2),
+                            'token1_usd': round(tx.get('token1_amount_usd', 0) or 0, 2),
+                            'tx_type': tx.get('tx_type'),
+                            'dex': tx.get('dex')
+                        })
                     
                     # STEP 2: Record activity for velocity tracking
+                    # Attempt to capture trader address for community velocity
+                    trader = tx.get('from') or tx.get('wallet')
                     record_token_activity(
                         token_address, 
                         usd_value, 
                         1,  # Transaction count (individual tx)
-                        is_smart_money_cycle,
-                        preliminary_score
+                        False,
+                        preliminary_score,
+                        trader
                     )
                     
                     # STEP 3: CREDIT-EFFICIENT DECISION - Only fetch detailed stats if warranted
                     if not should_fetch_detailed_stats(token_address, preliminary_score):
-                        smart_indicator = "⚡" if is_smart_money_cycle else "📊"
-                        print(f"{smart_indicator} Token {token_address[:8]}... prelim: {preliminary_score}/10 (skipped detailed analysis)")
+                        print(f"📊 Token {token_address} prelim: {preliminary_score}/10 (skipped detailed analysis)")
                         api_calls_saved += 1  # Track credits saved
                         continue
                     
@@ -123,38 +145,89 @@ def run_bot():
                     velocity_data = get_token_velocity(token_address, minutes_back=15)
                     velocity_bonus = velocity_data['velocity_score'] if velocity_data else 0
                     
-                    score, scoring_details = score_token(stats, smart_money_detected=is_smart_money_cycle)
+                    score, scoring_details = score_token(stats, smart_money_detected=False)
                     
                     # Add velocity bonus
                     if velocity_bonus > 0:
                         score = min(score + (velocity_bonus // 2), 10)  # Half velocity score as bonus
                         scoring_details.append(f"Velocity: +{velocity_bonus//2} ({velocity_data['observations']} observations)")
+                        # Community (unique traders) bonus
+                        ut = velocity_data.get('unique_traders', 0)
+                        if ut > 25:
+                            score = min(score + 2, 10)
+                            scoring_details.append(f"Community: +2 ({ut} unique traders in window)")
+                        elif ut > 10:
+                            score = min(score + 1, 10)
+                            scoring_details.append(f"Community: +1 ({ut} unique traders in window)")
                     
-                    smart_indicator = "🧠" if is_smart_money_cycle else "📊"
-                    print(f"{smart_indicator} Token {token_address[:8]}... FINAL: {score}/10 (prelim: {preliminary_score}, velocity: +{velocity_bonus//2})")
+                    print(f"📈 Token {token_address} FINAL: {score}/10 (prelim: {preliminary_score}, velocity: +{velocity_bonus//2})")
                     
                     if score >= HIGH_CONFIDENCE_SCORE:
                         # Enhanced alert with smart money indicators
-                        alert_type = "🧠 SMART MONEY" if is_smart_money_cycle else "🔥 HIGH-CONFIDENCE"
-                        
+                        alert_type = "HIGH-CONFIDENCE"
+
                         volume_24h = stats.get('volume', {}).get('24h', {}).get('volume_usd', 0)
                         market_cap = stats.get('market_cap_usd', 0)
                         price = stats.get('price_usd', 0)
                         change_1h = stats.get('change', {}).get('1h', 0)
                         change_24h = stats.get('change', {}).get('24h', 0)
-                        
+                        name = stats.get('name') or "Token"
+                        symbol = stats.get('symbol') or "?"
+                        liquidity = (
+                            stats.get('liquidity_usd')
+                            or stats.get('liquidity', {}).get('usd')
+                            or 0
+                        )
+                        chart_link = f"https://dexscreener.com/solana/{token_address}"
+                        swap_link = (
+                            f"https://raydium.io/swap/?inputMint=So11111111111111111111111111111111111111112&outputMint={token_address}"
+                        )
+                        # Safety/context badges based on stats
+                        security = stats.get('security', {}) or {}
+                        liq_obj = stats.get('liquidity', {}) or {}
+                        holders_obj = stats.get('holders', {}) or {}
+                        mint_revoked = security.get('is_mint_revoked')
+                        lp_locked = (
+                            liq_obj.get('is_lp_locked')
+                            or liq_obj.get('lock_status') in ("locked", "burned")
+                            or liq_obj.get('is_lp_burned')
+                        )
+                        top10 = holders_obj.get('top_10_concentration_percent') or holders_obj.get('top10_percent') or 0
+                        try:
+                            top10 = float(top10)
+                        except Exception:
+                            top10 = 0
+                        badges = []
+                        if mint_revoked is True:
+                            badges.append("✅ Mint Revoked")
+                        elif mint_revoked is False:
+                            badges.append("⚠️ Mintable")
+                        if lp_locked is True:
+                            badges.append("✅ LP Locked/Burned")
+                        elif lp_locked is False:
+                            badges.append("⚠️ LP Unlocked")
+                        if top10:
+                            if top10 > 40:
+                                badges.append(f"⚠️ Top10 {top10:.1f}%")
+                            else:
+                                badges.append(f"Top10 {top10:.1f}%")
+                        badges_text = " | ".join(badges) if badges else ""
+
+                        # Requested clean template with CA as plain text (non-link)
                         message = (
-                            f"<b>{alert_type} MEMECOIN ALERT</b>\n\n"
-                            f"<b>Contract Address:</b>\n<code>{token_address}</code>\n\n"
-                            f"<b>Score:</b> {score}/10\n"
-                            f"<b>Market Cap:</b> ${market_cap:,.0f}\n"
-                            f"<b>24h Volume:</b> ${volume_24h:,.0f}\n"
-                            f"<b>Price:</b> ${price:.8f}\n"
-                            f"<b>Price Change:</b> 1h: {change_1h:+.1f}% | 24h: {change_24h:+.1f}%\n"
+                            f"<b>{name} (${symbol})</b>\n\n"
+                            f"Fresh signal on Solana.\n\n"
+                            f"💰 <b>MCap:</b> ${market_cap:,.0f}\n"
+                            f"💧 <b>Liquidity:</b> ${liquidity:,.0f}\n"
+                            f"{badges_text}\n" if badges_text else ""
+                            f"📈 <b>Chart:</b> <a href='{chart_link}'>DexScreener</a>\n"
+                            f"🔁 <b>Swap:</b> <a href='{swap_link}'>Raydium</a>\n\n"
+                            f"<code>{token_address}</code>\n"
+                            f"\n—\n"
+                            f"Score: {score}/10 | 24h Vol: ${volume_24h:,.0f} | Price: ${price:.8f} | 1h {change_1h:+.1f}% | 24h {change_24h:+.1f}%"
                         )
                         
-                        if is_smart_money_cycle:
-                            message += f"\n<b>SMART MONEY DETECTED</b>\nTop performing wallets are actively trading this token\n"
+                        # no extra smart money line in lean mode
                         
                         # Add detailed scoring breakdown
                         message += f"\n<b>Scoring Analysis:</b>\n"

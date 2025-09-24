@@ -35,6 +35,7 @@ try:
     else:
         CIELO_LIST_ID = None
     CIELO_NEW_TRADE_ONLY = os.getenv("CIELO_NEW_TRADE_ONLY", "false").lower() == "true"
+    DEBUG_PRELIM = os.getenv("DEBUG_PRELIM", "false").lower() == "true"
 except ValueError as e:
     raise ValueError(f"Invalid numeric value in .env file: {e}")
 

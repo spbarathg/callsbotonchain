@@ -56,13 +56,13 @@ def calculate_preliminary_score(tx_data, smart_money_detected=False):
     if smart_money_detected:
         score += 4  # Higher bonus for preliminary scoring
     
-    # USD value indicates serious activity
-    usd_value = tx_data.get('usd_value', 0)
-    if usd_value > 10000:
+    # USD value indicates serious activity (more sensitive thresholds)
+    usd_value = tx_data.get('usd_value', 0) or 0
+    if usd_value > 2000:
         score += 3
-    elif usd_value > 5000:
+    elif usd_value > 750:
         score += 2
-    elif usd_value > 1000:
+    elif usd_value > 250:
         score += 1
     
     # Transaction frequency/urgency
@@ -135,6 +135,41 @@ def score_token(stats, smart_money_detected=False):
     if change_24h < -80:
         score -= 1
         scoring_details.append(f"Risk: -1 ({change_24h:.1f}% - major dump risk)")
+
+    # --- Cielo Safety Penalties / Disqualifiers ---
+    security = stats.get('security', {}) or {}
+    liquidity = stats.get('liquidity', {}) or {}
+    holders = stats.get('holders', {}) or {}
+
+    # Disqualifier: honeypot
+    if security.get('is_honeypot') is True:
+        scoring_details.append("Disqualified: honeypot")
+        return 0, scoring_details
+
+    # Mint not revoked → -3
+    if security.get('is_mint_revoked') is False:
+        score -= 3
+        scoring_details.append("Security: -3 (mint not revoked)")
+
+    # LP not locked/burned → -2 (try multiple field names in case)
+    lp_locked = (
+        liquidity.get('is_lp_locked')
+        or liquidity.get('lock_status') in ("locked", "burned")
+        or liquidity.get('is_lp_burned')
+    )
+    if lp_locked is False:
+        score -= 2
+        scoring_details.append("Liquidity: -2 (LP not locked/burned)")
+
+    # Top 10 holders concentration high → -1
+    top10 = holders.get('top_10_concentration_percent') or holders.get('top10_percent') or 0
+    try:
+        top10 = float(top10)
+    except Exception:
+        top10 = 0
+    if top10 > 40:
+        score -= 1
+        scoring_details.append(f"Holders: -1 (Top10 {top10:.1f}% > 40%)")
     
     final_score = max(0, min(score, 10))
     return final_score, scoring_details
