@@ -1,4 +1,5 @@
 import json
+import asyncio
 import logging
 import os
 import time
@@ -251,7 +252,12 @@ class Publisher:
         try:
             async with self._http.post(url, json=payload) as resp:
                 if resp.status != 200:
-                    logging.debug("Telegram http %s", resp.status)
+                    # Log response body for better diagnostics (e.g., chat not found, forbidden)
+                    try:
+                        err_text = await resp.text()
+                    except Exception:
+                        err_text = "<no body>"
+                    logging.debug("Telegram http %s: %s", resp.status, err_text)
                     await metrics_collector.record_api_health("telegram", "error", error=True)
                 else:
                     await metrics_collector.record_api_health("telegram", "healthy")
