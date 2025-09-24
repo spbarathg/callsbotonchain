@@ -28,6 +28,13 @@ try:
     HIGH_CONFIDENCE_SCORE = int(os.getenv("HIGH_CONFIDENCE_SCORE", "6"))
     MIN_USD_VALUE = int(os.getenv("MIN_USD_VALUE", "100"))
     FETCH_INTERVAL = int(os.getenv("FETCH_INTERVAL", "120"))
+    # Optional feed scoping
+    _list_id_raw = os.getenv("CIELO_LIST_ID")
+    if _list_id_raw is not None and _list_id_raw != "":
+        CIELO_LIST_ID = int(_list_id_raw)
+    else:
+        CIELO_LIST_ID = None
+    CIELO_NEW_TRADE_ONLY = os.getenv("CIELO_NEW_TRADE_ONLY", "false").lower() == "true"
 except ValueError as e:
     raise ValueError(f"Invalid numeric value in .env file: {e}")
 

@@ -1,7 +1,7 @@
 # fetch_feed.py
 import requests
 import time
-from config import CIELO_API_KEY, MIN_USD_VALUE
+from config import CIELO_API_KEY, MIN_USD_VALUE, CIELO_LIST_ID, CIELO_NEW_TRADE_ONLY
 
 def fetch_solana_feed(cursor=None, smart_money_only=False):
     url = "https://feed-api.cielo.finance/api/v1/feed"
@@ -15,6 +15,10 @@ def fetch_solana_feed(cursor=None, smart_money_only=False):
     # Only include minimum_usd_value if configured > 0
     if MIN_USD_VALUE and MIN_USD_VALUE > 0:
         params["minimum_usd_value"] = MIN_USD_VALUE
+    if CIELO_LIST_ID is not None:
+        params["list_id"] = CIELO_LIST_ID
+    if CIELO_NEW_TRADE_ONLY:
+        params["new_trade"] = "true"
     
     # Add smart money filters for enhanced detection
     if smart_money_only:
