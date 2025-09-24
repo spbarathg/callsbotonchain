@@ -39,6 +39,13 @@ class OnchainMonitor:
         except Exception:
             self.max_requests_per_minute = 5000
         
+        # Raw payload logging (for debugging incoming data)
+        self.log_raw_webhook: bool = os.getenv("LOG_WEBHOOK_RAW", "false").lower() == "true"
+        try:
+            self.log_raw_bytes: int = int(os.getenv("LOG_WEBHOOK_PAYLOAD_BYTES", "4096"))
+        except Exception:
+            self.log_raw_bytes = 4096
+
         # Launches-only filtering toggle
         self.launches_only: bool = os.getenv("LAUNCHES_ONLY", "false").lower() == "true"
         # Dedup window for launches (seconds)
@@ -227,6 +234,17 @@ class OnchainMonitor:
             except json.JSONDecodeError as e:
                 await metrics_collector.record_error("json_parse_error", str(e))
                 return web.Response(status=400, text="Invalid JSON")
+
+            # Optional: log raw webhook payload (truncated) for debugging
+            if self.log_raw_webhook:
+                try:
+                    raw_text = body.decode("utf-8", errors="replace")
+                    if len(raw_text) > self.log_raw_bytes:
+                        raw_text = raw_text[: self.log_raw_bytes] + "... [truncated]"
+                    logging.info("--- RAW WEBHOOK (%d bytes) ---\n%s\n--- END RAW WEBHOOK ---", len(body), raw_text)
+                except Exception:
+                    # Best-effort logging only
+                    pass
             
             # Count every webhook request (even if no events extracted)
             try:
