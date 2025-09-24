@@ -6,14 +6,15 @@ from config import CIELO_API_KEY, MIN_USD_VALUE
 def fetch_solana_feed(cursor=None, smart_money_only=False):
     url = "https://feed-api.cielo.finance/api/v1/feed"
     
-    # Base parameters
+    # Base parameters (keep minimal to maximize visibility)
     params = {
         "limit": 100,
         "chains": "solana",
-        "transaction_types": "mint,swap,transfer",
-        "minimum_usd_value": MIN_USD_VALUE,
         "cursor": cursor
     }
+    # Only include minimum_usd_value if configured > 0
+    if MIN_USD_VALUE and MIN_USD_VALUE > 0:
+        params["minimum_usd_value"] = MIN_USD_VALUE
     
     # Add smart money filters for enhanced detection
     if smart_money_only:
@@ -41,9 +42,14 @@ def fetch_solana_feed(cursor=None, smart_money_only=False):
                 # Convert Cielo API format to expected format
                 if api_response.get("status") == "ok" and "data" in api_response:
                     data = api_response["data"]
+                    # Adapt to both items-based and flat list responses
+                    items = data.get("items") if isinstance(data, dict) else None
+                    if items is None and isinstance(api_response.get("data"), list):
+                        items = api_response["data"]
                     return {
-                        "transactions": data.get("items", []),
-                        "next_cursor": data.get("paging", {}).get("next_cursor")
+                        "transactions": items or [],
+                        "next_cursor": (data.get("paging", {}).get("next_cursor")
+                                         if isinstance(data, dict) else None)
                     }
                 return api_response
             elif resp.status_code == 429:  # Rate limited
