@@ -38,5 +38,5 @@ if HIGH_CONFIDENCE_SCORE < 1 or HIGH_CONFIDENCE_SCORE > 10:
 if MIN_USD_VALUE < 0:
     raise ValueError("MIN_USD_VALUE must be positive")
 
-if FETCH_INTERVAL < 60:
-    raise ValueError("FETCH_INTERVAL should be at least 60 seconds to avoid rate limiting")
+if FETCH_INTERVAL < 30:
+    raise ValueError("FETCH_INTERVAL should be at least 30 seconds to avoid rate limiting")
