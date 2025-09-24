@@ -32,9 +32,12 @@ class OnchainMonitor:
         self.webhook_hmac_secret = os.getenv("WEBHOOK_HMAC_SECRET")
         self.max_payload_bytes = int(os.getenv("WEBHOOK_MAX_BYTES", "32768"))
         
-        # Rate limiting
+        # Rate limiting (configurable)
         self._request_times: List[float] = []
-        self.max_requests_per_minute = 100
+        try:
+            self.max_requests_per_minute = int(os.getenv("WEBHOOK_MAX_RPM", "5000"))
+        except Exception:
+            self.max_requests_per_minute = 5000
         
         # Deduplication TTL (24 hours)
         self._dedup_ttl_hours = 24
@@ -48,11 +51,15 @@ class OnchainMonitor:
             "7xKXGhFZKS1tZa6kFmf1zz55KjKnb5qTgzoBDLmqLwzw"  # Meteora DLMM
         }
         
-        # Program-specific instruction filters
+        # Program-specific instruction filters (lowercase names)
+        # Empty list means "accept any instruction for this program"
         self._program_instructions = {
-            "675kPX9MHTjS2zt1qfr1NYHuzeLXf3w7T8vQ1F8VxEZ": ["initialize2"],  # Raydium V4
-            "6EF8rrecthR5DkVKMzskHPBxdLHMpWFqcFvXVvLCADx": ["buy"],         # Pump.fun
-            "7xKXGhFZKS1tZa6kFmf1zz55KjKnb5qTgzoBDLmqLwzw": ["initialize_pool"]  # Meteora DLMM
+            # Raydium V4
+            "675kPX9MHTjS2zt1qfr1NYHuzeLXf3w7T8vQ1F8VxEZ": ["initialize2"],
+            # Pump.fun - allow both initial create and first buy flows
+            "6EF8rrecthR5DkVKMzskHPBxdLHMpWFqcFvXVvLCADx": ["buy", "create"],
+            # Meteora DLMM
+            "7xKXGhFZKS1tZa6kFmf1zz55KjKnb5qTgzoBDLmqLwzw": ["initialize_pool"]
         }
         
         # Statistics for monitoring
@@ -140,7 +147,8 @@ class OnchainMonitor:
         # Remove requests older than 1 minute
         self._request_times = [t for t in self._request_times if now - t < 60]
         
-        if len(self._request_times) >= self.max_requests_per_minute:
+        # If <=0, disable rate limiting
+        if self.max_requests_per_minute > 0 and len(self._request_times) >= self.max_requests_per_minute:
             return True
             
         self._request_times.append(now)
@@ -197,6 +205,12 @@ class OnchainMonitor:
             except json.JSONDecodeError as e:
                 await metrics_collector.record_error("json_parse_error", str(e))
                 return web.Response(status=400, text="Invalid JSON")
+            
+            # Count every webhook request (even if no events extracted)
+            try:
+                await metrics_collector.record_webhook_request()
+            except Exception:
+                pass
                 
             # Time-based cleanup (every hour)
             now = time.time()
@@ -264,13 +278,16 @@ class OnchainMonitor:
         
         for instruction in instructions:
             program_id = instruction.get("programId")
-            instruction_name = instruction.get("instruction", {}).get("name", "")
-            
+            instruction_name_raw = instruction.get("instruction", {}).get("name", "")
+            instruction_name = str(instruction_name_raw).lower()
+
             if program_id in self._target_programs:
                 target_instructions = self._program_instructions.get(program_id, [])
-                if instruction_name in target_instructions:
+                # Accept if this program has no specific instruction filter
+                # or if the lowercased instruction matches our targets
+                if not target_instructions or instruction_name in target_instructions:
                     matching_program = program_id
-                    matching_instruction = instruction_name
+                    matching_instruction = instruction_name or instruction_name_raw
                     break
         
         if not matching_program:
@@ -349,22 +366,26 @@ class OnchainMonitor:
             return True
             
         elif program_id == "675kPX9MHTjS2zt1qfr1NYHuzeLXf3w7T8vQ1F8VxEZ":  # Raydium V4
-            # Relaxed Raydium validation: accept any instruction
+            # Accept if initialize2 appears anywhere
             instructions = payload.get("instructions", [])
             if not instructions:
                 return False
-                
-            # Accept any Raydium instruction (relaxed filtering)
-            return True
+            for instr in instructions:
+                if str(instr.get("instruction", {}).get("name", "")).lower() == "initialize2":
+                    return True
+            logging.debug("Raydium transaction missing initialize2 instruction")
+            return False
                 
         elif program_id == "7xKXGhFZKS1tZa6kFmf1zz55KjKnb5qTgzoBDLmqLwzw":  # Meteora DLMM
-            # Relaxed Meteora validation: accept any instruction
+            # Accept if initialize_pool appears anywhere
             instructions = payload.get("instructions", [])
             if not instructions:
                 return False
-                
-            # Accept any Meteora instruction (relaxed filtering)
-            return True
+            for instr in instructions:
+                if str(instr.get("instruction", {}).get("name", "")).lower() == "initialize_pool":
+                    return True
+            logging.debug("Meteora transaction missing initialize_pool instruction")
+            return False
                 
         return False
         
