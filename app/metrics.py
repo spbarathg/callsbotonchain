@@ -72,6 +72,11 @@ class MetricsCollector:
             "tokens": 0, "signals": 0, "errors": 0
         })
         
+    async def record_webhook_request(self) -> None:
+        """Record a received webhook request/event."""
+        async with self._lock:
+            self.metrics.webhook_requests += 1
+
     async def record_token_seen(self, source: str = "unknown") -> None:
         """Record that a token was seen."""
         async with self._lock:
