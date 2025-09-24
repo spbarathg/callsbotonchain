@@ -1,0 +1,24 @@
+﻿# Secrets and env
+.env
+*.env
+
+# Databases and state
+alerted_tokens.db
+*.sqlite
+*.db
+
+# Python artifacts
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Editor/OS
+.vscode/
+.idea/.DS_Store
+Thumbs.db
