@@ -278,6 +278,35 @@ class MetricsCollector:
         else:
             return f"{minutes}m"
 
+    async def get_metrics(self) -> Dict[str, Any]:
+        """Return raw metrics snapshot suitable for /metrics endpoint."""
+        async with self._lock:
+            # Shallow copies to avoid mutation while serializing
+            return {
+                "start_time": self.metrics.start_time,
+                "counters": {
+                    "tokens_seen": self.metrics.tokens_seen,
+                    "tokens_processed": self.metrics.tokens_processed,
+                    "signals_generated": self.metrics.signals_generated,
+                    "errors_count": self.metrics.errors_count,
+                    "webhook_requests": self.metrics.webhook_requests,
+                },
+                "performance": {
+                    "avg_processing_time_ms": self.metrics.avg_processing_time_ms,
+                    "max_processing_time_ms": self.metrics.max_processing_time_ms,
+                    "queue_size_current": self.metrics.queue_size_current,
+                    "queue_size_max": self.metrics.queue_size_max,
+                },
+                "score_distribution": dict(self.metrics.score_distribution),
+                "api_health": dict(self.metrics.api_health),
+                "recent": {
+                    "tokens": list(self.metrics.recent_tokens),
+                    "signals": list(self.metrics.recent_signals),
+                    "errors": list(self.metrics.recent_errors),
+                },
+                "hourly": self.hourly_stats.copy(),
+            }
+
 
 # Global metrics collector instance
 metrics_collector = MetricsCollector()
