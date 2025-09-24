@@ -4,25 +4,69 @@ import os
 import signal
 
 import websockets
+from dotenv import load_dotenv
+
+# Load .env so API key is available when running directly
+load_dotenv()
 
 CIELO_WS_URL = os.getenv("CIELO_WS_URL", "wss://feed-api.cielo.finance/api/v1/ws")
 API_KEY = os.getenv("CIELO_API_KEY")
 
 
-async def _subscribe(ws):
-    """Try subscribe payloads in order of permissiveness."""
-    payloads = [
-        {"type": "subscribe_feed", "filter": {"tx_types": ["transfer", "swap"], "chains": ["solana"], "min_usd_value": 1000}},
-        {"type": "subscribe_feed", "filter": {"chains": ["solana"]}},
-        {"type": "subscribe_feed"},
-    ]
-    for i, p in enumerate(payloads, 1):
+def _build_filter_from_env():
+    """Build subscription filter from environment variables.
+    CIELO_WS_MIN_USD (default 0) and CIELO_WS_TX_TYPES (comma-separated).
+    """
+    min_usd = 0
+    try:
+        min_usd = int(os.getenv("CIELO_WS_MIN_USD", "0") or "0")
+    except Exception:
+        min_usd = 0
+
+    tx_types_env = os.getenv("CIELO_WS_TX_TYPES")
+    tx_types = [t.strip() for t in tx_types_env.split(",") if t.strip()] if tx_types_env else []
+
+    chains_env = os.getenv("CIELO_WS_CHAINS", "solana")
+    chains = [c.strip() for c in chains_env.split(",") if c.strip()]
+
+    tokens_env = os.getenv("CIELO_WS_TOKENS")
+    tokens = [x.strip() for x in tokens_env.split(",") if x.strip()] if tokens_env else []
+
+    f = {"chains": chains or ["solana"]}
+    if tx_types:
+        f["tx_types"] = tx_types
+    if min_usd > 0:
+        f["min_usd_value"] = min_usd
+    if tokens:
+        f["tokens"] = tokens
+    return f
+
+
+async def _subscribe(ws, mode="all"):
+    """Send a subscribe message.
+    modes: 'all' (no filter), 'env' (env-driven filter), 'chains' (solana only)
+    """
+    payload = {"type": "subscribe_feed"}
+    if mode == "env":
+        payload["filter"] = _build_filter_from_env()
+    elif mode == "chains":
+        payload["filter"] = {"chains": ["solana"]}
+    # else 'all': no filter
+    list_id_env = os.getenv("CIELO_WS_LIST_ID")
+    if list_id_env:
         try:
-            await ws.send(json.dumps(p))
-            print(f"WS: sent subscribe variant #{i}: {p}")
-            return
-        except Exception as e:
-            print("WS subscribe error:", e)
+            payload["list_id"] = int(list_id_env)
+        except ValueError:
+            pass
+    # If user provided a wallet, subscribe to it first for a deterministic test
+    test_wallet = os.getenv("CIELO_WS_WALLET")
+    if test_wallet:
+        wallet_cmd = {"type": "subscribe_wallet", "wallet": test_wallet}
+        await ws.send(json.dumps(wallet_cmd))
+        print("WS: sent subscribe_wallet:", wallet_cmd)
+
+    await ws.send(json.dumps(payload))
+    print("WS: sent subscribe (mode=", mode, "):", payload)
 
 
 async def ws_feed():
@@ -40,9 +84,20 @@ async def ws_feed():
         try:
             async with websockets.connect(CIELO_WS_URL, extra_headers=hv, ping_interval=20, ping_timeout=10) as ws:
                 print("WS: connected with headers:", hv)
-                await _subscribe(ws)
+                # Subscribe to ALL events first (most permissive, matches docs)
+                await _subscribe(ws, mode="all")
+                idle = 0
                 while True:
-                    msg = await ws.recv()
+                    try:
+                        msg = await asyncio.wait_for(ws.recv(), timeout=15)
+                        idle = 0
+                    except asyncio.TimeoutError:
+                        idle += 15
+                        # escalate filters sequence: all -> chains -> env
+                        mode = "chains" if (idle // 15) % 2 == 1 else "env"
+                        print("WS: no events in", idle, "seconds; resubscribing (mode=", mode, ")…")
+                        await _subscribe(ws, mode=mode)
+                        continue
                     try:
                         data = json.loads(msg)
                     except Exception:
