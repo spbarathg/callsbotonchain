@@ -39,6 +39,14 @@ class OnchainMonitor:
         except Exception:
             self.max_requests_per_minute = 5000
         
+        # Launches-only filtering toggle
+        self.launches_only: bool = os.getenv("LAUNCHES_ONLY", "false").lower() == "true"
+        # Dedup window for launches (seconds)
+        try:
+            self.launch_dedup_s: int = int(os.getenv("LAUNCH_DEDUP_S", "600"))
+        except Exception:
+            self.launch_dedup_s = 600
+
         # Deduplication TTL (24 hours)
         self._dedup_ttl_hours = 24
         # Max payload size to prevent DoS
@@ -56,10 +64,24 @@ class OnchainMonitor:
         self._program_instructions = {
             # Raydium V4
             "675kPX9MHTjS2zt1qfr1NYHuzeLXf3w7T8vQ1F8VxEZ": ["initialize2"],
-            # Pump.fun - allow both initial create and first buy flows
-            "6EF8rrecthR5DkVKMzskHPBxdLHMpWFqcFvXVvLCADx": ["buy", "create"],
+            # Pump.fun - for launches prefer create; first buy sometimes signals activation
+            "6EF8rrecthR5DkVKMzskHPBxdLHMpWFqcFvXVvLCADx": ["create", "buy"],
             # Meteora DLMM
-            "7xKXGhFZKS1tZa6kFmf1zz55KjKnb5qTgzoBDLmqLwzw": ["initialize_pool"]
+            "7xKXGhFZKS1tZa6kFmf1zz55KjKnb5qTgzoBDLmqLwzw": ["initialize_pool"],
+        }
+        # Additional launch-related programs (SPL Token + Token Metadata)
+        self._launch_aux_programs = {
+            # SPL Token Program (initialize mint)
+            "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA": [
+                "initializemint",
+                "initialize_mint",
+            ],
+            # Token Metadata create
+            "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s": [
+                "create",
+                "create_metadata_account",
+                "create_metadata_account_v3",
+            ],
         }
         
         # Statistics for monitoring
@@ -248,7 +270,7 @@ class OnchainMonitor:
             return web.Response(status=500, text="Internal server error")
             
     def _extract_events(self, payload: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Pass-through extraction: accept any event, attempt to extract mint, no filters."""
+        """Extract events. If LAUNCHES_ONLY is true, only queue new-launch transactions."""
         events: List[Dict[str, Any]] = []
 
         # Handle batch events
@@ -260,17 +282,46 @@ class OnchainMonitor:
         # Count event
         self._stats["total_events"] += 1
 
-        # Try to extract instruction/program for context (optional)
+        # Extract all instructions/programIds
         instructions = payload.get("instructions") or []
         first_instr = instructions[0] if instructions else {}
         matching_program = first_instr.get("programId") or ""
         matching_instruction = str((first_instr.get("instruction") or {}).get("name", "")).lower()
 
+        # If launches-only, ensure at least one instruction matches our launch maps
+        if self.launches_only:
+            matched = False
+            # Check primary launch programs
+            for instr in instructions:
+                pid = instr.get("programId") or ""
+                name = str((instr.get("instruction") or {}).get("name", "")).lower()
+                allowed = self._program_instructions.get(pid)
+                if allowed is not None:
+                    if not allowed or name in allowed:
+                        matched = True
+                        matching_program = pid
+                        matching_instruction = name
+                        break
+                # Check auxiliary programs
+                allowed_aux = self._launch_aux_programs.get(pid)
+                if allowed_aux is not None and (not allowed_aux or name in allowed_aux):
+                    matched = True
+                    matching_program = pid
+                    matching_instruction = name
+                    break
+            if not matched:
+                # Not a launch-related transaction
+                return events
+
         # Try to extract a mint (best-effort). If none, mark as "unknown" to avoid drops
         mint = self._extract_mint_address(payload) or str(payload.get("tokenMint") or payload.get("mint") or "unknown")
 
-        # Track last-seen timestamp for mint (no dedup)
-        self._seen_mints[mint] = time.time()
+        # Dedup launches by mint within TTL when launches_only
+        now_ts = time.time()
+        last_ts = self._seen_mints.get(mint)
+        if self.launches_only and last_ts and (now_ts - last_ts) < self.launch_dedup_s:
+            return events
+        self._seen_mints[mint] = now_ts
 
         # Program counters (best-effort)
         if matching_program:
