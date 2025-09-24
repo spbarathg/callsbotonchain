@@ -248,74 +248,41 @@ class OnchainMonitor:
             return web.Response(status=500, text="Internal server error")
             
     def _extract_events(self, payload: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Extract new token launch events using program-specific filtering."""
-        events = []
-        
+        """Pass-through extraction: accept any event, attempt to extract mint, no filters."""
+        events: List[Dict[str, Any]] = []
+
         # Handle batch events
         if isinstance(payload, list):
             for item in payload:
                 events.extend(self._extract_events(item))
             return events
-            
-        # Update statistics
-        self._stats["total_events"] += 1
-        
-        # Universal filters
-        # 1. Ignore transactions with errors
-        if payload.get("error") is not None:
-            self._stats["error_transactions"] += 1
-            logging.debug("Ignoring transaction with error: %s", payload.get("error"))
-            return events
-            
-        # 2. Check if transaction involves target programs
-        instructions = payload.get("instructions", [])
-        if not instructions:
-            return events
-            
-        # Find matching program and instruction
-        matching_program = None
-        matching_instruction = None
-        
-        for instruction in instructions:
-            program_id = instruction.get("programId")
-            instruction_name_raw = instruction.get("instruction", {}).get("name", "")
-            instruction_name = str(instruction_name_raw).lower()
 
-            if program_id in self._target_programs:
-                target_instructions = self._program_instructions.get(program_id, [])
-                # Accept if this program has no specific instruction filter
-                # or if the lowercased instruction matches our targets
-                if not target_instructions or instruction_name in target_instructions:
-                    matching_program = program_id
-                    matching_instruction = instruction_name or instruction_name_raw
-                    break
-        
-        if not matching_program:
-            return events
-            
-        self._stats["program_matches"] += 1
-        
-        # Program-specific validation
-        if not self._validate_program_specific_rules(payload, matching_program, matching_instruction):
-            return events
-            
-        # Extract mint address
-        mint = self._extract_mint_address(payload)
-        if not mint:
-            self._stats["invalid_mints"] += 1
-            return events
-            
-        # Deduplicate with TTL
-        now = time.time()
-        if mint in self._seen_mints:
-            # Check if mint is still within TTL
-            if now - self._seen_mints[mint] < (self._dedup_ttl_hours * 3600):
-                self._stats["duplicate_skips"] += 1
-                logging.debug("Skipping duplicate mint: %s", mint[:8])
-                return events
-        self._seen_mints[mint] = now
-        
-        # Create event with program context
+        # Count event
+        self._stats["total_events"] += 1
+
+        # Try to extract instruction/program for context (optional)
+        instructions = payload.get("instructions") or []
+        first_instr = instructions[0] if instructions else {}
+        matching_program = first_instr.get("programId") or ""
+        matching_instruction = str((first_instr.get("instruction") or {}).get("name", "")).lower()
+
+        # Try to extract a mint (best-effort). If none, mark as "unknown" to avoid drops
+        mint = self._extract_mint_address(payload) or str(payload.get("tokenMint") or payload.get("mint") or "unknown")
+
+        # Track last-seen timestamp for mint (no dedup)
+        self._seen_mints[mint] = time.time()
+
+        # Program counters (best-effort)
+        if matching_program:
+            self._stats["program_matches"] += 1
+            if matching_program == "6EF8rrecthR5DkVKMzskHPBxdLHMpWFqcFvXVvLCADx":
+                self._stats["pump_fun_creations"] += 1
+            elif matching_program == "675kPX9MHTjS2zt1qfr1NYHuzeLXf3w7T8vQ1F8VxEZ":
+                self._stats["raydium_initializations"] += 1
+            elif matching_program == "7xKXGhFZKS1tZa6kFmf1zz55KjKnb5qTgzoBDLmqLwzw":
+                self._stats["meteora_initializations"] += 1
+
+        # Build event
         event = {
             "mint": mint,
             "event_type": "webhook",
@@ -324,20 +291,11 @@ class OnchainMonitor:
             "block_time": payload.get("blockTime"),
             "program_id": matching_program,
             "instruction": matching_instruction,
-            "ts": time.time()
+            "ts": time.time(),
         }
-        
-        # Update program-specific statistics
-        if matching_program == "6EF8rrecthR5DkVKMzskHPBxdLHMpWFqcFvXVvLCADx":
-            self._stats["pump_fun_creations"] += 1
-        elif matching_program == "675kPX9MHTjS2zt1qfr1NYHuzeLXf3w7T8vQ1F8VxEZ":
-            self._stats["raydium_initializations"] += 1
-        elif matching_program == "7xKXGhFZKS1tZa6kFmf1zz55KjKnb5qTgzoBDLmqLwzw":
-            self._stats["meteora_initializations"] += 1
-            
+
         self._stats["filtered_events"] += 1
-        
-        logging.info("🚀 New token launch detected: %s via %s (%s)", mint[:8], matching_instruction, matching_program[:8])
+        logging.info("📥 Event accepted: mint=%s prog=%s instr=%s", str(mint)[:8], matching_program[:8], matching_instruction)
         events.append(event)
         return events
         
