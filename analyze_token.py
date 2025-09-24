@@ -1,51 +1,163 @@
 # analyze_token.py
 import requests
 import time
-from config import CIELO_API_KEY
+from typing import Dict, Tuple, List, Any, Optional
+from config import (
+    CIELO_API_KEY,
+    CIELO_DISABLE_STATS,
+    PRELIM_USD_HIGH,
+    PRELIM_USD_MID,
+    PRELIM_USD_LOW,
+    MCAP_MICRO_MAX,
+    MCAP_SMALL_MAX,
+    MCAP_MID_MAX,
+    VOL_VERY_HIGH,
+    VOL_HIGH,
+    VOL_MED,
+    MOMENTUM_1H_STRONG,
+    DRAW_24H_MAJOR,
+    TOP10_CONCERN,
+)
 
-def get_token_stats(token_address):
+def _dexscreener_best_pair(pairs: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if not pairs:
+        return None
+    # Prefer Solana pairs with highest 24h volume, then liquidity
+    sol_pairs = [p for p in pairs if (p.get("chainId") == "solana")]
+    candidates = sol_pairs or pairs
+    def score(p: Dict[str, Any]) -> float:
+        vol = (p.get("volume") or {}).get("h24") or 0
+        liq = (p.get("liquidity") or {}).get("usd") or 0
+        return float(vol) * 1.0 + float(liq) * 0.1
+    return max(candidates, key=score)
+
+
+def _get_token_stats_dexscreener(token_address: str) -> Dict[str, Any]:
+    url = f"https://api.dexscreener.com/latest/dex/tokens/{token_address}"
+    max_retries = 3
+    timeout = 10
+    for attempt in range(max_retries):
+        try:
+            resp = requests.get(url, timeout=timeout)
+            if resp.status_code == 200:
+                data = resp.json() or {}
+                pairs = data.get("pairs") or []
+                best = _dexscreener_best_pair(pairs)
+                if not best:
+                    return {}
+                base = best.get("baseToken") or {}
+                price_change = best.get("priceChange") or {}
+                volume = best.get("volume") or {}
+                liquidity = best.get("liquidity") or {}
+                market_cap = best.get("marketCap") or best.get("fdv") or 0
+                price_usd = best.get("priceUsd")
+                try:
+                    price_usd = float(price_usd) if price_usd is not None else 0.0
+                except Exception:
+                    price_usd = 0.0
+                stats: Dict[str, Any] = {
+                    "market_cap_usd": market_cap or 0,
+                    "price_usd": price_usd,
+                    "liquidity_usd": (liquidity.get("usd") or 0),
+                    "name": base.get("name") or None,
+                    "symbol": base.get("symbol") or None,
+                    "volume": {
+                        "24h": {
+                            "volume_usd": volume.get("h24") or 0,
+                            "unique_buyers": 0,
+                            "unique_sellers": 0,
+                        }
+                    },
+                    "change": {
+                        "1h": (price_change.get("h1") or 0),
+                        "24h": (price_change.get("h24") or 0),
+                    },
+                    # Unknown from DexScreener; leave empty so we don't penalize
+                    "security": {},
+                    "liquidity": {},
+                    "holders": {},
+                }
+                stats["_source"] = "dexscreener"
+                return stats
+            elif resp.status_code == 429:
+                time.sleep(2 ** attempt)
+                continue
+            else:
+                if attempt < max_retries - 1:
+                    time.sleep(1)
+                    continue
+        except requests.exceptions.RequestException:
+            if attempt < max_retries - 1:
+                time.sleep(2 ** attempt)
+                continue
+    return {}
+
+
+_deny_cache = {"stats_denied": False}
+
+
+def get_token_stats(token_address: str) -> Dict[str, Any]:
     if not token_address:
         return {}
         
-    url = f"https://feed-api.cielo.finance/api/v1/token/stats"
+    base_urls = [
+        "https://feed-api.cielo.finance/api/v1",
+        "https://api.cielo.finance/api/v1",
+    ]
+    header_variants = [
+        {"X-API-Key": CIELO_API_KEY},
+        {"Authorization": f"Bearer {CIELO_API_KEY}"},
+    ]
     params = {"token_address": token_address, "chain": "solana"}
-    headers = {"X-API-Key": CIELO_API_KEY}
     
     # Add timeout and retry logic
     max_retries = 3
     timeout = 10
     
-    for attempt in range(max_retries):
+    # Skip Cielo if user disabled or we detected denial previously
+    if CIELO_DISABLE_STATS or _deny_cache.get("stats_denied"):
+        return _get_token_stats_dexscreener(token_address)
+
+    combos = [(b, h) for b in base_urls for h in header_variants]
+    last_status = None
+    for idx, (base, hdrs) in enumerate(combos):
         try:
-            resp = requests.get(url, params=params, headers=headers, timeout=timeout)
+            url = f"{base}/token/stats"
+            resp = requests.get(url, params=params, headers=hdrs, timeout=timeout)
+            last_status = resp.status_code
             if resp.status_code == 200:
                 api_response = resp.json()
-                # Extract data from Cielo API format
                 if api_response.get("status") == "ok" and "data" in api_response:
+                    api_response["data"]["_source"] = "cielo"
                     return api_response["data"]
+                if isinstance(api_response, dict):
+                    api_response["_source"] = "cielo"
                 return api_response
-            elif resp.status_code == 429:  # Rate limited
-                print(f"Rate limited on token stats, waiting... (attempt {attempt + 1})")
-                time.sleep(2 ** attempt)  # Exponential backoff
+            elif resp.status_code == 429:
+                print(f"Rate limited on token stats, waiting... (variant {idx + 1})")
+                time.sleep(1)
                 continue
             elif resp.status_code == 404:
                 print(f"Token {token_address} not found")
                 return {}
+            elif resp.status_code in (401, 403):
+                # Try next variant
+                continue
             else:
                 print(f"Error fetching token stats: {resp.status_code}, {resp.text}")
-                if attempt < max_retries - 1:
-                    time.sleep(1)
-                    continue
-        except requests.exceptions.RequestException as e:
-            print(f"Request exception on token stats attempt {attempt + 1}: {e}")
-            if attempt < max_retries - 1:
-                time.sleep(2 ** attempt)
                 continue
-    
-    print(f"Failed to fetch token stats for {token_address} after {max_retries} attempts")
-    return {}
+        except requests.exceptions.RequestException as e:
+            print(f"Request exception on token stats (variant {idx + 1}): {e}")
+            continue
 
-def calculate_preliminary_score(tx_data, smart_money_detected=False):
+    if last_status in (401, 403):
+        _deny_cache["stats_denied"] = True
+        print("Cielo token stats denied across variants – using DexScreener fallback")
+    else:
+        print(f"Cielo token stats unavailable (last status={last_status}); using DexScreener fallback")
+    return _get_token_stats_dexscreener(token_address)
+
+def calculate_preliminary_score(tx_data: Dict[str, Any], smart_money_detected: bool = False) -> int:
     """
     CREDIT-EFFICIENT: Calculate preliminary score from feed data without API calls
     Uses only data available in the transaction feed
@@ -58,11 +170,11 @@ def calculate_preliminary_score(tx_data, smart_money_detected=False):
     
     # USD value indicates serious activity (more sensitive thresholds)
     usd_value = tx_data.get('usd_value', 0) or 0
-    if usd_value > 2000:
+    if usd_value > PRELIM_USD_HIGH:
         score += 3
-    elif usd_value > 750:
+    elif usd_value > PRELIM_USD_MID:
         score += 2
-    elif usd_value > 250:
+    elif usd_value > PRELIM_USD_LOW:
         score += 1
     
     # Transaction frequency/urgency
@@ -71,7 +183,7 @@ def calculate_preliminary_score(tx_data, smart_money_detected=False):
     
     return min(score, 10)
 
-def score_token(stats, smart_money_detected=False):
+def score_token(stats: Dict[str, Any], smart_money_detected: bool = False) -> Tuple[int, List[str]]:
     if not stats:
         return 0
         
@@ -85,25 +197,25 @@ def score_token(stats, smart_money_detected=False):
     
     # Market cap analysis (lower market cap = higher potential)
     market_cap = stats.get('market_cap_usd', 0)
-    if 0 < market_cap < 100_000:  # Under 100K market cap
+    if 0 < market_cap < MCAP_MICRO_MAX:  # Micro cap
         score += 3
         scoring_details.append(f"Market Cap: +3 (${market_cap:,.0f} - micro cap gem)")
-    elif market_cap < 1_000_000:  # Under 1M market cap
+    elif market_cap < MCAP_SMALL_MAX:  # Small cap
         score += 2
         scoring_details.append(f"Market Cap: +2 (${market_cap:,.0f} - small cap)")
-    elif market_cap < 10_000_000:  # Under 10M market cap
+    elif market_cap < MCAP_MID_MAX:  # Mid cap
         score += 1
         scoring_details.append(f"Market Cap: +1 (${market_cap:,.0f} - growing)")
     
     # Volume analysis (24h volume indicates activity)
     volume_24h = stats.get('volume', {}).get('24h', {}).get('volume_usd', 0)
-    if volume_24h > 100_000:  # High volume
+    if volume_24h > VOL_VERY_HIGH:  # Very high activity
         score += 3
         scoring_details.append(f"Volume: +3 (${volume_24h:,.0f} - very high activity)")
-    elif volume_24h > 50_000:  # Good volume
+    elif volume_24h > VOL_HIGH:  # High activity
         score += 2
         scoring_details.append(f"Volume: +2 (${volume_24h:,.0f} - high activity)")
-    elif volume_24h > 10_000:  # Moderate volume
+    elif volume_24h > VOL_MED:  # Moderate activity
         score += 1
         scoring_details.append(f"Volume: +1 (${volume_24h:,.0f} - moderate activity)")
     
@@ -124,7 +236,7 @@ def score_token(stats, smart_money_detected=False):
     change_24h = stats.get('change', {}).get('24h', 0)
     
     # Reward recent positive momentum
-    if change_1h > 5:  # Strong 1h pump
+    if change_1h > MOMENTUM_1H_STRONG:  # Strong 1h pump
         score += 2
         scoring_details.append(f"Momentum: +2 ({change_1h:.1f}% - strong pump)")
     elif change_1h > 0:  # Positive 1h
@@ -132,7 +244,7 @@ def score_token(stats, smart_money_detected=False):
         scoring_details.append(f"Momentum: +1 ({change_1h:.1f}% - positive)")
     
     # But penalize if 24h is extremely negative (might be dump)
-    if change_24h < -80:
+    if change_24h < DRAW_24H_MAJOR:
         score -= 1
         scoring_details.append(f"Risk: -1 ({change_24h:.1f}% - major dump risk)")
 
@@ -167,9 +279,9 @@ def score_token(stats, smart_money_detected=False):
         top10 = float(top10)
     except Exception:
         top10 = 0
-    if top10 > 40:
+    if top10 > TOP10_CONCERN:
         score -= 1
-        scoring_details.append(f"Holders: -1 (Top10 {top10:.1f}% > 40%)")
+        scoring_details.append(f"Holders: -1 (Top10 {top10:.1f}% > {TOP10_CONCERN}%)")
     
     final_score = max(0, min(score, 10))
     return final_score, scoring_details

@@ -7,8 +7,12 @@ from fetch_feed import fetch_solana_feed
 from analyze_token import get_token_stats, score_token, calculate_preliminary_score
 from notify import send_telegram_alert
 from storage import (init_db, has_been_alerted, mark_as_alerted, 
-                    record_token_activity, get_token_velocity, should_fetch_detailed_stats)
-from config import HIGH_CONFIDENCE_SCORE, FETCH_INTERVAL, DEBUG_PRELIM
+                    record_token_activity, get_token_velocity, should_fetch_detailed_stats,
+                    ensure_indices, prune_old_activity, get_alerted_tokens_batch, update_token_tracking)
+from config import HIGH_CONFIDENCE_SCORE, FETCH_INTERVAL, DEBUG_PRELIM, TELEGRAM_ALERT_MIN_INTERVAL, TRACK_INTERVAL_MIN, TRACK_BATCH_SIZE
+from relay import relay_contract_address_sync, relay_enabled
+from logger_utils import log_alert, log_tracking
+import html
 
 # Global flag for graceful shutdown
 shutdown_flag = False
@@ -27,20 +31,25 @@ def run_bot():
     
     try:
         init_db()  # ensure database is initialized
+        ensure_indices()
         print("✅ Database initialized successfully")
     except Exception as e:
         print(f"❌ Failed to initialize database: {e}")
         return
     
-    cursor = None
+    cursor_general = None
+    cursor_smart = None
     processed_count = 0
     alert_count = 0
+    last_alert_time = 0
     api_calls_saved = 0  # Track credit optimization
+    session_alerted_tokens = set()
+    last_track_time = 0
     
     print("🧠 SMART MONEY ENHANCED SOLANA MEMECOIN BOT STARTED!")
     print(f"📊 Configuration: Score threshold = {HIGH_CONFIDENCE_SCORE}, Fetch interval = {FETCH_INTERVAL}s")
     print("🎯 Features: Smart Money Detection + Enhanced Scoring + Detailed Analysis")
-    print("✅ Smart-money filters enabled (top_wallets=true, min_wallet_pnl=1000)")
+    print("✅ Smart-money cycle enabled (top_wallets=true, min_wallet_pnl=1000)")
     
     # Send startup notification
     startup_message = (
@@ -53,10 +62,16 @@ def run_bot():
     )
     send_telegram_alert(startup_message)
     
+    is_smart_cycle = False
     while not shutdown_flag:
         try:
-            feed = fetch_solana_feed(cursor)
-            cursor = feed.get("next_cursor")
+            # Alternate between general feed and smart-money-only feed
+            if is_smart_cycle:
+                feed = fetch_solana_feed(cursor_smart, smart_money_only=True)
+                cursor_smart = feed.get("next_cursor")
+            else:
+                feed = fetch_solana_feed(cursor_general, smart_money_only=False)
+                cursor_general = feed.get("next_cursor")
 
             # Log the number of items returned this cycle for visibility
             items_count = len(feed.get("transactions", []))
@@ -102,12 +117,12 @@ def run_bot():
 
                 processed_count += 1
 
-                if has_been_alerted(token_address):
+                if token_address in session_alerted_tokens or has_been_alerted(token_address):
                     continue  # skip previously alerted tokens
 
                 try:
                     # STEP 1: Calculate preliminary score (NO API CALLS)
-                    preliminary_score = calculate_preliminary_score(tx, smart_money_detected=False)
+                    preliminary_score = calculate_preliminary_score(tx, smart_money_detected=is_smart_cycle)
                     if DEBUG_PRELIM:
                         print("    ⤷ prelim_debug:", {
                             'usd_value': round(tx.get('usd_value', 0) or 0, 2),
@@ -124,7 +139,7 @@ def run_bot():
                         token_address, 
                         usd_value, 
                         1,  # Transaction count (individual tx)
-                        False,
+                        is_smart_cycle,
                         preliminary_score,
                         trader
                     )
@@ -145,7 +160,7 @@ def run_bot():
                     velocity_data = get_token_velocity(token_address, minutes_back=15)
                     velocity_bonus = velocity_data['velocity_score'] if velocity_data else 0
                     
-                    score, scoring_details = score_token(stats, smart_money_detected=False)
+                    score, scoring_details = score_token(stats, smart_money_detected=is_smart_cycle)
                     
                     # Add velocity bonus
                     if velocity_bonus > 0:
@@ -171,8 +186,8 @@ def run_bot():
                         price = stats.get('price_usd', 0)
                         change_1h = stats.get('change', {}).get('1h', 0)
                         change_24h = stats.get('change', {}).get('24h', 0)
-                        name = stats.get('name') or "Token"
-                        symbol = stats.get('symbol') or "?"
+                        name = html.escape(stats.get('name') or "Token")
+                        symbol = html.escape(stats.get('symbol') or "?")
                         liquidity = (
                             stats.get('liquidity_usd')
                             or stats.get('liquidity', {}).get('usd')
@@ -214,18 +229,24 @@ def run_bot():
                         badges_text = " | ".join(badges) if badges else ""
 
                         # Requested clean template with CA as plain text (non-link)
-                        message = (
-                            f"<b>{name} (${symbol})</b>\n\n"
-                            f"Fresh signal on Solana.\n\n"
-                            f"💰 <b>MCap:</b> ${market_cap:,.0f}\n"
-                            f"💧 <b>Liquidity:</b> ${liquidity:,.0f}\n"
-                            f"{badges_text}\n" if badges_text else ""
-                            f"📈 <b>Chart:</b> <a href='{chart_link}'>DexScreener</a>\n"
-                            f"🔁 <b>Swap:</b> <a href='{swap_link}'>Raydium</a>\n\n"
-                            f"<code>{token_address}</code>\n"
-                            f"\n—\n"
-                            f"Score: {score}/10 | 24h Vol: ${volume_24h:,.0f} | Price: ${price:.8f} | 1h {change_1h:+.1f}% | 24h {change_24h:+.1f}%"
-                        )
+                        parts = []
+                        parts.append(f"<b>{name} (${symbol})</b>\n\n")
+                        parts.append("Fresh signal on Solana.\n\n")
+                        parts.append(f"💰 <b>MCap:</b> ${market_cap:,.0f}\n")
+                        parts.append(f"💧 <b>Liquidity:</b> ${liquidity:,.0f}\n")
+                        if badges_text:
+                            parts.append(f"{badges_text}\n")
+                        parts.append(f"📈 <b>Chart:</b> <a href='{chart_link}'>DexScreener</a>\n")
+                        parts.append(f"🔁 <b>Swap:</b> <a href='{swap_link}'>Raydium</a>\n\n")
+                        parts.append(f"{html.escape(token_address)}\n")
+                        parts.append("━━━━━━━━━━━━━━━\n")
+                        parts.append(f"📊 <b>Score:</b> {score}/10\n")
+                        parts.append(f"💸 <b>24h Vol:</b> ${volume_24h:,.0f}\n")
+                        parts.append(f"💰 <b>Price:</b> ${price:.8f}\n")
+                        parts.append(f"⏱ <b>1h Change:</b> {change_1h:+.1f}%\n")
+                        parts.append(f"📆 <b>24h Change:</b> {change_24h:+.1f}%\n")
+                        parts.append("━━━━━━━━━━━━━━━")
+                        message = "".join(parts)
                         
                         # no extra smart money line in lean mode
                         
@@ -238,10 +259,55 @@ def run_bot():
                         
                         message += f"\n<b>Alert Time:</b> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
                         
+                        # Throttle alerts if configured
+                        if TELEGRAM_ALERT_MIN_INTERVAL and TELEGRAM_ALERT_MIN_INTERVAL > 0:
+                            now = time.time()
+                            delta = now - last_alert_time
+                            if last_alert_time > 0 and delta < TELEGRAM_ALERT_MIN_INTERVAL:
+                                wait_s = int(TELEGRAM_ALERT_MIN_INTERVAL - delta)
+                                print(f"⏳ Throttling alerts; waiting {wait_s}s before sending…")
+                                for _ in range(wait_s):
+                                    if shutdown_flag:
+                                        break
+                                    time.sleep(1)
+                            last_alert_time = time.time()
+
                         if send_telegram_alert(message):
-                            mark_as_alerted(token_address, score, is_smart_money_cycle)
+                            # Baseline metrics for tracking
+                            baseline_price = float(price or 0)
+                            baseline_mcap = float(market_cap or 0)
+                            baseline_liq = float(liquidity or 0)
+                            baseline_vol = float(volume_24h or 0)
+                            mark_as_alerted(token_address, score, is_smart_cycle,
+                                            baseline_price, baseline_mcap, baseline_liq, baseline_vol)
+                            try:
+                                if relay_enabled():
+                                    relay_contract_address_sync(token_address)
+                            except Exception:
+                                pass
+                            session_alerted_tokens.add(token_address)
                             alert_count += 1
                             print(f"✅ Alert #{alert_count} sent for token {token_address} (Final: {score}/10, Prelim: {preliminary_score}/10)")
+                            try:
+                                log_alert({
+                                    "token": token_address,
+                                    "name": name,
+                                    "symbol": symbol,
+                                    "final_score": score,
+                                    "prelim_score": preliminary_score,
+                                    "velocity_bonus": int(velocity_bonus//2),
+                                    "volume_24h": volume_24h,
+                                    "market_cap": market_cap,
+                                    "price": float(price),
+                                    "change_1h": change_1h,
+                                    "change_24h": change_24h,
+                                    "liquidity": liquidity,
+                                    "badges": badges,
+                                    "data_source": (stats.get("_source") or "unknown"),
+                                    "smart_cycle": bool(is_smart_cycle),
+                                })
+                            except Exception:
+                                pass
                         else:
                             print(f"❌ Failed to send alert for token {token_address}")
                             
@@ -251,12 +317,57 @@ def run_bot():
 
             # Cursors are handled per cycle type above
             
+            # Periodic maintenance
+            try:
+                deleted = prune_old_activity()
+                if deleted:
+                    print(f"🧹 Pruned {deleted} old activity rows")
+            except Exception:
+                pass
+
+            # Periodic tracking of alerted tokens for peak/last prices
+            try:
+                now = time.time()
+                if now - last_track_time > TRACK_INTERVAL_MIN * 60:
+                    to_check = get_alerted_tokens_batch(limit=TRACK_BATCH_SIZE, older_than_minutes=TRACK_INTERVAL_MIN)
+                    if to_check:
+                        print(f"🛰 Tracking {len(to_check)} alerted tokens for price updates…")
+                    for ca in to_check:
+                        try:
+                            stats = get_token_stats(ca)
+                            price = 0.0
+                            mcap = None
+                            liq = None
+                            vol24 = None
+                            if stats:
+                                price = float(stats.get('price_usd') or 0.0)
+                                mcap = stats.get('market_cap_usd')
+                                liq = stats.get('liquidity_usd') or (stats.get('liquidity', {}) or {}).get('usd')
+                                vol24 = (stats.get('volume', {}) or {}).get('24h', {}) or {}
+                                vol24 = vol24.get('volume_usd')
+                            update_token_tracking(ca, price, mcap, liq, vol24)
+                            try:
+                                log_tracking({
+                                    "token": ca,
+                                    "price": price,
+                                    "data_source": (stats.get("_source") if isinstance(stats, dict) else None) or "unknown",
+                                })
+                            except Exception:
+                                pass
+                        except Exception:
+                            continue
+                    last_track_time = now
+            except Exception:
+                pass
+
             if not shutdown_flag:
                 print(f"😴 Sleeping for {FETCH_INTERVAL} seconds...")
                 for _ in range(FETCH_INTERVAL):
                     if shutdown_flag:
                         break
                     time.sleep(1)
+            # flip cycle after sleep
+            is_smart_cycle = not is_smart_cycle
                 
         except KeyboardInterrupt:
             print("\n🛑 Keyboard interrupt received")

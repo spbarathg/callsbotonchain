@@ -53,9 +53,15 @@ def fetch_solana_feed(cursor=None, smart_money_only=False):
                     return {
                         "transactions": items or [],
                         "next_cursor": (data.get("paging", {}).get("next_cursor")
-                                         if isinstance(data, dict) else None)
+                                         if isinstance(data, dict) else None),
+                        "error": None,
                     }
-                return api_response
+                # Unexpected shape but still HTTP 200
+                return {
+                    "transactions": [],
+                    "next_cursor": None,
+                    "error": "unexpected_response_shape",
+                }
             elif resp.status_code == 429:  # Rate limited
                 print(f"Rate limited, waiting before retry... (attempt {attempt + 1})")
                 time.sleep(2 ** attempt)  # Exponential backoff
@@ -65,12 +71,22 @@ def fetch_solana_feed(cursor=None, smart_money_only=False):
                 if attempt < max_retries - 1:
                     time.sleep(1)  # Brief pause before retry
                     continue
+                return {
+                    "transactions": [],
+                    "next_cursor": None,
+                    "error": f"http_{resp.status_code}",
+                }
         except requests.exceptions.RequestException as e:
             print(f"Request exception on attempt {attempt + 1}: {e}")
             if attempt < max_retries - 1:
                 time.sleep(2 ** attempt)  # Exponential backoff
                 continue
+            return {
+                "transactions": [],
+                "next_cursor": None,
+                "error": "network_exception",
+            }
     
     # All retries failed
     print(f"Failed to fetch feed after {max_retries} attempts")
-    return {"transactions": [], "next_cursor": None}
+    return {"transactions": [], "next_cursor": None, "error": "retries_exhausted"}

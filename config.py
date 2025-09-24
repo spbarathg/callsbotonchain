@@ -48,3 +48,59 @@ if MIN_USD_VALUE < 0:
 
 if FETCH_INTERVAL < 30:
     raise ValueError("FETCH_INTERVAL should be at least 30 seconds to avoid rate limiting")
+
+# ==============================================
+# SCORING THRESHOLDS (override via .env)
+# ==============================================
+def _get_int(name: str, default: int) -> int:
+    try:
+        return int(os.getenv(name, str(default)))
+    except ValueError:
+        return default
+
+# Preliminary USD thresholds
+PRELIM_USD_HIGH = _get_int("PRELIM_USD_HIGH", 2000)
+PRELIM_USD_MID = _get_int("PRELIM_USD_MID", 750)
+PRELIM_USD_LOW = _get_int("PRELIM_USD_LOW", 250)
+
+# Market cap buckets (USD)
+MCAP_MICRO_MAX = _get_int("MCAP_MICRO_MAX", 100_000)
+MCAP_SMALL_MAX = _get_int("MCAP_SMALL_MAX", 1_000_000)
+MCAP_MID_MAX = _get_int("MCAP_MID_MAX", 10_000_000)
+
+# 24h Volume thresholds (USD)
+VOL_VERY_HIGH = _get_int("VOL_VERY_HIGH", 100_000)
+VOL_HIGH = _get_int("VOL_HIGH", 50_000)
+VOL_MED = _get_int("VOL_MED", 10_000)
+
+# Momentum thresholds (%)
+MOMENTUM_1H_STRONG = _get_int("MOMENTUM_1H_STRONG", 5)
+DRAW_24H_MAJOR = _get_int("DRAW_24H_MAJOR", -80)
+
+# Holder concentration threshold (%)
+TOP10_CONCERN = _get_int("TOP10_CONCERN", 40)
+
+# Detailed fetch decision thresholds
+PRELIM_DETAILED_MIN = _get_int("PRELIM_DETAILED_MIN", 6)
+PRELIM_VELOCITY_MIN_SCORE = _get_int("PRELIM_VELOCITY_MIN_SCORE", 3)
+VELOCITY_REQUIRED = _get_int("VELOCITY_REQUIRED", 5)
+
+# ==============================================
+# STORAGE SETTINGS
+# ==============================================
+DB_FILE = os.getenv("CALLSBOT_DB_FILE", "alerted_tokens.db")
+DB_RETENTION_HOURS = _get_int("DB_RETENTION_HOURS", 72)
+
+# ==============================================
+# FEATURE FLAGS
+# ==============================================
+CIELO_DISABLE_STATS = os.getenv("CIELO_DISABLE_STATS", "false").lower() == "true"
+
+# Telegram throttling
+TELEGRAM_ALERT_MIN_INTERVAL = _get_int("TELEGRAM_ALERT_MIN_INTERVAL", 0)  # seconds
+
+# ==============================================
+# TRACKING SETTINGS
+# ==============================================
+TRACK_INTERVAL_MIN = _get_int("TRACK_INTERVAL_MIN", 60)
+TRACK_BATCH_SIZE = _get_int("TRACK_BATCH_SIZE", 25)

@@ -12,7 +12,7 @@ def send_telegram_alert(message):
     data = {
         "chat_id": TELEGRAM_CHAT_ID,
         "text": message,
-        "parse_mode": "HTML"  # Allow HTML formatting
+        "parse_mode": "HTML",  # Allow HTML formatting
     }
     
     # Add timeout and retry logic
