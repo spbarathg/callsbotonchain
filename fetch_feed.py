@@ -25,9 +25,8 @@ def fetch_solana_feed(cursor=None, smart_money_only=False):
         print("🧠 Fetching SMART MONEY activity...")
     else:
         print("📡 Fetching general feed...")
-        
-    # Always try to get high-value transactions
-    params["minimum_usd_value"] = max(MIN_USD_VALUE, 500)  # Minimum $500 for quality
+
+    # Respect configured MIN_USD_VALUE as-is to maximize visibility
     headers = {"X-API-Key": CIELO_API_KEY}
     
     # Add timeout and retry logic

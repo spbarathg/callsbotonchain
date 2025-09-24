@@ -68,6 +68,11 @@ def run_bot():
                 print(f"📡 GENERAL CYCLE {cycle_count} (processed: {processed_count}, alerts: {alert_count}, API calls saved: {api_calls_saved})")
                 feed = fetch_solana_feed(cursor, smart_money_only=False)
                 cursor = feed.get("next_cursor")
+
+            # Log the number of items returned this cycle for visibility
+            items_count = len(feed.get("transactions", []))
+            cycle_name = "SMART MONEY" if is_smart_money_cycle else "GENERAL"
+            print(f"🔎 {cycle_name} FEED ITEMS: {items_count}")
             
             if not feed.get("transactions"):
                 cycle_type = "smart money" if is_smart_money_cycle else "general"

@@ -25,7 +25,7 @@ if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
 # BOT SETTINGS
 # ==============================================
 try:
-    HIGH_CONFIDENCE_SCORE = int(os.getenv("HIGH_CONFIDENCE_SCORE", "8"))
+    HIGH_CONFIDENCE_SCORE = int(os.getenv("HIGH_CONFIDENCE_SCORE", "6"))
     MIN_USD_VALUE = int(os.getenv("MIN_USD_VALUE", "100"))
     FETCH_INTERVAL = int(os.getenv("FETCH_INTERVAL", "120"))
 except ValueError as e:
