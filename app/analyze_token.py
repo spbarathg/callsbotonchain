@@ -2,6 +2,7 @@
 import requests
 import time
 from typing import Dict, Tuple, List, Any, Optional
+from app.logger_utils import log_alert  # if needed later; safe to leave
 from config import (
     CIELO_API_KEY,
     CIELO_DISABLE_STATS,
@@ -23,6 +24,10 @@ from config import (
     LARGE_CAP_MOMENTUM_GATE_1H,
     MIN_LIQUIDITY_USD,
     VOL_24H_MIN_FOR_ALERT,
+    VOL_TO_MCAP_RATIO_MIN,
+    MICROCAP_SWEET_MIN,
+    MICROCAP_SWEET_MAX,
+    MOMENTUM_1H_PUMPER,
     REQUIRE_MINT_REVOKED,
     REQUIRE_LP_LOCKED,
     ALLOW_UNKNOWN_SECURITY,
@@ -230,6 +235,10 @@ def score_token(stats: Dict[str, Any], smart_money_detected: bool = False, token
     elif market_cap < MCAP_MID_MAX:  # Mid cap
         score += 1
         scoring_details.append(f"Market Cap: +1 (${market_cap:,.0f} - growing)")
+    # Microcap sweet band bonus
+    if market_cap and MICROCAP_SWEET_MIN <= market_cap <= MICROCAP_SWEET_MAX:
+        score = min(score + 1, 10)
+        scoring_details.append(f"Microcap Sweet Spot: +1 (${market_cap:,.0f})")
     # Gate very large caps unless strong momentum or smart money
     if market_cap and market_cap > MAX_MARKET_CAP_FOR_DEFAULT_ALERT:
         ch1 = stats.get('change', {}).get('1h', 0)
@@ -248,6 +257,15 @@ def score_token(stats: Dict[str, Any], smart_money_detected: bool = False, token
     elif volume_24h > VOL_MED:  # Moderate activity
         score += 1
         scoring_details.append(f"Volume: +1 (${volume_24h:,.0f} - moderate activity)")
+    # Volume-to-MCap ratio gate (optional)
+    if VOL_TO_MCAP_RATIO_MIN:
+        try:
+            ratio = (volume_24h or 0) / (market_cap or 1)
+        except Exception:
+            ratio = 0
+        if ratio < VOL_TO_MCAP_RATIO_MIN:
+            scoring_details.append(f"Filtered: vol/mcap {ratio:.2f} < {VOL_TO_MCAP_RATIO_MIN}")
+            return 0, scoring_details
     
     # Unique trader analysis (indicates community engagement)
     unique_buyers_24h = stats.get('volume', {}).get('24h', {}).get('unique_buyers', 0)
@@ -266,7 +284,7 @@ def score_token(stats: Dict[str, Any], smart_money_detected: bool = False, token
     change_24h = stats.get('change', {}).get('24h', 0)
     
     # Reward recent positive momentum
-    if change_1h > MOMENTUM_1H_STRONG:  # Strong 1h pump
+    if change_1h > max(MOMENTUM_1H_STRONG, MOMENTUM_1H_PUMPER):  # Strong pump threshold
         score += 2
         scoring_details.append(f"Momentum: +2 ({change_1h:.1f}% - strong pump)")
     elif change_1h > 0:  # Positive 1h

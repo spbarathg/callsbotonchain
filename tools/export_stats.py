@@ -29,7 +29,10 @@ def export_db_summary(db_path: str, out_csv: str) -> None:
       s.peak_market_cap_usd,
       s.peak_volume_24h_usd,
       s.peak_price_at,
-      s.peak_market_cap_at
+      s.peak_market_cap_at,
+      s.outcome,
+      s.outcome_at,
+      s.peak_drawdown_pct
     FROM alerted_token_stats s
     JOIN alerted_tokens t ON t.token_address = s.token_address
     ORDER BY s.first_alert_at ASC
@@ -56,6 +59,9 @@ def export_db_summary(db_path: str, out_csv: str) -> None:
         "peak_volume_24h_usd",
         "peak_price_at",
         "peak_market_cap_at",
+        "outcome",
+        "outcome_at",
+        "peak_drawdown_pct",
         "peak_x_price",
         "peak_x_mcap",
         "time_to_peak_price_s",
@@ -85,6 +91,9 @@ def export_db_summary(db_path: str, out_csv: str) -> None:
                 peak_vol24,
                 peak_price_at,
                 peak_mcap_at,
+                outcome,
+                outcome_at,
+                peak_drawdown_pct,
             ) = r
             peak_x_price = (peak_price / first_price) if (first_price or 0) else None
             peak_x_mcap = (peak_mcap / first_mcap) if (first_mcap or 0) else None
@@ -126,6 +135,9 @@ def export_db_summary(db_path: str, out_csv: str) -> None:
                 peak_vol24,
                 peak_price_at,
                 peak_mcap_at,
+                outcome,
+                outcome_at,
+                peak_drawdown_pct,
                 peak_x_price,
                 peak_x_mcap,
                 ttp_s,

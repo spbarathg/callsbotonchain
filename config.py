@@ -58,6 +58,12 @@ def _get_int(name: str, default: int) -> int:
     except ValueError:
         return default
 
+def _get_float(name: str, default: float) -> float:
+    try:
+        return float(os.getenv(name, str(default)))
+    except ValueError:
+        return default
+
 # Preliminary USD thresholds
 PRELIM_USD_HIGH = _get_int("PRELIM_USD_HIGH", 2000)
 PRELIM_USD_MID = _get_int("PRELIM_USD_MID", 750)
@@ -139,6 +145,12 @@ MIN_LIQUIDITY_USD = _get_int("MIN_LIQUIDITY_USD", 3000)
 # Minimum 24h volume required (USD)
 VOL_24H_MIN_FOR_ALERT = _get_int("VOL_24H_MIN_FOR_ALERT", 15000)
 
+# Require smart-money cycle for final alert
+REQUIRE_SMART_MONEY_FOR_ALERT = os.getenv("REQUIRE_SMART_MONEY_FOR_ALERT", "false").lower() == "true"
+
+# Require minimum velocity score for final alert (0 disables)
+REQUIRE_VELOCITY_MIN_SCORE_FOR_ALERT = _get_int("REQUIRE_VELOCITY_MIN_SCORE_FOR_ALERT", 5)
+
 # Security requirements (only enforce when security data is available)
 REQUIRE_MINT_REVOKED = os.getenv("REQUIRE_MINT_REVOKED", "true").lower() == "true"
 REQUIRE_LP_LOCKED = os.getenv("REQUIRE_LP_LOCKED", "true").lower() == "true"
@@ -148,3 +160,23 @@ ALLOW_UNKNOWN_SECURITY = os.getenv("ALLOW_UNKNOWN_SECURITY", "true").lower() == 
 
 # Maximum acceptable top-10 holders concentration (%). Above this → drop
 MAX_TOP10_CONCENTRATION = _get_int("MAX_TOP10_CONCENTRATION", 45)
+
+# Volume-to-MCap ratio minimum gate (e.g., 0.5 means 24h vol >= 50% of mcap)
+VOL_TO_MCAP_RATIO_MIN = _get_float("VOL_TO_MCAP_RATIO_MIN", 0.0)  # 0 disables
+
+# Momentum gate for tight mode (require at least this 1h change for alert)
+REQUIRE_MOMENTUM_1H_MIN_FOR_ALERT = _get_int("REQUIRE_MOMENTUM_1H_MIN_FOR_ALERT", 0)
+
+# Super-high volume threshold to allow momentum leniency in loose mode
+VOL_SUPER_HIGH = _get_int("VOL_SUPER_HIGH", 100_000)
+
+# Microcap sweet band bonus
+MICROCAP_SWEET_MIN = _get_int("MICROCAP_SWEET_MIN", 10_000)
+MICROCAP_SWEET_MAX = _get_int("MICROCAP_SWEET_MAX", 50_000)
+
+# Extra kicker threshold for strong pumpers
+MOMENTUM_1H_PUMPER = _get_int("MOMENTUM_1H_PUMPER", 20)
+
+# Rug/outcome heuristics
+RUG_DRAWDOWN_PCT = _get_float("RUG_DRAWDOWN_PCT", 90.0)  # price drop from peak (%) to call a rug
+RUG_MIN_LIQUIDITY_USD = _get_int("RUG_MIN_LIQUIDITY_USD", 1)  # <= this treated as vanished LP

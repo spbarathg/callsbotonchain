@@ -3,16 +3,16 @@ import time
 import signal
 import sys
 from datetime import datetime
-from fetch_feed import fetch_solana_feed
-from analyze_token import get_token_stats, score_token, calculate_preliminary_score
-from notify import send_telegram_alert
-from storage import (init_db, has_been_alerted, mark_as_alerted, 
+from app.fetch_feed import fetch_solana_feed
+from app.analyze_token import get_token_stats, score_token, calculate_preliminary_score
+from app.notify import send_telegram_alert
+from app.storage import (init_db, has_been_alerted, mark_as_alerted, 
                     record_token_activity, get_token_velocity, should_fetch_detailed_stats,
                     ensure_indices, prune_old_activity, get_alerted_tokens_batch, update_token_tracking,
                     get_tracking_snapshot)
-from config import HIGH_CONFIDENCE_SCORE, FETCH_INTERVAL, DEBUG_PRELIM, TELEGRAM_ALERT_MIN_INTERVAL, TRACK_INTERVAL_MIN, TRACK_BATCH_SIZE
-from relay import relay_contract_address_sync, relay_enabled
-from logger_utils import log_alert, log_tracking
+from config import HIGH_CONFIDENCE_SCORE, FETCH_INTERVAL, DEBUG_PRELIM, TELEGRAM_ALERT_MIN_INTERVAL, TRACK_INTERVAL_MIN, TRACK_BATCH_SIZE, REQUIRE_SMART_MONEY_FOR_ALERT, REQUIRE_VELOCITY_MIN_SCORE_FOR_ALERT
+from tools.relay import relay_contract_address_sync, relay_enabled
+from app.logger_utils import log_alert, log_tracking
 import html
 
 # Global flag for graceful shutdown
@@ -178,6 +178,13 @@ def run_bot():
                     
                     print(f"📈 Token {token_address} FINAL: {score}/10 (prelim: {preliminary_score}, velocity: +{velocity_bonus//2})")
                     
+                    # Optional post-score meta gates (smart-money/velocity)
+                    if REQUIRE_SMART_MONEY_FOR_ALERT and not is_smart_cycle:
+                        continue
+                    if REQUIRE_VELOCITY_MIN_SCORE_FOR_ALERT:
+                        if (velocity_bonus // 2) < (REQUIRE_VELOCITY_MIN_SCORE_FOR_ALERT // 2):
+                            continue
+
                     if score >= HIGH_CONFIDENCE_SCORE:
                         # Enhanced alert with smart money indicators
                         alert_type = "HIGH-CONFIDENCE"
@@ -290,6 +297,16 @@ def run_bot():
                             alert_count += 1
                             print(f"✅ Alert #{alert_count} sent for token {token_address} (Final: {score}/10, Prelim: {preliminary_score}/10)")
                             try:
+                                # Velocity snapshot at alert time
+                                vel_snap = get_token_velocity(token_address, minutes_back=15) or {}
+                                # Lightweight score components snapshot (derived from details where possible)
+                                score_components = {
+                                    "smart_money": 3 if is_smart_cycle else 0,
+                                    "market_cap": None,
+                                    "volume": None,
+                                    "momentum": None,
+                                    "security_penalties": None,
+                                }
                                 log_alert({
                                     "token": token_address,
                                     "name": name,
@@ -297,6 +314,8 @@ def run_bot():
                                     "final_score": score,
                                     "prelim_score": preliminary_score,
                                     "velocity_bonus": int(velocity_bonus//2),
+                                    "velocity_score_15m": vel_snap.get('velocity_score'),
+                                    "unique_traders_15m": vel_snap.get('unique_traders'),
                                     "volume_24h": volume_24h,
                                     "market_cap": market_cap,
                                     "price": float(price),
@@ -304,6 +323,7 @@ def run_bot():
                                     "change_24h": change_24h,
                                     "liquidity": liquidity,
                                     "badges": badges,
+                                    "score_components": score_components,
                                     "data_source": (stats.get("_source") or "unknown"),
                                     "smart_cycle": bool(is_smart_cycle),
                                 })

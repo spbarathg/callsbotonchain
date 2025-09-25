@@ -123,6 +123,12 @@ def init_db():
             add_cols.append("ADD COLUMN peak_price_at TIMESTAMP")
         if 'peak_market_cap_at' not in col_names:
             add_cols.append("ADD COLUMN peak_market_cap_at TIMESTAMP")
+        if 'outcome' not in col_names:
+            add_cols.append("ADD COLUMN outcome TEXT")
+        if 'outcome_at' not in col_names:
+            add_cols.append("ADD COLUMN outcome_at TIMESTAMP")
+        if 'peak_drawdown_pct' not in col_names:
+            add_cols.append("ADD COLUMN peak_drawdown_pct REAL")
         for stmt in add_cols:
             c.execute(f"ALTER TABLE alerted_token_stats {stmt}")
     except Exception:
@@ -285,6 +291,36 @@ def update_token_tracking(token_address: str, price_usd: float, market_cap_usd: 
             token_address,
         ),
     )
+    # Rug/outcome heuristic
+    try:
+        row = c.execute(
+            """
+            SELECT first_price_usd, peak_price_usd, last_price_usd, last_liquidity_usd, outcome
+            FROM alerted_token_stats WHERE token_address = ?
+            """,
+            (token_address,),
+        ).fetchone()
+        if row:
+            first_p, peak_p, last_p, last_liq, outcome = row
+            peak_p = peak_p or 0
+            last_p = last_p or 0
+            drawdown_pct = None
+            if peak_p > 0 and last_p >= 0:
+                drawdown_pct = (1 - (last_p / peak_p)) * 100
+            from config import RUG_DRAWDOWN_PCT, RUG_MIN_LIQUIDITY_USD
+            is_lp_gone = (last_liq or 0) <= RUG_MIN_LIQUIDITY_USD
+            is_hard_drawdown = (drawdown_pct is not None) and (drawdown_pct >= RUG_DRAWDOWN_PCT)
+            if outcome is None and (is_lp_gone or is_hard_drawdown):
+                c.execute(
+                    """
+                    UPDATE alerted_token_stats
+                    SET outcome = 'rug', outcome_at = CURRENT_TIMESTAMP, peak_drawdown_pct = ?
+                    WHERE token_address = ?
+                    """,
+                    (drawdown_pct, token_address),
+                )
+    except Exception:
+        pass
     conn.commit()
     conn.close()
 
@@ -297,7 +333,8 @@ def get_tracking_snapshot(token_address: str) -> Optional[Dict[str, Any]]:
         """
         SELECT token_address, first_alert_at, first_price_usd, first_market_cap_usd,
                last_price_usd, last_market_cap_usd,
-               peak_price_usd, peak_market_cap_usd, peak_price_at, peak_market_cap_at
+               peak_price_usd, peak_market_cap_usd, peak_price_at, peak_market_cap_at,
+               outcome, peak_drawdown_pct
         FROM alerted_token_stats WHERE token_address = ?
         """,
         (token_address,),
@@ -310,6 +347,7 @@ def get_tracking_snapshot(token_address: str) -> Optional[Dict[str, Any]]:
         tok, first_alert_at, first_price, first_mcap,
         last_price, last_mcap,
         peak_price, peak_mcap, peak_price_at, peak_mcap_at,
+        outcome, peak_drawdown_pct,
     ) = row
 
     def _parse(ts: Optional[str]) -> Optional[datetime]:
@@ -348,6 +386,8 @@ def get_tracking_snapshot(token_address: str) -> Optional[Dict[str, Any]]:
         'time_to_peak_mcap_s': ttm_s,
         'peak_x_price': peak_x_price,
         'peak_x_mcap': peak_x_mcap,
+        'outcome': outcome,
+        'peak_drawdown_pct': peak_drawdown_pct,
     }
 
 
