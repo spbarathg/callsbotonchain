@@ -22,7 +22,10 @@ def relay_enabled() -> bool:
 
 def _get_env(name: str) -> Optional[str]:
     v = os.getenv(name)
-    return v if v is not None and v != "" else None
+    if v is None:
+        return None
+    v = v.strip()
+    return v if v != "" else None
 
 
 async def _ensure_client() -> Optional[TelegramClient]:
@@ -47,7 +50,14 @@ async def _ensure_client() -> Optional[TelegramClient]:
         print("Relay disabled: TELEGRAM_API_ID must be integer")
         return None
 
-    session_name = os.getenv("TELETHON_SESSION_NAME", "relay_user")
+    session_name = _get_env("TELETHON_SESSION_NAME") or "relay_user"
+    # Ensure session directory exists if a path is provided
+    try:
+        session_dir = os.path.dirname(session_name)
+        if session_dir:
+            os.makedirs(session_dir, exist_ok=True)
+    except Exception:
+        pass
     _client = TelegramClient(session_name, api_id_int, api_hash)
     await _client.connect()
     if not await _client.is_user_authorized():
