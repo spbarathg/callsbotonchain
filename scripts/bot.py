@@ -1,5 +1,6 @@
 # bot.py
 import time
+import atexit
 import signal
 import sys
 import os
@@ -39,6 +40,86 @@ import html
 # Global flag for graceful shutdown
 shutdown_flag = False
 
+# Global lock handle to keep singleton lock alive for process lifetime
+_singleton_lock_file = None
+
+def _release_singleton_lock(lock_path: str) -> None:
+    global _singleton_lock_file
+    try:
+        if _singleton_lock_file is not None:
+            try:
+                # On Windows, unlocking is implicit on close; on Unix, flock releases on close
+                _singleton_lock_file.close()
+            except Exception:
+                pass
+            _singleton_lock_file = None
+        # Best-effort cleanup of the lock file itself
+        try:
+            if os.path.exists(lock_path):
+                os.remove(lock_path)
+        except Exception:
+            pass
+    except Exception:
+        pass
+
+def acquire_singleton_lock() -> bool:
+    """
+    Enforce a single running instance via a cross-platform advisory file lock.
+    Returns True if lock acquired; False if another instance holds the lock.
+    """
+    global _singleton_lock_file
+    lock_path = os.path.join(PROJECT_ROOT, "var", "bot.lock")
+    os.makedirs(os.path.dirname(lock_path), exist_ok=True)
+
+    # Open or create the lock file in binary mode
+    f = open(lock_path, "a+b")
+
+    # Ensure at least 1 byte exists for Windows region locking
+    try:
+        f.seek(0, os.SEEK_END)
+        if f.tell() == 0:
+            f.write(b"\0")
+            f.flush()
+    except Exception:
+        pass
+
+    try:
+        try:
+            # Prefer POSIX flock when available
+            import fcntl  # type: ignore
+            try:
+                fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                f.close()
+                return False
+        except ImportError:
+            # Windows: use msvcrt locking on the first byte
+            import msvcrt  # type: ignore
+            try:
+                f.seek(0)
+                msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+            except OSError:
+                f.close()
+                return False
+        # Write PID for debugging purposes
+        try:
+            f.seek(0)
+            pid_bytes = str(os.getpid()).encode("utf-8")
+            f.write(pid_bytes[:64].ljust(64, b" "))
+            f.flush()
+        except Exception:
+            pass
+        _singleton_lock_file = f
+        # Register cleanup
+        atexit.register(_release_singleton_lock, lock_path)
+        return True
+    except Exception:
+        try:
+            f.close()
+        except Exception:
+            pass
+        return False
+
 def signal_handler(sig, frame):
     global shutdown_flag
     print("\n🛑 Shutdown signal received. Gracefully stopping bot...")
@@ -51,6 +132,11 @@ def run_bot():
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
     
+    # Enforce single-instance execution
+    if not acquire_singleton_lock():
+        print("🚫 Another bot instance is already running. Exiting.")
+        return
+
     try:
         init_db()  # ensure database is initialized
         ensure_indices()
@@ -72,6 +158,7 @@ def run_bot():
     print(f"📊 Configuration: Score threshold = {HIGH_CONFIDENCE_SCORE}, Fetch interval = {FETCH_INTERVAL}s")
     print("🎯 Features: Smart Money Detection + Enhanced Scoring + Detailed Analysis")
     print("✅ Smart-money cycle enabled (top_wallets=true, min_wallet_pnl=1000)")
+    print("🛡️ Adaptive cooldown on Cielo rate limits is enabled")
     
     # Send startup notification
     startup_message = (
@@ -94,6 +181,24 @@ def run_bot():
             else:
                 feed = fetch_solana_feed(cursor_general, smart_money_only=False)
                 cursor_general = feed.get("next_cursor")
+
+            # Handle adaptive cooldown on rate limit / quota exhaust
+            feed_error = feed.get("error")
+            if feed_error in ("rate_limited", "quota_exceeded"):
+                retry_after_sec = int(feed.get("retry_after_sec") or 0)
+                if feed_error == "quota_exceeded" and retry_after_sec <= 0:
+                    # Fall back to a conservative cooldown window when quota fully exhausted
+                    retry_after_sec = max(300, FETCH_INTERVAL)  # at least 5 minutes
+                elif retry_after_sec <= 0:
+                    retry_after_sec = max(60, FETCH_INTERVAL)
+                print(f"⏳ Cielo {('quota' if feed_error=='quota_exceeded' else 'rate limit')} hit. Cooling down for {retry_after_sec}s…")
+                for _ in range(retry_after_sec):
+                    if shutdown_flag:
+                        break
+                    time.sleep(1)
+                # Do not process this cycle; flip cycle to avoid hammering the same endpoint
+                is_smart_cycle = not is_smart_cycle
+                continue
 
             # Log the number of items returned this cycle for visibility
             items_count = len(feed.get("transactions", []))
