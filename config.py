@@ -34,6 +34,16 @@ try:
         CIELO_LIST_ID = int(_list_id_raw)
     else:
         CIELO_LIST_ID = None
+    # Optional: support multiple list ids via comma-separated env
+    _list_ids_raw = os.getenv("CIELO_LIST_IDS", "")
+    CIELO_LIST_IDS = []
+    if _list_ids_raw:
+        parts = [p.strip() for p in _list_ids_raw.split(",") if p.strip()]
+        for p in parts:
+            try:
+                CIELO_LIST_IDS.append(int(p))
+            except ValueError:
+                continue
     CIELO_NEW_TRADE_ONLY = os.getenv("CIELO_NEW_TRADE_ONLY", "false").lower() == "true"
     DEBUG_PRELIM = os.getenv("DEBUG_PRELIM", "false").lower() == "true"
 except ValueError as e:

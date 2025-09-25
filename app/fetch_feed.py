@@ -4,6 +4,10 @@ import time
 from datetime import datetime, timezone
 from typing import Optional
 from config import CIELO_API_KEY, MIN_USD_VALUE, CIELO_LIST_ID, CIELO_NEW_TRADE_ONLY
+try:
+    from config import CIELO_LIST_IDS  # optional multi-list support
+except Exception:
+    CIELO_LIST_IDS = []
 
 def _parse_retry_after_seconds(resp: requests.Response) -> Optional[int]:
     """
@@ -52,7 +56,10 @@ def fetch_solana_feed(cursor=None, smart_money_only=False):
     # Only include minimum_usd_value if configured > 0
     if MIN_USD_VALUE and MIN_USD_VALUE > 0:
         params["minimum_usd_value"] = MIN_USD_VALUE
-    if CIELO_LIST_ID is not None:
+    # Multi-list support: if CIELO_LIST_IDS present, prefer it; else fallback to single CIELO_LIST_ID
+    if CIELO_LIST_IDS:
+        params["list_id"] = ",".join(str(x) for x in CIELO_LIST_IDS)
+    elif CIELO_LIST_ID is not None:
         params["list_id"] = CIELO_LIST_ID
     if CIELO_NEW_TRADE_ONLY:
         params["new_trade"] = "true"
