@@ -2,7 +2,22 @@
 import time
 import signal
 import sys
+import os
 from datetime import datetime
+
+# Ensure project root is importable when running this script directly
+CURRENT_DIR = os.path.dirname(__file__)
+PROJECT_ROOT = os.path.abspath(os.path.join(CURRENT_DIR, os.pardir))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
+# Ensure stdout/stderr can print emojis on Windows terminals
+try:
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+except Exception:
+    pass
+
 from app.fetch_feed import fetch_solana_feed
 from app.analyze_token import get_token_stats, score_token, calculate_preliminary_score
 from app.notify import send_telegram_alert
@@ -11,7 +26,13 @@ from app.storage import (init_db, has_been_alerted, mark_as_alerted,
                     ensure_indices, prune_old_activity, get_alerted_tokens_batch, update_token_tracking,
                     get_tracking_snapshot)
 from config import HIGH_CONFIDENCE_SCORE, FETCH_INTERVAL, DEBUG_PRELIM, TELEGRAM_ALERT_MIN_INTERVAL, TRACK_INTERVAL_MIN, TRACK_BATCH_SIZE, REQUIRE_SMART_MONEY_FOR_ALERT, REQUIRE_VELOCITY_MIN_SCORE_FOR_ALERT
-from tools.relay import relay_contract_address_sync, relay_enabled
+try:
+    from tools.relay import relay_contract_address_sync, relay_enabled
+except Exception:
+    def relay_enabled() -> bool:
+        return False
+    def relay_contract_address_sync(*_args, **_kwargs) -> bool:
+        return False
 from app.logger_utils import log_alert, log_tracking
 import html
 

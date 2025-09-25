@@ -94,7 +94,7 @@ VELOCITY_REQUIRED = _get_int("VELOCITY_REQUIRED", 5)
 # ==============================================
 # STORAGE SETTINGS
 # ==============================================
-DB_FILE = os.getenv("CALLSBOT_DB_FILE", "alerted_tokens.db")
+DB_FILE = os.getenv("CALLSBOT_DB_FILE", os.path.join(os.path.dirname(__file__), "var", "alerted_tokens.db"))
 DB_RETENTION_HOURS = _get_int("DB_RETENTION_HOURS", 72)
 
 # ==============================================
