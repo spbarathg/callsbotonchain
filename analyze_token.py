@@ -17,6 +17,16 @@ from config import (
     MOMENTUM_1H_STRONG,
     DRAW_24H_MAJOR,
     TOP10_CONCERN,
+    STABLE_MINTS,
+    BLOCKLIST_SYMBOLS,
+    MAX_MARKET_CAP_FOR_DEFAULT_ALERT,
+    LARGE_CAP_MOMENTUM_GATE_1H,
+    MIN_LIQUIDITY_USD,
+    VOL_24H_MIN_FOR_ALERT,
+    REQUIRE_MINT_REVOKED,
+    REQUIRE_LP_LOCKED,
+    ALLOW_UNKNOWN_SECURITY,
+    MAX_TOP10_CONCENTRATION,
 )
 
 def _dexscreener_best_pair(pairs: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
@@ -183,12 +193,26 @@ def calculate_preliminary_score(tx_data: Dict[str, Any], smart_money_detected: b
     
     return min(score, 10)
 
-def score_token(stats: Dict[str, Any], smart_money_detected: bool = False) -> Tuple[int, List[str]]:
+def score_token(stats: Dict[str, Any], smart_money_detected: bool = False, token_address: Optional[str] = None) -> Tuple[int, List[str]]:
     if not stats:
         return 0
         
     score = 0
     scoring_details = []
+
+    # Hard filters: stables/majors (by mint or symbol); allow if strong momentum or smart money
+    sym = (stats.get('symbol') or '').upper()
+    if token_address and token_address in STABLE_MINTS:
+        # Only allow if smart money and strong 1h momentum
+        ch1 = stats.get('change', {}).get('1h', 0)
+        if not (smart_money_detected and ch1 and ch1 >= LARGE_CAP_MOMENTUM_GATE_1H):
+            scoring_details.append("Filtered: stable/major mint")
+            return 0, scoring_details
+    if sym in BLOCKLIST_SYMBOLS:
+        ch1 = stats.get('change', {}).get('1h', 0)
+        if not (smart_money_detected and ch1 and ch1 >= LARGE_CAP_MOMENTUM_GATE_1H):
+            scoring_details.append("Filtered: blocklisted symbol")
+            return 0, scoring_details
     
     # SMART MONEY BONUS (highest priority)
     if smart_money_detected:
@@ -206,6 +230,12 @@ def score_token(stats: Dict[str, Any], smart_money_detected: bool = False) -> Tu
     elif market_cap < MCAP_MID_MAX:  # Mid cap
         score += 1
         scoring_details.append(f"Market Cap: +1 (${market_cap:,.0f} - growing)")
+    # Gate very large caps unless strong momentum or smart money
+    if market_cap and market_cap > MAX_MARKET_CAP_FOR_DEFAULT_ALERT:
+        ch1 = stats.get('change', {}).get('1h', 0)
+        if not (smart_money_detected and ch1 and ch1 >= LARGE_CAP_MOMENTUM_GATE_1H):
+            scoring_details.append(f"Filtered: large cap ${market_cap:,.0f} without strong momentum")
+            return 0, scoring_details
     
     # Volume analysis (24h volume indicates activity)
     volume_24h = stats.get('volume', {}).get('24h', {}).get('volume_usd', 0)
@@ -248,7 +278,7 @@ def score_token(stats: Dict[str, Any], smart_money_detected: bool = False) -> Tu
         score -= 1
         scoring_details.append(f"Risk: -1 ({change_24h:.1f}% - major dump risk)")
 
-    # --- Cielo Safety Penalties / Disqualifiers ---
+    # --- Safety checks / Disqualifiers ---
     security = stats.get('security', {}) or {}
     liquidity = stats.get('liquidity', {}) or {}
     holders = stats.get('holders', {}) or {}
@@ -258,20 +288,37 @@ def score_token(stats: Dict[str, Any], smart_money_detected: bool = False) -> Tu
         scoring_details.append("Disqualified: honeypot")
         return 0, scoring_details
 
-    # Mint not revoked → -3
-    if security.get('is_mint_revoked') is False:
-        score -= 3
-        scoring_details.append("Security: -3 (mint not revoked)")
+    # Strict gates: mint revoked required unless unknown and allowed
+    mint_revoked = security.get('is_mint_revoked')
+    if REQUIRE_MINT_REVOKED:
+        if mint_revoked is False:
+            scoring_details.append("Filtered: mint not revoked")
+            return 0, scoring_details
+        if mint_revoked is None and not ALLOW_UNKNOWN_SECURITY:
+            scoring_details.append("Filtered: mint revoke unknown")
+            return 0, scoring_details
+    else:
+        if mint_revoked is False:
+            score -= 3
+            scoring_details.append("Security: -3 (mint not revoked)")
 
-    # LP not locked/burned → -2 (try multiple field names in case)
+    # LP locked/burned gate
     lp_locked = (
         liquidity.get('is_lp_locked')
         or liquidity.get('lock_status') in ("locked", "burned")
         or liquidity.get('is_lp_burned')
     )
-    if lp_locked is False:
-        score -= 2
-        scoring_details.append("Liquidity: -2 (LP not locked/burned)")
+    if REQUIRE_LP_LOCKED:
+        if lp_locked is False:
+            scoring_details.append("Filtered: LP not locked/burned")
+            return 0, scoring_details
+        if lp_locked is None and not ALLOW_UNKNOWN_SECURITY:
+            scoring_details.append("Filtered: LP lock unknown")
+            return 0, scoring_details
+    else:
+        if lp_locked is False:
+            score -= 2
+            scoring_details.append("Liquidity: -2 (LP not locked/burned)")
 
     # Top 10 holders concentration high → -1
     top10 = holders.get('top_10_concentration_percent') or holders.get('top10_percent') or 0
@@ -279,9 +326,21 @@ def score_token(stats: Dict[str, Any], smart_money_detected: bool = False) -> Tu
         top10 = float(top10)
     except Exception:
         top10 = 0
-    if top10 > TOP10_CONCERN:
+    if MAX_TOP10_CONCENTRATION and top10 and top10 > MAX_TOP10_CONCENTRATION:
+        scoring_details.append(f"Filtered: Top10 {top10:.1f}% > {MAX_TOP10_CONCENTRATION}%")
+        return 0, scoring_details
+    elif top10 > TOP10_CONCERN:
         score -= 1
         scoring_details.append(f"Holders: -1 (Top10 {top10:.1f}% > {TOP10_CONCERN}%)")
+
+    # Liquidity and minimum volume gates (DexScreener provides liquidity_usd sometimes)
+    liq_usd = stats.get('liquidity_usd') or liquidity.get('usd') or 0
+    if MIN_LIQUIDITY_USD and (liq_usd or 0) < MIN_LIQUIDITY_USD:
+        scoring_details.append(f"Filtered: liquidity ${liq_usd:,.0f} < ${MIN_LIQUIDITY_USD}")
+        return 0, scoring_details
+    if VOL_24H_MIN_FOR_ALERT and (volume_24h or 0) < VOL_24H_MIN_FOR_ALERT:
+        scoring_details.append(f"Filtered: vol24 ${volume_24h:,.0f} < ${VOL_24H_MIN_FOR_ALERT}")
+        return 0, scoring_details
     
     final_score = max(0, min(score, 10))
     return final_score, scoring_details

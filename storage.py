@@ -44,6 +44,8 @@ def init_db():
             last_volume_24h_usd REAL,
             peak_price_usd REAL,
             peak_market_cap_usd REAL,
+            peak_price_at TIMESTAMP,
+            peak_market_cap_at TIMESTAMP,
             peak_volume_24h_usd REAL
         )
     """)
@@ -117,6 +119,10 @@ def init_db():
             add_cols.append("ADD COLUMN peak_market_cap_usd REAL")
         if 'peak_volume_24h_usd' not in col_names:
             add_cols.append("ADD COLUMN peak_volume_24h_usd REAL")
+        if 'peak_price_at' not in col_names:
+            add_cols.append("ADD COLUMN peak_price_at TIMESTAMP")
+        if 'peak_market_cap_at' not in col_names:
+            add_cols.append("ADD COLUMN peak_market_cap_at TIMESTAMP")
         for stmt in add_cols:
             c.execute(f"ALTER TABLE alerted_token_stats {stmt}")
     except Exception:
@@ -149,8 +155,9 @@ def mark_as_alerted(token_address: str, score: int = 0, smart_money_detected: bo
         INSERT OR IGNORE INTO alerted_token_stats (
             token_address, last_checked_at, first_price_usd, first_market_cap_usd, first_liquidity_usd,
             last_price_usd, last_market_cap_usd, last_liquidity_usd, last_volume_24h_usd,
-            peak_price_usd, peak_market_cap_usd, peak_volume_24h_usd
-        ) VALUES (?, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            peak_price_usd, peak_market_cap_usd, peak_volume_24h_usd,
+            peak_price_at, peak_market_cap_at
+        ) VALUES (?, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
         """,
         (
             token_address,
@@ -259,7 +266,9 @@ def update_token_tracking(token_address: str, price_usd: float, market_cap_usd: 
             last_liquidity_usd = COALESCE(?, last_liquidity_usd),
             last_volume_24h_usd = COALESCE(?, last_volume_24h_usd),
             peak_price_usd = CASE WHEN peak_price_usd IS NULL OR ? > peak_price_usd THEN ? ELSE peak_price_usd END,
+            peak_price_at  = CASE WHEN peak_price_usd IS NULL OR ? > peak_price_usd THEN CURRENT_TIMESTAMP ELSE peak_price_at END,
             peak_market_cap_usd = CASE WHEN peak_market_cap_usd IS NULL OR COALESCE(?,0) > COALESCE(peak_market_cap_usd,0) THEN COALESCE(?, peak_market_cap_usd) ELSE peak_market_cap_usd END,
+            peak_market_cap_at  = CASE WHEN peak_market_cap_usd IS NULL OR COALESCE(?,0) > COALESCE(peak_market_cap_usd,0) THEN CURRENT_TIMESTAMP ELSE peak_market_cap_at END,
             peak_volume_24h_usd = CASE WHEN peak_volume_24h_usd IS NULL OR COALESCE(?,0) > COALESCE(peak_volume_24h_usd,0) THEN COALESCE(?, peak_volume_24h_usd) ELSE peak_volume_24h_usd END
         WHERE token_address = ?
         """,
@@ -269,13 +278,77 @@ def update_token_tracking(token_address: str, price_usd: float, market_cap_usd: 
             liquidity_usd,
             volume_24h_usd,
             price_usd, price_usd,
+            price_usd,
             market_cap_usd, market_cap_usd,
+            market_cap_usd,
             volume_24h_usd, volume_24h_usd,
             token_address,
         ),
     )
     conn.commit()
     conn.close()
+
+
+def get_tracking_snapshot(token_address: str) -> Optional[Dict[str, Any]]:
+    """Return current tracking snapshot with computed peak multiples and time-to-peak seconds."""
+    conn = _get_conn()
+    c = conn.cursor()
+    c.execute(
+        """
+        SELECT token_address, first_alert_at, first_price_usd, first_market_cap_usd,
+               last_price_usd, last_market_cap_usd,
+               peak_price_usd, peak_market_cap_usd, peak_price_at, peak_market_cap_at
+        FROM alerted_token_stats WHERE token_address = ?
+        """,
+        (token_address,),
+    )
+    row = c.fetchone()
+    conn.close()
+    if not row:
+        return None
+    (
+        tok, first_alert_at, first_price, first_mcap,
+        last_price, last_mcap,
+        peak_price, peak_mcap, peak_price_at, peak_mcap_at,
+    ) = row
+
+    def _parse(ts: Optional[str]) -> Optional[datetime]:
+        if not ts:
+            return None
+        try:
+            # SQLite CURRENT_TIMESTAMP is 'YYYY-MM-DD HH:MM:SS'
+            return datetime.strptime(ts, '%Y-%m-%d %H:%M:%S')
+        except Exception:
+            try:
+                return datetime.fromisoformat(ts)
+            except Exception:
+                return None
+
+    t0 = _parse(first_alert_at)
+    tp = _parse(peak_price_at)
+    tm = _parse(peak_mcap_at)
+    ttp_s = int((tp - t0).total_seconds()) if t0 and tp else None
+    ttm_s = int((tm - t0).total_seconds()) if t0 and tm else None
+
+    peak_x_price = (peak_price / first_price) if (first_price or 0) else None
+    peak_x_mcap = (peak_mcap / first_mcap) if (first_mcap or 0) else None
+
+    return {
+        'token': tok,
+        'first_alert_at': first_alert_at,
+        'first_price': first_price or 0,
+        'first_mcap': first_mcap or 0,
+        'last_price': last_price or 0,
+        'last_mcap': last_mcap or 0,
+        'peak_price': peak_price or 0,
+        'peak_mcap': peak_mcap or 0,
+        'peak_price_at': peak_price_at,
+        'peak_mcap_at': peak_mcap_at,
+        'time_to_peak_price_s': ttp_s,
+        'time_to_peak_mcap_s': ttm_s,
+        'peak_x_price': peak_x_price,
+        'peak_x_mcap': peak_x_mcap,
+    }
 
 
 def prune_old_activity(hours: int = DB_RETENTION_HOURS) -> int:

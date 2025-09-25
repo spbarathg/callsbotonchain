@@ -104,3 +104,47 @@ TELEGRAM_ALERT_MIN_INTERVAL = _get_int("TELEGRAM_ALERT_MIN_INTERVAL", 0)  # seco
 # ==============================================
 TRACK_INTERVAL_MIN = _get_int("TRACK_INTERVAL_MIN", 60)
 TRACK_BATCH_SIZE = _get_int("TRACK_BATCH_SIZE", 25)
+
+# ==============================================
+# TOKEN FILTERS / GATES
+# ==============================================
+# Comma-separated lists; defaults cover common Solana majors/stables
+_stable_mints_env = os.getenv(
+    "STABLE_MINTS",
+    ",".join([
+        # USDC, USDT, wSOL (Solana)
+        "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",  # USDC
+        "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",  # USDT
+        "So11111111111111111111111111111111111111112",  # wSOL
+    ])
+)
+STABLE_MINTS = [m.strip() for m in _stable_mints_env.split(",") if m.strip()]
+
+_block_syms_env = os.getenv(
+    "BLOCKLIST_SYMBOLS",
+    ",".join(["USDC","USDT","SOL","WSOL","WBTC","BTC","ETH","WETH"])
+)
+BLOCKLIST_SYMBOLS = [s.strip().upper() for s in _block_syms_env.split(",") if s.strip()]
+
+# Cap gating: prefer microcaps; gate very large caps unless high momentum or smart-money
+MAX_MARKET_CAP_FOR_DEFAULT_ALERT = _get_int("MAX_MARKET_CAP_FOR_DEFAULT_ALERT", 50_000_000)
+LARGE_CAP_MOMENTUM_GATE_1H = _get_int("LARGE_CAP_MOMENTUM_GATE_1H", 15)
+
+# ==============================================
+# RISK GATES (STRICT MODE)
+# ==============================================
+# Minimum on-chain liquidity required to alert (USD)
+MIN_LIQUIDITY_USD = _get_int("MIN_LIQUIDITY_USD", 3000)
+
+# Minimum 24h volume required (USD)
+VOL_24H_MIN_FOR_ALERT = _get_int("VOL_24H_MIN_FOR_ALERT", 15000)
+
+# Security requirements (only enforce when security data is available)
+REQUIRE_MINT_REVOKED = os.getenv("REQUIRE_MINT_REVOKED", "true").lower() == "true"
+REQUIRE_LP_LOCKED = os.getenv("REQUIRE_LP_LOCKED", "true").lower() == "true"
+
+# If security fields are unknown (e.g., DexScreener fallback), should we allow?
+ALLOW_UNKNOWN_SECURITY = os.getenv("ALLOW_UNKNOWN_SECURITY", "true").lower() == "true"
+
+# Maximum acceptable top-10 holders concentration (%). Above this → drop
+MAX_TOP10_CONCENTRATION = _get_int("MAX_TOP10_CONCENTRATION", 45)

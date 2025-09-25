@@ -8,7 +8,8 @@ from analyze_token import get_token_stats, score_token, calculate_preliminary_sc
 from notify import send_telegram_alert
 from storage import (init_db, has_been_alerted, mark_as_alerted, 
                     record_token_activity, get_token_velocity, should_fetch_detailed_stats,
-                    ensure_indices, prune_old_activity, get_alerted_tokens_batch, update_token_tracking)
+                    ensure_indices, prune_old_activity, get_alerted_tokens_batch, update_token_tracking,
+                    get_tracking_snapshot)
 from config import HIGH_CONFIDENCE_SCORE, FETCH_INTERVAL, DEBUG_PRELIM, TELEGRAM_ALERT_MIN_INTERVAL, TRACK_INTERVAL_MIN, TRACK_BATCH_SIZE
 from relay import relay_contract_address_sync, relay_enabled
 from logger_utils import log_alert, log_tracking
@@ -160,7 +161,7 @@ def run_bot():
                     velocity_data = get_token_velocity(token_address, minutes_back=15)
                     velocity_bonus = velocity_data['velocity_score'] if velocity_data else 0
                     
-                    score, scoring_details = score_token(stats, smart_money_detected=is_smart_cycle)
+                    score, scoring_details = score_token(stats, smart_money_detected=is_smart_cycle, token_address=token_address)
                     
                     # Add velocity bonus
                     if velocity_bonus > 0:
@@ -347,9 +348,19 @@ def run_bot():
                                 vol24 = vol24.get('volume_usd')
                             update_token_tracking(ca, price, mcap, liq, vol24)
                             try:
+                                snap = get_tracking_snapshot(ca) or {}
                                 log_tracking({
                                     "token": ca,
                                     "price": price,
+                                    "market_cap": mcap,
+                                    "liquidity": liq,
+                                    "vol24": vol24,
+                                    "peak_price": snap.get('peak_price'),
+                                    "peak_mcap": snap.get('peak_mcap'),
+                                    "time_to_peak_price_s": snap.get('time_to_peak_price_s'),
+                                    "time_to_peak_mcap_s": snap.get('time_to_peak_mcap_s'),
+                                    "peak_x_price": snap.get('peak_x_price'),
+                                    "peak_x_mcap": snap.get('peak_x_mcap'),
                                     "data_source": (stats.get("_source") if isinstance(stats, dict) else None) or "unknown",
                                 })
                             except Exception:
