@@ -27,6 +27,19 @@ from app.storage import (init_db, has_been_alerted, mark_as_alerted,
                     ensure_indices, prune_old_activity, get_alerted_tokens_batch, update_token_tracking,
                     get_tracking_snapshot)
 from config import HIGH_CONFIDENCE_SCORE, FETCH_INTERVAL, DEBUG_PRELIM, TELEGRAM_ALERT_MIN_INTERVAL, TRACK_INTERVAL_MIN, TRACK_BATCH_SIZE, REQUIRE_SMART_MONEY_FOR_ALERT, REQUIRE_VELOCITY_MIN_SCORE_FOR_ALERT
+from config import (
+    MIN_LIQUIDITY_USD,
+    VOL_24H_MIN_FOR_ALERT,
+    VOL_TO_MCAP_RATIO_MIN,
+    MCAP_MICRO_MAX,
+    MAX_MARKET_CAP_FOR_DEFAULT_ALERT,
+    MOMENTUM_1H_STRONG,
+    LARGE_CAP_MOMENTUM_GATE_1H,
+    MAX_TOP10_CONCENTRATION,
+    REQUIRE_MINT_REVOKED,
+    REQUIRE_LP_LOCKED,
+    ALLOW_UNKNOWN_SECURITY,
+)
 try:
     from tools.relay import relay_contract_address_sync, relay_enabled
 except Exception:
@@ -327,7 +340,8 @@ def run_bot():
                             or stats.get('liquidity', {}).get('usd')
                             or 0
                         )
-                        chart_link = f"https://dexscreener.com/solana/{token_address}"
+                        # Add cache-busting param so Telegram refreshes the preview image
+                        chart_link = f"https://dexscreener.com/solana/{token_address}?t={int(time.time())}"
                         swap_link = (
                             f"https://raydium.io/swap/?inputMint=So11111111111111111111111111111111111111112&outputMint={token_address}"
                         )
@@ -433,6 +447,26 @@ def run_bot():
                                     "momentum": None,
                                     "security_penalties": None,
                                 }
+
+                                # Enriched safety and gate logging
+                                buyers_24 = (stats.get('volume', {}) or {}).get('24h', {}) or {}
+                                unique_buyers_24h = buyers_24.get('unique_buyers') or 0
+                                unique_sellers_24h = buyers_24.get('unique_sellers') or 0
+                                vol_to_mcap_ratio = None
+                                try:
+                                    vol_to_mcap_ratio = (volume_24h or 0) / (market_cap or 1)
+                                except Exception:
+                                    vol_to_mcap_ratio = None
+
+                                # Gate pass/fail snapshot at alert time
+                                liq_gate = (baseline_liq or 0) >= (MIN_LIQUIDITY_USD or 0)
+                                vol_gate = (baseline_vol or 0) >= (VOL_24H_MIN_FOR_ALERT or 0)
+                                vtm_gate = (vol_to_mcap_ratio or 0) >= (VOL_TO_MCAP_RATIO_MIN or 0)
+                                mcap_micro_gate = (baseline_mcap or 0) <= (MCAP_MICRO_MAX or float('inf'))
+                                top10_gate = True
+                                if isinstance(top10, (int, float)) and MAX_TOP10_CONCENTRATION:
+                                    top10_gate = float(top10) <= float(MAX_TOP10_CONCENTRATION)
+
                                 log_alert({
                                     "token": token_address,
                                     "name": name,
@@ -452,6 +486,44 @@ def run_bot():
                                     "score_components": score_components,
                                     "data_source": (stats.get("_source") or "unknown"),
                                     "smart_cycle": bool(is_smart_cycle),
+                                    # Raw objects for post-hoc analysis
+                                    "security": security,
+                                    "liquidity_obj": liq_obj,
+                                    "holders_obj": holders_obj,
+                                    # Extracted safety fields
+                                    "mint_revoked": mint_revoked,
+                                    "is_honeypot": (security or {}).get('is_honeypot'),
+                                    "lp_locked": bool(lp_locked) if lp_locked is not None else None,
+                                    "lp_lock_status": (liq_obj or {}).get('lock_status'),
+                                    "lp_burned": (liq_obj or {}).get('is_lp_burned'),
+                                    "top10_concentration_percent": float(top10) if isinstance(top10, (int, float)) else None,
+                                    # Ratios and engagement
+                                    "vol_to_mcap_ratio": vol_to_mcap_ratio,
+                                    "volume_24h_unique_buyers": unique_buyers_24h,
+                                    "volume_24h_unique_sellers": unique_sellers_24h,
+                                    # Gate snapshot
+                                    "gates": {
+                                        "MIN_LIQUIDITY_USD": MIN_LIQUIDITY_USD,
+                                        "VOL_24H_MIN_FOR_ALERT": VOL_24H_MIN_FOR_ALERT,
+                                        "VOL_TO_MCAP_RATIO_MIN": VOL_TO_MCAP_RATIO_MIN,
+                                        "MCAP_MICRO_MAX": MCAP_MICRO_MAX,
+                                        "MAX_MARKET_CAP_FOR_DEFAULT_ALERT": MAX_MARKET_CAP_FOR_DEFAULT_ALERT,
+                                        "MOMENTUM_1H_STRONG": MOMENTUM_1H_STRONG,
+                                        "LARGE_CAP_MOMENTUM_GATE_1H": LARGE_CAP_MOMENTUM_GATE_1H,
+                                        "MAX_TOP10_CONCENTRATION": MAX_TOP10_CONCENTRATION,
+                                        "REQUIRE_MINT_REVOKED": REQUIRE_MINT_REVOKED,
+                                        "REQUIRE_LP_LOCKED": REQUIRE_LP_LOCKED,
+                                        "ALLOW_UNKNOWN_SECURITY": ALLOW_UNKNOWN_SECURITY,
+                                        "HIGH_CONFIDENCE_SCORE": HIGH_CONFIDENCE_SCORE,
+                                        # Pass/fail at alert time
+                                        "passes": {
+                                            "liquidity": liq_gate,
+                                            "volume_24h": vol_gate,
+                                            "vol_to_mcap": vtm_gate,
+                                            "mcap_micro": mcap_micro_gate,
+                                            "top10_concentration": top10_gate,
+                                        },
+                                    },
                                 })
                             except Exception:
                                 pass
