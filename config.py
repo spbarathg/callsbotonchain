@@ -200,27 +200,31 @@ RUG_MIN_LIQUIDITY_USD = _get_int("RUG_MIN_LIQUIDITY_USD", 1)  # <= this treated 
 GATE_MODE = (os.getenv("GATE_MODE", "TIER2") or "TIER2").upper()
 
 def _apply_gate_mode_overrides() -> None:
+    """
+    Apply tiered gate overrides. When GATE_MODE is set, we treat these
+    overrides as authoritative (do not let older .env values dilute the tier).
+    """
     global HIGH_CONFIDENCE_SCORE, MIN_LIQUIDITY_USD, VOL_24H_MIN_FOR_ALERT
     global MAX_MARKET_CAP_FOR_DEFAULT_ALERT, VOL_TO_MCAP_RATIO_MIN
     mode = GATE_MODE
     if mode == "TIER1":
-        HIGH_CONFIDENCE_SCORE = int(os.getenv("HIGH_CONFIDENCE_SCORE", str(max(9, HIGH_CONFIDENCE_SCORE))))
-        MIN_LIQUIDITY_USD = _get_int("MIN_LIQUIDITY_USD", 20_000)
-        VOL_24H_MIN_FOR_ALERT = _get_int("VOL_24H_MIN_FOR_ALERT", 50_000)
-        MAX_MARKET_CAP_FOR_DEFAULT_ALERT = _get_int("MAX_MARKET_CAP_FOR_DEFAULT_ALERT", 1_500_000)
-        VOL_TO_MCAP_RATIO_MIN = _get_float("VOL_TO_MCAP_RATIO_MIN", 0.60)
+        HIGH_CONFIDENCE_SCORE = 9
+        MIN_LIQUIDITY_USD = 20_000
+        VOL_24H_MIN_FOR_ALERT = 50_000
+        MAX_MARKET_CAP_FOR_DEFAULT_ALERT = 1_500_000
+        VOL_TO_MCAP_RATIO_MIN = 0.60
     elif mode == "TIER2":
-        HIGH_CONFIDENCE_SCORE = _get_int("HIGH_CONFIDENCE_SCORE", 9)
-        MIN_LIQUIDITY_USD = _get_int("MIN_LIQUIDITY_USD", 10_000)
-        VOL_24H_MIN_FOR_ALERT = _get_int("VOL_24H_MIN_FOR_ALERT", 0)
-        MAX_MARKET_CAP_FOR_DEFAULT_ALERT = _get_int("MAX_MARKET_CAP_FOR_DEFAULT_ALERT", 1_500_000)
-        VOL_TO_MCAP_RATIO_MIN = _get_float("VOL_TO_MCAP_RATIO_MIN", 0.60)
+        HIGH_CONFIDENCE_SCORE = 9
+        MIN_LIQUIDITY_USD = 10_000
+        VOL_24H_MIN_FOR_ALERT = 0
+        MAX_MARKET_CAP_FOR_DEFAULT_ALERT = 1_500_000
+        VOL_TO_MCAP_RATIO_MIN = 0.60
     elif mode == "TIER3":
-        HIGH_CONFIDENCE_SCORE = _get_int("HIGH_CONFIDENCE_SCORE", 8)
-        MIN_LIQUIDITY_USD = _get_int("MIN_LIQUIDITY_USD", 5_000)
-        VOL_24H_MIN_FOR_ALERT = _get_int("VOL_24H_MIN_FOR_ALERT", 0)
-        MAX_MARKET_CAP_FOR_DEFAULT_ALERT = _get_int("MAX_MARKET_CAP_FOR_DEFAULT_ALERT", 5_000_000)
-        VOL_TO_MCAP_RATIO_MIN = _get_float("VOL_TO_MCAP_RATIO_MIN", 0.30)
+        HIGH_CONFIDENCE_SCORE = 8
+        MIN_LIQUIDITY_USD = 5_000
+        VOL_24H_MIN_FOR_ALERT = 0
+        MAX_MARKET_CAP_FOR_DEFAULT_ALERT = 5_000_000
+        VOL_TO_MCAP_RATIO_MIN = 0.30
     # else: unknown mode → keep env/defaults
 
 _apply_gate_mode_overrides()
