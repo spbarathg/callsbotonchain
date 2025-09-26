@@ -6,8 +6,18 @@ from typing import Optional
 import sqlite3
 import json
 
+try:
+    # Capture current gates for provenance in exports
+    from config import CURRENT_GATES
+except Exception:
+    CURRENT_GATES = None
+
 
 def export_db_summary(db_path: str, out_csv: str) -> None:
+    # Ensure output directory exists
+    out_dir = os.path.dirname(out_csv)
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
     con = sqlite3.connect(db_path)
     c = con.cursor()
     q = """
@@ -143,6 +153,11 @@ def export_db_summary(db_path: str, out_csv: str) -> None:
                 ttp_s,
                 ttm_s,
             ])
+    # Write sidecar JSON with gate snapshot if available
+    if CURRENT_GATES:
+        meta_path = os.path.splitext(out_csv)[0] + "_meta.json"
+        with open(meta_path, "w", encoding="utf-8") as mf:
+            json.dump({"exported_at": datetime.utcnow().isoformat(), "current_gates": CURRENT_GATES}, mf)
 
 
 def export_jsonl(jsonl_path: str, out_csv: str) -> None:
@@ -171,9 +186,10 @@ def export_jsonl(jsonl_path: str, out_csv: str) -> None:
 def main():
     ap = argparse.ArgumentParser(description="Export CALLSBOTONCHAIN stats to CSV")
     ap.add_argument("--mode", choices=["db", "alerts", "tracking"], default="db")
-    ap.add_argument("--db", default="alerted_tokens.db")
+    ap.add_argument("--db", default="var/alerted_tokens.db")
     ap.add_argument("--logdir", default=os.getenv("CALLSBOT_LOG_DIR", "logs"))
     ap.add_argument("--out", default=None)
+    ap.add_argument("--by", choices=["overall", "gatemode"], default="overall", help="Optional grouping for summaries")
     args = ap.parse_args()
 
     ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")

@@ -41,6 +41,11 @@ from config import (
     ALLOW_UNKNOWN_SECURITY,
 )
 try:
+    # Gate mode snapshot for logging
+    from config import CURRENT_GATES
+except Exception:
+    CURRENT_GATES = None
+try:
     from tools.relay import relay_contract_address_sync, relay_enabled
 except Exception:
     def relay_enabled() -> bool:
@@ -169,6 +174,9 @@ def run_bot():
     
     print("🧠 SMART MONEY ENHANCED SOLANA MEMECOIN BOT STARTED!")
     print(f"📊 Configuration: Score threshold = {HIGH_CONFIDENCE_SCORE}, Fetch interval = {FETCH_INTERVAL}s")
+    if CURRENT_GATES:
+        gm = CURRENT_GATES.get('GATE_MODE')
+        print(f"🎚️ Gate Mode: {gm} | Gates: score>={CURRENT_GATES.get('HIGH_CONFIDENCE_SCORE')}, liq>={CURRENT_GATES.get('MIN_LIQUIDITY_USD')}, vol24>={CURRENT_GATES.get('VOL_24H_MIN_FOR_ALERT')}, mcap<={CURRENT_GATES.get('MAX_MARKET_CAP_FOR_DEFAULT_ALERT')}, vol/mcap>={CURRENT_GATES.get('VOL_TO_MCAP_RATIO_MIN')}")
     print("🎯 Features: Smart Money Detection + Enhanced Scoring + Detailed Analysis")
     print("✅ Smart-money cycle enabled (top_wallets=true, min_wallet_pnl=1000)")
     print("🛡️ Adaptive cooldown on Cielo rate limits is enabled")
@@ -324,22 +332,34 @@ def run_bot():
                         if (velocity_bonus // 2) < (REQUIRE_VELOCITY_MIN_SCORE_FOR_ALERT // 2):
                             continue
 
-                    if score >= HIGH_CONFIDENCE_SCORE:
+                    # Gate checks (explicit)
+                    volume_24h = stats.get('volume', {}).get('24h', {}).get('volume_usd', 0)
+                    market_cap = stats.get('market_cap_usd', 0)
+                    liquidity = (
+                        stats.get('liquidity_usd')
+                        or stats.get('liquidity', {}).get('usd')
+                        or 0
+                    )
+                    vol_to_mcap_ok = False
+                    try:
+                        vol_to_mcap_ok = (float(volume_24h or 0) / float(market_cap or 1)) >= (VOL_TO_MCAP_RATIO_MIN or 0)
+                    except Exception:
+                        vol_to_mcap_ok = False
+
+                    liq_ok = (liquidity or 0) >= (MIN_LIQUIDITY_USD or 0)
+                    vol_ok = (volume_24h or 0) >= (VOL_24H_MIN_FOR_ALERT or 0)
+                    mcap_ok = (market_cap or 0) <= (MAX_MARKET_CAP_FOR_DEFAULT_ALERT or float('inf'))
+
+                    print(f"🧪 Gate check: score>={HIGH_CONFIDENCE_SCORE}? {score>=HIGH_CONFIDENCE_SCORE} | liq_ok={liq_ok} (${liquidity:,.0f}) | vol_ok={vol_ok} (${volume_24h:,.0f}) | mcap_ok={mcap_ok} (${market_cap:,.0f}) | vtm_ok={vol_to_mcap_ok}")
+
+                    if score >= HIGH_CONFIDENCE_SCORE and liq_ok and vol_ok and mcap_ok and (VOL_TO_MCAP_RATIO_MIN == 0 or vol_to_mcap_ok):
                         # Enhanced alert with smart money indicators
                         alert_type = "HIGH-CONFIDENCE"
-
-                        volume_24h = stats.get('volume', {}).get('24h', {}).get('volume_usd', 0)
-                        market_cap = stats.get('market_cap_usd', 0)
                         price = stats.get('price_usd', 0)
                         change_1h = stats.get('change', {}).get('1h', 0)
                         change_24h = stats.get('change', {}).get('24h', 0)
                         name = html.escape(stats.get('name') or "Token")
                         symbol = html.escape(stats.get('symbol') or "?")
-                        liquidity = (
-                            stats.get('liquidity_usd')
-                            or stats.get('liquidity', {}).get('usd')
-                            or 0
-                        )
                         # Add cache-busting param so Telegram refreshes the preview image
                         chart_link = f"https://dexscreener.com/solana/{token_address}?t={int(time.time())}"
                         swap_link = (
@@ -515,6 +535,7 @@ def run_bot():
                                         "REQUIRE_LP_LOCKED": REQUIRE_LP_LOCKED,
                                         "ALLOW_UNKNOWN_SECURITY": ALLOW_UNKNOWN_SECURITY,
                                         "HIGH_CONFIDENCE_SCORE": HIGH_CONFIDENCE_SCORE,
+                                        "GATE_MODE": (CURRENT_GATES.get('GATE_MODE') if CURRENT_GATES else None),
                                         # Pass/fail at alert time
                                         "passes": {
                                             "liquidity": liq_gate,

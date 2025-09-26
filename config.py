@@ -25,7 +25,7 @@ if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
 # BOT SETTINGS
 # ==============================================
 try:
-    HIGH_CONFIDENCE_SCORE = int(os.getenv("HIGH_CONFIDENCE_SCORE", "6"))
+    HIGH_CONFIDENCE_SCORE = int(os.getenv("HIGH_CONFIDENCE_SCORE", "9"))
     MIN_USD_VALUE = int(os.getenv("MIN_USD_VALUE", "100"))
     FETCH_INTERVAL = int(os.getenv("FETCH_INTERVAL", "120"))
     # Optional feed scoping
@@ -143,27 +143,27 @@ _block_syms_env = os.getenv(
 BLOCKLIST_SYMBOLS = [s.strip().upper() for s in _block_syms_env.split(",") if s.strip()]
 
 # Cap gating: prefer microcaps; gate very large caps unless high momentum or smart-money
-MAX_MARKET_CAP_FOR_DEFAULT_ALERT = _get_int("MAX_MARKET_CAP_FOR_DEFAULT_ALERT", 50_000_000)
+MAX_MARKET_CAP_FOR_DEFAULT_ALERT = _get_int("MAX_MARKET_CAP_FOR_DEFAULT_ALERT", 1_500_000)
 LARGE_CAP_MOMENTUM_GATE_1H = _get_int("LARGE_CAP_MOMENTUM_GATE_1H", 15)
 
 # ==============================================
 # RISK GATES (STRICT MODE)
 # ==============================================
 # Minimum on-chain liquidity required to alert (USD)
-MIN_LIQUIDITY_USD = _get_int("MIN_LIQUIDITY_USD", 3000)
+MIN_LIQUIDITY_USD = _get_int("MIN_LIQUIDITY_USD", 10_000)
 
 # Minimum 24h volume required (USD)
-VOL_24H_MIN_FOR_ALERT = _get_int("VOL_24H_MIN_FOR_ALERT", 15000)
+VOL_24H_MIN_FOR_ALERT = _get_int("VOL_24H_MIN_FOR_ALERT", 0)
 
 # Require smart-money cycle for final alert
 REQUIRE_SMART_MONEY_FOR_ALERT = os.getenv("REQUIRE_SMART_MONEY_FOR_ALERT", "false").lower() == "true"
 
 # Require minimum velocity score for final alert (0 disables)
-REQUIRE_VELOCITY_MIN_SCORE_FOR_ALERT = _get_int("REQUIRE_VELOCITY_MIN_SCORE_FOR_ALERT", 5)
+REQUIRE_VELOCITY_MIN_SCORE_FOR_ALERT = _get_int("REQUIRE_VELOCITY_MIN_SCORE_FOR_ALERT", 0)
 
 # Security requirements (only enforce when security data is available)
-REQUIRE_MINT_REVOKED = os.getenv("REQUIRE_MINT_REVOKED", "true").lower() == "true"
-REQUIRE_LP_LOCKED = os.getenv("REQUIRE_LP_LOCKED", "true").lower() == "true"
+REQUIRE_MINT_REVOKED = os.getenv("REQUIRE_MINT_REVOKED", "false").lower() == "true"
+REQUIRE_LP_LOCKED = os.getenv("REQUIRE_LP_LOCKED", "false").lower() == "true"
 
 # If security fields are unknown (e.g., DexScreener fallback), should we allow?
 ALLOW_UNKNOWN_SECURITY = os.getenv("ALLOW_UNKNOWN_SECURITY", "true").lower() == "true"
@@ -172,7 +172,7 @@ ALLOW_UNKNOWN_SECURITY = os.getenv("ALLOW_UNKNOWN_SECURITY", "true").lower() == 
 MAX_TOP10_CONCENTRATION = _get_int("MAX_TOP10_CONCENTRATION", 45)
 
 # Volume-to-MCap ratio minimum gate (e.g., 0.5 means 24h vol >= 50% of mcap)
-VOL_TO_MCAP_RATIO_MIN = _get_float("VOL_TO_MCAP_RATIO_MIN", 0.0)  # 0 disables
+VOL_TO_MCAP_RATIO_MIN = _get_float("VOL_TO_MCAP_RATIO_MIN", 0.60)  # 0 disables
 
 # Momentum gate for tight mode (require at least this 1h change for alert)
 REQUIRE_MOMENTUM_1H_MIN_FOR_ALERT = _get_int("REQUIRE_MOMENTUM_1H_MIN_FOR_ALERT", 0)
@@ -190,3 +190,49 @@ MOMENTUM_1H_PUMPER = _get_int("MOMENTUM_1H_PUMPER", 20)
 # Rug/outcome heuristics
 RUG_DRAWDOWN_PCT = _get_float("RUG_DRAWDOWN_PCT", 90.0)  # price drop from peak (%) to call a rug
 RUG_MIN_LIQUIDITY_USD = _get_int("RUG_MIN_LIQUIDITY_USD", 1)  # <= this treated as vanished LP
+
+# ==============================================
+# GATE MODE (Tiered defaults via env)
+# ==============================================
+# TIER1 (High Confidence): score>=9, liq>=20k, vol24>=50k, mcap<=1.5M
+# TIER2 (Balanced Default): score>=9, liq>=10k, mcap<=1.5M, vol/mcap>=0.6
+# TIER3 (Exploratory/Relax): score>=8, liq>=5k, mcap<=5M, vol/mcap>=0.3
+GATE_MODE = (os.getenv("GATE_MODE", "TIER2") or "TIER2").upper()
+
+def _apply_gate_mode_overrides() -> None:
+    global HIGH_CONFIDENCE_SCORE, MIN_LIQUIDITY_USD, VOL_24H_MIN_FOR_ALERT
+    global MAX_MARKET_CAP_FOR_DEFAULT_ALERT, VOL_TO_MCAP_RATIO_MIN
+    mode = GATE_MODE
+    if mode == "TIER1":
+        HIGH_CONFIDENCE_SCORE = int(os.getenv("HIGH_CONFIDENCE_SCORE", str(max(9, HIGH_CONFIDENCE_SCORE))))
+        MIN_LIQUIDITY_USD = _get_int("MIN_LIQUIDITY_USD", 20_000)
+        VOL_24H_MIN_FOR_ALERT = _get_int("VOL_24H_MIN_FOR_ALERT", 50_000)
+        MAX_MARKET_CAP_FOR_DEFAULT_ALERT = _get_int("MAX_MARKET_CAP_FOR_DEFAULT_ALERT", 1_500_000)
+        VOL_TO_MCAP_RATIO_MIN = _get_float("VOL_TO_MCAP_RATIO_MIN", 0.60)
+    elif mode == "TIER2":
+        HIGH_CONFIDENCE_SCORE = _get_int("HIGH_CONFIDENCE_SCORE", 9)
+        MIN_LIQUIDITY_USD = _get_int("MIN_LIQUIDITY_USD", 10_000)
+        VOL_24H_MIN_FOR_ALERT = _get_int("VOL_24H_MIN_FOR_ALERT", 0)
+        MAX_MARKET_CAP_FOR_DEFAULT_ALERT = _get_int("MAX_MARKET_CAP_FOR_DEFAULT_ALERT", 1_500_000)
+        VOL_TO_MCAP_RATIO_MIN = _get_float("VOL_TO_MCAP_RATIO_MIN", 0.60)
+    elif mode == "TIER3":
+        HIGH_CONFIDENCE_SCORE = _get_int("HIGH_CONFIDENCE_SCORE", 8)
+        MIN_LIQUIDITY_USD = _get_int("MIN_LIQUIDITY_USD", 5_000)
+        VOL_24H_MIN_FOR_ALERT = _get_int("VOL_24H_MIN_FOR_ALERT", 0)
+        MAX_MARKET_CAP_FOR_DEFAULT_ALERT = _get_int("MAX_MARKET_CAP_FOR_DEFAULT_ALERT", 5_000_000)
+        VOL_TO_MCAP_RATIO_MIN = _get_float("VOL_TO_MCAP_RATIO_MIN", 0.30)
+    # else: unknown mode → keep env/defaults
+
+_apply_gate_mode_overrides()
+
+# Snapshot for logging/monitoring
+CURRENT_GATES = {
+    "GATE_MODE": GATE_MODE,
+    "HIGH_CONFIDENCE_SCORE": HIGH_CONFIDENCE_SCORE,
+    "MIN_LIQUIDITY_USD": MIN_LIQUIDITY_USD,
+    "VOL_24H_MIN_FOR_ALERT": VOL_24H_MIN_FOR_ALERT,
+    "MAX_MARKET_CAP_FOR_DEFAULT_ALERT": MAX_MARKET_CAP_FOR_DEFAULT_ALERT,
+    "VOL_TO_MCAP_RATIO_MIN": VOL_TO_MCAP_RATIO_MIN,
+    "REQUIRE_MINT_REVOKED": REQUIRE_MINT_REVOKED,
+    "REQUIRE_LP_LOCKED": REQUIRE_LP_LOCKED,
+}
