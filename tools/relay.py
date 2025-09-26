@@ -2,7 +2,7 @@ import asyncio
 import os
 from typing import Optional, List
 from telethon import TelegramClient
-from telethon.errors import RPCError
+from telethon.errors import RPCError, SessionPasswordNeededError
 
 
 # Environment variables needed:
@@ -59,12 +59,29 @@ async def _ensure_client() -> Optional[TelegramClient]:
     except Exception:
         pass
     _client = TelegramClient(session_name, api_id_int, api_hash)
-    await _client.connect()
+    # Robust connect with small retries
+    for _ in range(3):
+        await _client.connect()
+        if await _client.is_user_authorized():
+            break
+        # If not authorized, we'll proceed to sign in below
+        break
     if not await _client.is_user_authorized():
         try:
             await _client.send_code_request(phone)
             code = input("Enter the Telegram login code sent to your account: ")
             await _client.sign_in(phone=phone, code=code)
+        except SessionPasswordNeededError:
+            # Support 2FA via environment variable (non-interactive under systemd)
+            pwd = _get_env("TELEGRAM_2FA_PASSWORD")
+            if not pwd:
+                print("Relay authorization needs 2FA password: set TELEGRAM_2FA_PASSWORD")
+                return None
+            try:
+                await _client.sign_in(password=pwd)
+            except Exception as e:
+                print("Relay 2FA sign-in failed:", e)
+                return None
         except Exception as e:
             print("Relay authorization failed:", e)
             return None
@@ -84,20 +101,43 @@ async def relay_contract_address(ca_text: str) -> bool:
     if not client:
         return False
 
-    try:
-        entity = await _resolve_target(client, target)
-        await client.send_message(entity, ca_text)
-        return True
-    except RPCError as e:
-        print("Relay send error:", e)
-        return False
-    except Exception as e:
-        print("Relay unexpected error:", e)
-        return False
+    # Ensure connected and retry once on transient disconnects
+    for attempt in range(2):
+        try:
+            if not client.is_connected():
+                await client.connect()
+            entity = await _resolve_target(client, target)
+            await client.send_message(entity, ca_text)
+            return True
+        except RPCError as e:
+            print("Relay send error:", e)
+            return False
+        except Exception as e:
+            print("Relay unexpected error:", e)
+            # Try reconnect once
+            try:
+                await client.disconnect()
+            except Exception:
+                pass
+            try:
+                await client.connect()
+            except Exception:
+                pass
+            # Next loop iteration will retry once
+    return False
 
 
 def relay_contract_address_sync(ca_text: str) -> bool:
-    return asyncio.get_event_loop().run_until_complete(relay_contract_address(ca_text))
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+    # If loop is closed, create a new one
+    if loop.is_closed():
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+    return loop.run_until_complete(relay_contract_address(ca_text))
 
 
 async def _resolve_target(client: TelegramClient, target: str):
