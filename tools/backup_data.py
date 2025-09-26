@@ -52,7 +52,8 @@ def main() -> None:
 
     # Inputs/outputs
     db_path = os.getenv("CALLSBOT_DB_FILE", os.path.join("var", "alerted_tokens.db"))
-    log_dir = os.getenv("CALLSBOT_LOG_DIR", os.path.join("logs"))
+    # Align default with app.logger_utils which defaults to data/logs
+    log_dir = os.getenv("CALLSBOT_LOG_DIR", os.path.join("data", "logs"))
 
     ts = utc_ts()
     base_dir = os.path.join("data", "backups", ts)

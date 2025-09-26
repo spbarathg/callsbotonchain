@@ -69,7 +69,8 @@ async def _ensure_client() -> Optional[TelegramClient]:
     if not await _client.is_user_authorized():
         try:
             await _client.send_code_request(phone)
-            code = input("Enter the Telegram login code sent to your account: ")
+            # Support non-interactive login via TELEGRAM_LOGIN_CODE when provided
+            code = os.getenv("TELEGRAM_LOGIN_CODE") or input("Enter the Telegram login code sent to your account: ")
             await _client.sign_in(phone=phone, code=code)
         except SessionPasswordNeededError:
             # Support 2FA via environment variable (non-interactive under systemd)

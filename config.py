@@ -188,6 +188,16 @@ MICROCAP_SWEET_MAX = _get_int("MICROCAP_SWEET_MAX", 50_000)
 # Extra kicker threshold for strong pumpers
 MOMENTUM_1H_PUMPER = _get_int("MOMENTUM_1H_PUMPER", 20)
 
+# ==============================================
+# RISK GATES (NUANCED MODE FACTORS)
+# ==============================================
+# Relaxed thresholds for the nuanced evaluation path
+NUANCED_SCORE_REDUCTION = _get_int("NUANCED_SCORE_REDUCTION", 1)
+NUANCED_LIQUIDITY_FACTOR = _get_float("NUANCED_LIQUIDITY_FACTOR", 0.5)
+NUANCED_VOL_TO_MCAP_FACTOR = _get_float("NUANCED_VOL_TO_MCAP_FACTOR", 0.7)
+NUANCED_MCAP_FACTOR = _get_float("NUANCED_MCAP_FACTOR", 1.5)
+NUANCED_TOP10_CONCENTRATION_BUFFER = _get_int("NUANCED_TOP10_CONCENTRATION_BUFFER", 10)
+
 # Rug/outcome heuristics
 RUG_DRAWDOWN_PCT = _get_float("RUG_DRAWDOWN_PCT", 90.0)  # price drop from peak (%) to call a rug
 RUG_MIN_LIQUIDITY_USD = _get_int("RUG_MIN_LIQUIDITY_USD", 1)  # <= this treated as vanished LP

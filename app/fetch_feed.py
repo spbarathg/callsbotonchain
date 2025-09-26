@@ -44,7 +44,10 @@ def _parse_retry_after_seconds(resp: requests.Response) -> Optional[int]:
     return None
 
 
-def fetch_solana_feed(cursor=None, smart_money_only=False):
+from typing import Dict, Any
+
+
+def fetch_solana_feed(cursor=None, smart_money_only: bool = False) -> Dict[str, Any]:
     url = "https://feed-api.cielo.finance/api/v1/feed"
     
     # Base parameters (keep minimal to maximize visibility)
@@ -77,7 +80,8 @@ def fetch_solana_feed(cursor=None, smart_money_only=False):
 
     # Respect configured MIN_USD_VALUE as-is to maximize visibility
     # Header name should be case-insensitive, keep canonical spelling
-    headers = {"X-API-KEY": CIELO_API_KEY}
+    # Cielo is case-insensitive, but align with other modules using X-API-Key
+    headers = {"X-API-Key": CIELO_API_KEY}
     
     # Add timeout and retry logic
     max_retries = 3

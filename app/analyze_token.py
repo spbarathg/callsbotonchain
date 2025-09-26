@@ -32,6 +32,13 @@ from config import (
     REQUIRE_LP_LOCKED,
     ALLOW_UNKNOWN_SECURITY,
     MAX_TOP10_CONCENTRATION,
+    HIGH_CONFIDENCE_SCORE,
+    # Nuanced factors
+    NUANCED_SCORE_REDUCTION,
+    NUANCED_LIQUIDITY_FACTOR,
+    NUANCED_VOL_TO_MCAP_FACTOR,
+    NUANCED_MCAP_FACTOR,
+    NUANCED_TOP10_CONCENTRATION_BUFFER,
 )
 
 def _dexscreener_best_pair(pairs: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
@@ -206,166 +213,290 @@ def calculate_preliminary_score(tx_data: Dict[str, Any], smart_money_detected: b
     return min(score, 10)
 
 def score_token(stats: Dict[str, Any], smart_money_detected: bool = False, token_address: Optional[str] = None) -> Tuple[int, List[str]]:
+    """
+    Compute a raw score based on token metrics only. This function no longer
+    performs any filtering or gating. All gatekeeping is handled by moiety
+    checkers (senior/junior strict/nuanced).
+    """
     if not stats:
-        return 0
-        
-    score = 0
-    scoring_details = []
+        return 0, []
 
-    # Hard filters: stables/majors (by mint or symbol); allow if strong momentum or smart money
-    sym = (stats.get('symbol') or '').upper()
-    if token_address and token_address in STABLE_MINTS:
-        # Only allow if smart money and strong 1h momentum
-        ch1 = stats.get('change', {}).get('1h', 0)
-        if not (smart_money_detected and ch1 and ch1 >= LARGE_CAP_MOMENTUM_GATE_1H):
-            scoring_details.append("Filtered: stable/major mint")
-            return 0, scoring_details
-    if sym in BLOCKLIST_SYMBOLS:
-        ch1 = stats.get('change', {}).get('1h', 0)
-        if not (smart_money_detected and ch1 and ch1 >= LARGE_CAP_MOMENTUM_GATE_1H):
-            scoring_details.append("Filtered: blocklisted symbol")
-            return 0, scoring_details
-    
-    # SMART MONEY BONUS (highest priority)
+    score = 0
+    scoring_details: List[str] = []
+
+    # Smart money bonus is part of raw scoring signal
     if smart_money_detected:
         score += 3
         scoring_details.append("Smart Money: +3 (top wallets active!)")
-    
+
     # Market cap analysis (lower market cap = higher potential)
     market_cap = stats.get('market_cap_usd', 0)
-    if 0 < market_cap < MCAP_MICRO_MAX:  # Micro cap
+    if 0 < (market_cap or 0) < MCAP_MICRO_MAX:
         score += 3
         scoring_details.append(f"Market Cap: +3 (${market_cap:,.0f} - micro cap gem)")
-    elif market_cap < MCAP_SMALL_MAX:  # Small cap
+    elif (market_cap or 0) < MCAP_SMALL_MAX:
         score += 2
         scoring_details.append(f"Market Cap: +2 (${market_cap:,.0f} - small cap)")
-    elif market_cap < MCAP_MID_MAX:  # Mid cap
+    elif (market_cap or 0) < MCAP_MID_MAX:
         score += 1
         scoring_details.append(f"Market Cap: +1 (${market_cap:,.0f} - growing)")
     # Microcap sweet band bonus
     if market_cap and MICROCAP_SWEET_MIN <= market_cap <= MICROCAP_SWEET_MAX:
         score = min(score + 1, 10)
         scoring_details.append(f"Microcap Sweet Spot: +1 (${market_cap:,.0f})")
-    # Gate very large caps unless strong momentum or smart money
-    if market_cap and market_cap > MAX_MARKET_CAP_FOR_DEFAULT_ALERT:
-        ch1 = stats.get('change', {}).get('1h', 0)
-        if not (smart_money_detected and ch1 and ch1 >= LARGE_CAP_MOMENTUM_GATE_1H):
-            scoring_details.append(f"Filtered: large cap ${market_cap:,.0f} without strong momentum")
-            return 0, scoring_details
-    
+
     # Volume analysis (24h volume indicates activity)
     volume_24h = stats.get('volume', {}).get('24h', {}).get('volume_usd', 0)
-    if volume_24h > VOL_VERY_HIGH:  # Very high activity
+    if (volume_24h or 0) > VOL_VERY_HIGH:
         score += 3
         scoring_details.append(f"Volume: +3 (${volume_24h:,.0f} - very high activity)")
-    elif volume_24h > VOL_HIGH:  # High activity
+    elif (volume_24h or 0) > VOL_HIGH:
         score += 2
         scoring_details.append(f"Volume: +2 (${volume_24h:,.0f} - high activity)")
-    elif volume_24h > VOL_MED:  # Moderate activity
+    elif (volume_24h or 0) > VOL_MED:
         score += 1
         scoring_details.append(f"Volume: +1 (${volume_24h:,.0f} - moderate activity)")
-    # Volume-to-MCap ratio gate (optional)
-    if VOL_TO_MCAP_RATIO_MIN:
-        try:
-            ratio = (volume_24h or 0) / (market_cap or 1)
-        except Exception:
-            ratio = 0
-        if ratio < VOL_TO_MCAP_RATIO_MIN:
-            scoring_details.append(f"Filtered: vol/mcap {ratio:.2f} < {VOL_TO_MCAP_RATIO_MIN}")
-            return 0, scoring_details
-    
+
     # Unique trader analysis (indicates community engagement)
     unique_buyers_24h = stats.get('volume', {}).get('24h', {}).get('unique_buyers', 0)
     unique_sellers_24h = stats.get('volume', {}).get('24h', {}).get('unique_sellers', 0)
-    total_unique_traders = unique_buyers_24h + unique_sellers_24h
-    
-    if total_unique_traders > 500:  # Very active community
+    total_unique_traders = (unique_buyers_24h or 0) + (unique_sellers_24h or 0)
+    if total_unique_traders > 500:
         score += 2
         scoring_details.append(f"Community: +2 ({total_unique_traders} traders - very active)")
-    elif total_unique_traders > 200:  # Active community
+    elif total_unique_traders > 200:
         score += 1
         scoring_details.append(f"Community: +1 ({total_unique_traders} traders - active)")
-    
+
     # Price momentum analysis (positive short-term trend)
     change_1h = stats.get('change', {}).get('1h', 0)
     change_24h = stats.get('change', {}).get('24h', 0)
-    
-    # Reward recent positive momentum
-    if change_1h > max(MOMENTUM_1H_STRONG, MOMENTUM_1H_PUMPER):  # Strong pump threshold
+    if (change_1h or 0) > max(MOMENTUM_1H_STRONG, MOMENTUM_1H_PUMPER):
         score += 2
-        scoring_details.append(f"Momentum: +2 ({change_1h:.1f}% - strong pump)")
-    elif change_1h > 0:  # Positive 1h
+        scoring_details.append(f"Momentum: +2 ({(change_1h or 0):.1f}% - strong pump)")
+    elif (change_1h or 0) > 0:
         score += 1
-        scoring_details.append(f"Momentum: +1 ({change_1h:.1f}% - positive)")
-    
-    # But penalize if 24h is extremely negative (might be dump)
-    if change_24h < DRAW_24H_MAJOR:
+        scoring_details.append(f"Momentum: +1 ({(change_1h or 0):.1f}% - positive)")
+
+    # Penalize if 24h is extremely negative (might be dump)
+    if (change_24h or 0) < DRAW_24H_MAJOR:
         score -= 1
-        scoring_details.append(f"Risk: -1 ({change_24h:.1f}% - major dump risk)")
+        scoring_details.append(f"Risk: -1 ({(change_24h or 0):.1f}% - major dump risk)")
 
-    # --- Safety checks / Disqualifiers ---
-    security = stats.get('security', {}) or {}
-    liquidity = stats.get('liquidity', {}) or {}
-    holders = stats.get('holders', {}) or {}
-
-    # Disqualifier: honeypot
-    if security.get('is_honeypot') is True:
-        scoring_details.append("Disqualified: honeypot")
-        return 0, scoring_details
-
-    # Strict gates: mint revoked required unless unknown and allowed
-    mint_revoked = security.get('is_mint_revoked')
-    if REQUIRE_MINT_REVOKED:
-        if mint_revoked is False:
-            scoring_details.append("Filtered: mint not revoked")
-            return 0, scoring_details
-        if mint_revoked is None and not ALLOW_UNKNOWN_SECURITY:
-            scoring_details.append("Filtered: mint revoke unknown")
-            return 0, scoring_details
-    else:
-        if mint_revoked is False:
-            score -= 3
-            scoring_details.append("Security: -3 (mint not revoked)")
-
-    # LP locked/burned gate
-    lp_locked = (
-        liquidity.get('is_lp_locked')
-        or liquidity.get('lock_status') in ("locked", "burned")
-        or liquidity.get('is_lp_burned')
-    )
-    if REQUIRE_LP_LOCKED:
-        if lp_locked is False:
-            scoring_details.append("Filtered: LP not locked/burned")
-            return 0, scoring_details
-        if lp_locked is None and not ALLOW_UNKNOWN_SECURITY:
-            scoring_details.append("Filtered: LP lock unknown")
-            return 0, scoring_details
-    else:
-        if lp_locked is False:
-            score -= 2
-            scoring_details.append("Liquidity: -2 (LP not locked/burned)")
-
-    # Top 10 holders concentration high → -1
-    top10 = holders.get('top_10_concentration_percent') or holders.get('top10_percent') or 0
-    try:
-        top10 = float(top10)
-    except Exception:
-        top10 = 0
-    if MAX_TOP10_CONCENTRATION and top10 and top10 > MAX_TOP10_CONCENTRATION:
-        scoring_details.append(f"Filtered: Top10 {top10:.1f}% > {MAX_TOP10_CONCENTRATION}%")
-        return 0, scoring_details
-    elif top10 > TOP10_CONCERN:
-        score -= 1
-        scoring_details.append(f"Holders: -1 (Top10 {top10:.1f}% > {TOP10_CONCERN}%)")
-
-    # Liquidity and minimum volume gates (DexScreener provides liquidity_usd sometimes)
-    liq_usd = stats.get('liquidity_usd') or liquidity.get('usd') or 0
-    if MIN_LIQUIDITY_USD and (liq_usd or 0) < MIN_LIQUIDITY_USD:
-        scoring_details.append(f"Filtered: liquidity ${liq_usd:,.0f} < ${MIN_LIQUIDITY_USD}")
-        return 0, scoring_details
-    if VOL_24H_MIN_FOR_ALERT and (volume_24h or 0) < VOL_24H_MIN_FOR_ALERT:
-        scoring_details.append(f"Filtered: vol24 ${volume_24h:,.0f} < ${VOL_24H_MIN_FOR_ALERT}")
-        return 0, scoring_details
-    
     final_score = max(0, min(score, 10))
     return final_score, scoring_details
+
+
+def _extract_liquidity_usd(stats: Dict[str, Any]) -> float:
+    liq_obj = stats.get('liquidity') or {}
+    liq_usd = stats.get('liquidity_usd') or liq_obj.get('usd') or 0
+    try:
+        return float(liq_usd or 0)
+    except Exception:
+        return 0.0
+
+
+def _extract_top10_concentration(stats: Dict[str, Any]) -> Optional[float]:
+    holders = stats.get('holders') or {}
+    top10 = holders.get('top_10_concentration_percent') or holders.get('top10_percent')
+    try:
+        return float(top10) if top10 is not None else None
+    except Exception:
+        return None
+
+
+def check_senior_strict(stats: Dict[str, Any], token_address: Optional[str] = None) -> bool:
+    """
+    Strict safety checks (Senior Moiety).
+    - Must not be a honeypot.
+    - Must not be a stable/major mint or blocklisted symbol.
+    - If REQUIRE_MINT_REVOKED: mint must be revoked (True).
+    - If REQUIRE_LP_LOCKED: LP must be locked/burned (True).
+    - Top 10 holder concentration must be <= MAX_TOP10_CONCENTRATION (if known).
+    """
+    if not stats:
+        return False
+
+    # Honeypot disqualifier
+    security = stats.get('security') or {}
+    if security.get('is_honeypot') is True:
+        return False
+
+    # Blocklist/stable filters
+    sym = (stats.get('symbol') or '').upper()
+    if sym and sym in BLOCKLIST_SYMBOLS:
+        return False
+    if token_address and token_address in STABLE_MINTS:
+        return False
+
+    # Mint revoked requirement
+    if REQUIRE_MINT_REVOKED:
+        mint_revoked = security.get('is_mint_revoked')
+        if mint_revoked is not True:
+            return False
+
+    # LP locked requirement
+    if REQUIRE_LP_LOCKED:
+        liq = stats.get('liquidity') or {}
+        lp_locked = (
+            liq.get('is_lp_locked')
+            or liq.get('lock_status') in ("locked", "burned")
+            or liq.get('is_lp_burned')
+        )
+        if lp_locked is not True:
+            return False
+
+    # Top-10 concentration strict cap
+    top10 = _extract_top10_concentration(stats)
+    if (MAX_TOP10_CONCENTRATION or 0) and (top10 is not None) and (top10 > float(MAX_TOP10_CONCENTRATION)):
+        return False
+
+    return True
+
+
+def check_junior_strict(stats: Dict[str, Any], final_score: int) -> bool:
+    """
+    Strict metric checks (Junior Moiety).
+    - Liquidity >= MIN_LIQUIDITY_USD
+    - 24h Volume >= VOL_24H_MIN_FOR_ALERT
+    - Market Cap <= MAX_MARKET_CAP_FOR_DEFAULT_ALERT (allow if strong 1h momentum)
+    - Volume/MCap ratio >= VOL_TO_MCAP_RATIO_MIN
+    - Final score >= HIGH_CONFIDENCE_SCORE
+    """
+    if not stats:
+        return False
+
+    liq_usd = _extract_liquidity_usd(stats)
+    if (MIN_LIQUIDITY_USD or 0) and liq_usd < float(MIN_LIQUIDITY_USD):
+        return False
+
+    volume_24h = stats.get('volume', {}).get('24h', {}).get('volume_usd', 0) or 0
+    try:
+        volume_24h = float(volume_24h)
+    except Exception:
+        volume_24h = 0.0
+    if (VOL_24H_MIN_FOR_ALERT or 0) and volume_24h < float(VOL_24H_MIN_FOR_ALERT):
+        return False
+
+    market_cap = stats.get('market_cap_usd', 0) or 0
+    try:
+        market_cap = float(market_cap)
+    except Exception:
+        market_cap = 0.0
+    change_1h = stats.get('change', {}).get('1h', 0) or 0
+    try:
+        change_1h = float(change_1h)
+    except Exception:
+        change_1h = 0.0
+    mcap_ok = (market_cap or 0) <= float(MAX_MARKET_CAP_FOR_DEFAULT_ALERT or 0)
+    if not mcap_ok:
+        # allow large cap if strong momentum
+        if not (change_1h >= float(LARGE_CAP_MOMENTUM_GATE_1H or 0)):
+            return False
+
+    # Volume to MarketCap ratio
+    ratio = 0.0
+    try:
+        ratio = (volume_24h or 0.0) / (market_cap or 1.0)
+    except Exception:
+        ratio = 0.0
+    if (VOL_TO_MCAP_RATIO_MIN or 0) and ratio < float(VOL_TO_MCAP_RATIO_MIN):
+        return False
+
+    if final_score < int(HIGH_CONFIDENCE_SCORE or 0):
+        return False
+
+    return True
+
+
+def check_senior_nuanced(stats: Dict[str, Any], token_address: Optional[str] = None) -> bool:
+    """
+    Nuanced safety checks (Senior Moiety).
+    - Same as strict, but allows unknown security fields when ALLOW_UNKNOWN_SECURITY is True.
+    - Top 10 holder concentration can be slightly higher (<= MAX_TOP10_CONCENTRATION + buffer).
+    """
+    if not stats:
+        return False
+
+    security = stats.get('security') or {}
+    if security.get('is_honeypot') is True:
+        return False
+
+    sym = (stats.get('symbol') or '').upper()
+    if sym and sym in BLOCKLIST_SYMBOLS:
+        return False
+    if token_address and token_address in STABLE_MINTS:
+        return False
+
+    if REQUIRE_MINT_REVOKED:
+        mint_revoked = security.get('is_mint_revoked')
+        if mint_revoked is False:
+            return False
+        if mint_revoked is None and not ALLOW_UNKNOWN_SECURITY:
+            return False
+
+    if REQUIRE_LP_LOCKED:
+        liq = stats.get('liquidity') or {}
+        lp_locked = (
+            liq.get('is_lp_locked')
+            or liq.get('lock_status') in ("locked", "burned")
+            or liq.get('is_lp_burned')
+        )
+        if lp_locked is False:
+            return False
+        if (lp_locked is None) and (not ALLOW_UNKNOWN_SECURITY):
+            return False
+
+    # Relaxed top-10 concentration
+    buffer_cap = float(MAX_TOP10_CONCENTRATION or 0) + float(NUANCED_TOP10_CONCENTRATION_BUFFER or 0)
+    top10 = _extract_top10_concentration(stats)
+    if (top10 is not None) and buffer_cap and (top10 > buffer_cap):
+        return False
+
+    return True
+
+
+def check_junior_nuanced(stats: Dict[str, Any], final_score: int) -> bool:
+    """
+    Nuanced metric checks (Junior Moiety).
+    - Liquidity >= MIN_LIQUIDITY_USD * NUANCED_LIQUIDITY_FACTOR
+    - Market Cap <= MAX_MARKET_CAP_FOR_DEFAULT_ALERT * NUANCED_MCAP_FACTOR
+    - Volume/MCap ratio >= VOL_TO_MCAP_RATIO_MIN * NUANCED_VOL_TO_MCAP_FACTOR
+    - Final score >= HIGH_CONFIDENCE_SCORE - NUANCED_SCORE_REDUCTION
+    """
+    if not stats:
+        return False
+
+    liq_usd = _extract_liquidity_usd(stats)
+    min_liq = float(MIN_LIQUIDITY_USD or 0) * float(NUANCED_LIQUIDITY_FACTOR or 1.0)
+    if liq_usd < min_liq:
+        return False
+
+    market_cap = stats.get('market_cap_usd', 0) or 0
+    try:
+        market_cap = float(market_cap)
+    except Exception:
+        market_cap = 0.0
+    mcap_cap = float(MAX_MARKET_CAP_FOR_DEFAULT_ALERT or 0) * float(NUANCED_MCAP_FACTOR or 1.0)
+    if (mcap_cap or 0) and market_cap > mcap_cap:
+        return False
+
+    volume_24h = stats.get('volume', {}).get('24h', {}).get('volume_usd', 0) or 0
+    try:
+        volume_24h = float(volume_24h)
+    except Exception:
+        volume_24h = 0.0
+    ratio_req = float(VOL_TO_MCAP_RATIO_MIN or 0) * float(NUANCED_VOL_TO_MCAP_FACTOR or 1.0)
+    ratio = 0.0
+    try:
+        ratio = (volume_24h or 0.0) / (market_cap or 1.0)
+    except Exception:
+        ratio = 0.0
+    if (ratio_req or 0) and ratio < ratio_req:
+        return False
+
+    min_score = int(HIGH_CONFIDENCE_SCORE or 0) - int(NUANCED_SCORE_REDUCTION or 0)
+    if final_score < max(0, min_score):
+        return False
+
+    return True

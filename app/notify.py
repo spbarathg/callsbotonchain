@@ -3,7 +3,7 @@ import requests
 import time
 from config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
 
-def send_telegram_alert(message):
+def send_telegram_alert(message: str) -> bool:
     if not message or not message.strip():
         print("Error: Empty message provided")
         return False

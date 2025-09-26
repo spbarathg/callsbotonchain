@@ -12,6 +12,7 @@ REQUIRED_COLUMNS: List[str] = [
     "alerted_at",
     "final_score",
     "smart_money_detected",
+    "conviction_type",
     "first_alert_at",
     "last_checked_at",
     "first_price_usd",

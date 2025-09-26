@@ -25,7 +25,8 @@ def init_db():
             token_address TEXT PRIMARY KEY,
             alerted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             final_score INTEGER,
-            smart_money_detected BOOLEAN
+            smart_money_detected BOOLEAN,
+            conviction_type TEXT
         )
     """)
 
@@ -134,6 +135,15 @@ def init_db():
     except Exception:
         pass
 
+    # Migration: add conviction_type to alerted_tokens if missing
+    try:
+        cols = c.execute("PRAGMA table_info(alerted_tokens)").fetchall()
+        col_names = {col[1] for col in cols}
+        if 'conviction_type' not in col_names:
+            c.execute("ALTER TABLE alerted_tokens ADD COLUMN conviction_type TEXT")
+    except Exception:
+        pass
+
     conn.commit()
     conn.close()
 
@@ -147,14 +157,15 @@ def has_been_alerted(token_address: str) -> bool:
 
 def mark_as_alerted(token_address: str, score: int = 0, smart_money_detected: bool = False,
                     baseline_price_usd: float = None, baseline_market_cap_usd: float = None,
-                    baseline_liquidity_usd: float = None, baseline_volume_24h_usd: float = None) -> None:
+                    baseline_liquidity_usd: float = None, baseline_volume_24h_usd: float = None,
+                    conviction_type: Optional[str] = None) -> None:
     conn = _get_conn()
     c = conn.cursor()
     c.execute("""
         INSERT OR IGNORE INTO alerted_tokens 
-        (token_address, final_score, smart_money_detected) 
-        VALUES (?, ?, ?)
-    """, (token_address, score, smart_money_detected))
+        (token_address, final_score, smart_money_detected, conviction_type) 
+        VALUES (?, ?, ?, ?)
+    """, (token_address, score, smart_money_detected, conviction_type))
     # initialize tracking row
     c.execute(
         """
@@ -249,7 +260,7 @@ def get_alerted_tokens_batch(limit: int = 25, older_than_minutes: int = 55):
         FROM alerted_token_stats s
         JOIN alerted_tokens t ON t.token_address = s.token_address
         WHERE (strftime('%s','now') - strftime('%s', COALESCE(s.last_checked_at, '1970-01-01 00:00:00'))) > (? * 60)
-        ORDER BY s.last_checked_at ASC NULLS FIRST
+        ORDER BY (s.last_checked_at IS NOT NULL), s.last_checked_at ASC
         LIMIT ?
         """,
         (older_than_minutes, limit),
