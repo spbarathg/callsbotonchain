@@ -5,7 +5,8 @@ from typing import Any, Dict, Optional
 from threading import Lock
 
 
-LOG_DIR = os.getenv("CALLSBOT_LOG_DIR", "logs")
+# Persist logs locally under data/logs by default (never committed)
+LOG_DIR = os.getenv("CALLSBOT_LOG_DIR", os.path.join("data", "logs"))
 os.makedirs(LOG_DIR, exist_ok=True)
 
 _log_lock = Lock()

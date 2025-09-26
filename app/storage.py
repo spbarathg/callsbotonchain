@@ -291,7 +291,7 @@ def update_token_tracking(token_address: str, price_usd: float, market_cap_usd: 
             token_address,
         ),
     )
-    # Rug/outcome heuristic
+    # Rug/outcome heuristic and drawdown update always
     try:
         row = c.execute(
             """
@@ -307,6 +307,14 @@ def update_token_tracking(token_address: str, price_usd: float, market_cap_usd: 
             drawdown_pct = None
             if peak_p > 0 and last_p >= 0:
                 drawdown_pct = (1 - (last_p / peak_p)) * 100
+                c.execute(
+                    """
+                    UPDATE alerted_token_stats
+                    SET peak_drawdown_pct = ?
+                    WHERE token_address = ?
+                    """,
+                    (drawdown_pct, token_address),
+                )
             from config import RUG_DRAWDOWN_PCT, RUG_MIN_LIQUIDITY_USD
             is_lp_gone = (last_liq or 0) <= RUG_MIN_LIQUIDITY_USD
             is_hard_drawdown = (drawdown_pct is not None) and (drawdown_pct >= RUG_DRAWDOWN_PCT)

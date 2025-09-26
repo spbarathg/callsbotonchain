@@ -187,22 +187,26 @@ def main():
     ap = argparse.ArgumentParser(description="Export CALLSBOTONCHAIN stats to CSV")
     ap.add_argument("--mode", choices=["db", "alerts", "tracking"], default="db")
     ap.add_argument("--db", default="var/alerted_tokens.db")
-    ap.add_argument("--logdir", default=os.getenv("CALLSBOT_LOG_DIR", "logs"))
+    # Default logdir aligns with logger_utils (data/logs)
+    ap.add_argument("--logdir", default=os.getenv("CALLSBOT_LOG_DIR", os.path.join("data", "logs")))
     ap.add_argument("--out", default=None)
     ap.add_argument("--by", choices=["overall", "gatemode"], default="overall", help="Optional grouping for summaries")
     args = ap.parse_args()
 
     ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    # Default outputs to local data/ folder (not committed) unless user provided --out
+    base_dir = os.path.join("data", "exports")
+    os.makedirs(base_dir, exist_ok=True)
     if args.mode == "db":
-        out = args.out or f"export_db_{ts}.csv"
+        out = args.out or os.path.join(base_dir, f"export_db_{ts}.csv")
         export_db_summary(args.db, out)
         print("Wrote:", out)
     elif args.mode == "alerts":
-        out = args.out or f"export_alerts_{ts}.csv"
+        out = args.out or os.path.join(base_dir, f"export_alerts_{ts}.csv")
         export_jsonl(os.path.join(args.logdir, "alerts.jsonl"), out)
         print("Wrote:", out)
     else:
-        out = args.out or f"export_tracking_{ts}.csv"
+        out = args.out or os.path.join(base_dir, f"export_tracking_{ts}.csv")
         export_jsonl(os.path.join(args.logdir, "tracking.jsonl"), out)
         print("Wrote:", out)
 

@@ -64,14 +64,21 @@ def _get_token_stats_dexscreener(token_address: str) -> Dict[str, Any]:
                 price_change = best.get("priceChange") or {}
                 volume = best.get("volume") or {}
                 liquidity = best.get("liquidity") or {}
-                market_cap = best.get("marketCap") or best.get("fdv") or 0
+                # Prefer marketCap; fall back to fdv; coerce to float
+                mc_val = best.get("marketCap")
+                if mc_val is None:
+                    mc_val = best.get("fdv")
+                try:
+                    market_cap = float(mc_val or 0)
+                except Exception:
+                    market_cap = 0.0
                 price_usd = best.get("priceUsd")
                 try:
                     price_usd = float(price_usd) if price_usd is not None else 0.0
                 except Exception:
                     price_usd = 0.0
                 stats: Dict[str, Any] = {
-                    "market_cap_usd": market_cap or 0,
+                    "market_cap_usd": market_cap,
                     "price_usd": price_usd,
                     "liquidity_usd": (liquidity.get("usd") or 0),
                     "name": base.get("name") or None,

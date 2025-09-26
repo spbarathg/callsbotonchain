@@ -228,6 +228,38 @@ def run_bot():
             if not feed.get("transactions"):
                 print(f"📭 No new transactions found")
             
+            def _tx_has_smart_money(tx_obj: dict, smart_cycle: bool) -> bool:
+                """Best-effort detection of smart-money involvement from feed item.
+                Falls back to cycle type only if explicit hints are missing.
+                """
+                try:
+                    if smart_cycle:
+                        return True
+                    # Common hints in feed payloads
+                    hints = [
+                        tx_obj.get("smart_money"),
+                        tx_obj.get("top_wallets"),
+                        tx_obj.get("is_smart"),
+                        tx_obj.get("isTopWallet"),
+                    ]
+                    # Wallet/trader pnl signals
+                    for key in ("wallet_pnl", "min_wallet_pnl", "trader_pnl", "pnl_usd"):
+                        val = tx_obj.get(key)
+                        if isinstance(val, (int, float)) and val >= 1000:
+                            hints.append(True)
+                    # Label-based signal
+                    labels = tx_obj.get("labels") or tx_obj.get("wallet_labels")
+                    if labels:
+                        if isinstance(labels, (list, tuple)):
+                            label_text = ",".join(str(x) for x in labels).lower()
+                        else:
+                            label_text = str(labels).lower()
+                        if any(tag in label_text for tag in ("smart", "top", "alpha", "elite")):
+                            hints.append(True)
+                    return any(bool(h) for h in hints)
+                except Exception:
+                    return bool(smart_cycle)
+
             for tx in feed.get("transactions", []):
                 if shutdown_flag:
                     break
@@ -259,6 +291,7 @@ def run_bot():
                 
                 # attach usd_value into tx for preliminary scoring
                 tx["usd_value"] = usd_value
+                smart_involved = _tx_has_smart_money(tx, is_smart_cycle)
 
                 if not token_address or usd_value == 0:
                     continue
@@ -270,7 +303,7 @@ def run_bot():
 
                 try:
                     # STEP 1: Calculate preliminary score (NO API CALLS)
-                    preliminary_score = calculate_preliminary_score(tx, smart_money_detected=is_smart_cycle)
+                    preliminary_score = calculate_preliminary_score(tx, smart_money_detected=smart_involved)
                     if DEBUG_PRELIM:
                         print("    ⤷ prelim_debug:", {
                             'usd_value': round(tx.get('usd_value', 0) or 0, 2),
@@ -287,7 +320,7 @@ def run_bot():
                         token_address, 
                         usd_value, 
                         1,  # Transaction count (individual tx)
-                        is_smart_cycle,
+                        smart_involved,
                         preliminary_score,
                         trader
                     )
@@ -308,7 +341,7 @@ def run_bot():
                     velocity_data = get_token_velocity(token_address, minutes_back=15)
                     velocity_bonus = velocity_data['velocity_score'] if velocity_data else 0
                     
-                    score, scoring_details = score_token(stats, smart_money_detected=is_smart_cycle, token_address=token_address)
+                    score, scoring_details = score_token(stats, smart_money_detected=smart_involved, token_address=token_address)
                     
                     # Add velocity bonus
                     if velocity_bonus > 0:
@@ -326,7 +359,7 @@ def run_bot():
                     print(f"📈 Token {token_address} FINAL: {score}/10 (prelim: {preliminary_score}, velocity: +{velocity_bonus//2})")
                     
                     # Optional post-score meta gates (smart-money/velocity)
-                    if REQUIRE_SMART_MONEY_FOR_ALERT and not is_smart_cycle:
+                    if REQUIRE_SMART_MONEY_FOR_ALERT and not smart_involved:
                         continue
                     if REQUIRE_VELOCITY_MIN_SCORE_FOR_ALERT:
                         if (velocity_bonus // 2) < (REQUIRE_VELOCITY_MIN_SCORE_FOR_ALERT // 2):
@@ -446,7 +479,7 @@ def run_bot():
                             baseline_mcap = float(market_cap or 0)
                             baseline_liq = float(liquidity or 0)
                             baseline_vol = float(volume_24h or 0)
-                            mark_as_alerted(token_address, score, is_smart_cycle,
+                            mark_as_alerted(token_address, score, smart_involved,
                                             baseline_price, baseline_mcap, baseline_liq, baseline_vol)
                             try:
                                 if relay_enabled():
@@ -506,6 +539,7 @@ def run_bot():
                                     "score_components": score_components,
                                     "data_source": (stats.get("_source") or "unknown"),
                                     "smart_cycle": bool(is_smart_cycle),
+                                    "smart_money_detected": bool(smart_involved),
                                     # Raw objects for post-hoc analysis
                                     "security": security,
                                     "liquidity_obj": liq_obj,

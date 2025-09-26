@@ -6,6 +6,11 @@
 alerted_tokens.db
 *.sqlite
 *.db
+var/*.db
+var/*.sqlite
+var/*.db-journal
+var/*.sqlite-journal
+var/*.session
 
 # Python artifacts
 __pycache__/
@@ -22,3 +27,9 @@ env/
 .vscode/
 .idea/.DS_Store
 Thumbs.db
+
+# Local data and analytics (keep private)
+data/
+exports/
+logs/
+analytics/
