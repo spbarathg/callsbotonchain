@@ -198,6 +198,14 @@ NUANCED_VOL_TO_MCAP_FACTOR = _get_float("NUANCED_VOL_TO_MCAP_FACTOR", 0.7)
 NUANCED_MCAP_FACTOR = _get_float("NUANCED_MCAP_FACTOR", 1.5)
 NUANCED_TOP10_CONCENTRATION_BUFFER = _get_int("NUANCED_TOP10_CONCENTRATION_BUFFER", 10)
 
+# Additional holder-composition risk thresholds
+# If bundlers/insiders percentages are available from stats, apply strict caps
+MAX_BUNDLERS_PERCENT = _get_float("MAX_BUNDLERS_PERCENT", 75.0)
+MAX_INSIDERS_PERCENT = _get_float("MAX_INSIDERS_PERCENT", 35.0)
+# Nuanced buffers allow slightly higher share than strict
+NUANCED_BUNDLERS_BUFFER = _get_float("NUANCED_BUNDLERS_BUFFER", 5.0)
+NUANCED_INSIDERS_BUFFER = _get_float("NUANCED_INSIDERS_BUFFER", 5.0)
+
 # Rug/outcome heuristics
 RUG_DRAWDOWN_PCT = _get_float("RUG_DRAWDOWN_PCT", 90.0)  # price drop from peak (%) to call a rug
 RUG_MIN_LIQUIDITY_USD = _get_int("RUG_MIN_LIQUIDITY_USD", 1)  # <= this treated as vanished LP

@@ -39,6 +39,11 @@ from config import (
     NUANCED_VOL_TO_MCAP_FACTOR,
     NUANCED_MCAP_FACTOR,
     NUANCED_TOP10_CONCENTRATION_BUFFER,
+    # Holder-composition caps
+    MAX_BUNDLERS_PERCENT,
+    MAX_INSIDERS_PERCENT,
+    NUANCED_BUNDLERS_BUFFER,
+    NUANCED_INSIDERS_BUFFER,
 )
 
 def _dexscreener_best_pair(pairs: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
@@ -305,6 +310,19 @@ def _extract_top10_concentration(stats: Dict[str, Any]) -> Optional[float]:
         return None
 
 
+def _extract_holder_risk(stats: Dict[str, Any]) -> Dict[str, Optional[float]]:
+    holders = stats.get('holders') or {}
+    def to_float(x):
+        try:
+            return float(x) if x is not None else None
+        except Exception:
+            return None
+    return {
+        "bundlers": to_float(holders.get('bundlers_percent') or holders.get('bundlers') or holders.get('bundlers_pct')),
+        "insiders": to_float(holders.get('insiders_percent') or holders.get('insiders') or holders.get('insiders_pct')),
+    }
+
+
 def check_senior_strict(stats: Dict[str, Any], token_address: Optional[str] = None) -> bool:
     """
     Strict safety checks (Senior Moiety).
@@ -349,6 +367,13 @@ def check_senior_strict(stats: Dict[str, Any], token_address: Optional[str] = No
     # Top-10 concentration strict cap
     top10 = _extract_top10_concentration(stats)
     if (MAX_TOP10_CONCENTRATION or 0) and (top10 is not None) and (top10 > float(MAX_TOP10_CONCENTRATION)):
+        return False
+
+    # Holder-composition strict caps (if available)
+    hr = _extract_holder_risk(stats)
+    if (hr.get("bundlers") is not None) and (MAX_BUNDLERS_PERCENT or 0) and (hr["bundlers"] > float(MAX_BUNDLERS_PERCENT)):
+        return False
+    if (hr.get("insiders") is not None) and (MAX_INSIDERS_PERCENT or 0) and (hr["insiders"] > float(MAX_INSIDERS_PERCENT)):
         return False
 
     return True
@@ -451,6 +476,15 @@ def check_senior_nuanced(stats: Dict[str, Any], token_address: Optional[str] = N
     buffer_cap = float(MAX_TOP10_CONCENTRATION or 0) + float(NUANCED_TOP10_CONCENTRATION_BUFFER or 0)
     top10 = _extract_top10_concentration(stats)
     if (top10 is not None) and buffer_cap and (top10 > buffer_cap):
+        return False
+
+    # Relaxed holder-composition caps (allow small buffer)
+    hr = _extract_holder_risk(stats)
+    bundlers_cap = float(MAX_BUNDLERS_PERCENT or 0) + float(NUANCED_BUNDLERS_BUFFER or 0)
+    insiders_cap = float(MAX_INSIDERS_PERCENT or 0) + float(NUANCED_INSIDERS_BUFFER or 0)
+    if (hr.get("bundlers") is not None) and bundlers_cap and (hr["bundlers"] > bundlers_cap):
+        return False
+    if (hr.get("insiders") is not None) and insiders_cap and (hr["insiders"] > insiders_cap):
         return False
 
     return True
