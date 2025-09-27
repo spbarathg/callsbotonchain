@@ -212,6 +212,10 @@ REQUIRE_HOLDER_STATS_FOR_LARGE_CAP_ALERT = os.getenv(
 ).lower() == "true"
 LARGE_CAP_HOLDER_STATS_MCAP_USD = _get_int("LARGE_CAP_HOLDER_STATS_MCAP_USD", 2_000_000)
 
+# Optional enforcement switches for holder-composition caps
+ENFORCE_BUNDLER_CAP = os.getenv("ENFORCE_BUNDLER_CAP", "false").lower() == "true"
+ENFORCE_INSIDER_CAP = os.getenv("ENFORCE_INSIDER_CAP", "false").lower() == "true"
+
 # Rug/outcome heuristics
 RUG_DRAWDOWN_PCT = _get_float("RUG_DRAWDOWN_PCT", 90.0)  # price drop from peak (%) to call a rug
 RUG_MIN_LIQUIDITY_USD = _get_int("RUG_MIN_LIQUIDITY_USD", 1)  # <= this treated as vanished LP

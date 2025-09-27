@@ -264,53 +264,30 @@ def run_bot():
             if not feed.get("transactions"):
                 print(f"No new transactions found")
             
-            def _tx_has_smart_money(tx_obj: dict, smart_cycle: bool) -> bool:
-                """Conservative detection of smart-money involvement from a feed item.
-                Requires multiple independent hints to avoid saturation.
-                """
+            def _tx_has_smart_money(tx_obj: dict, smart_cycle: bool) -> bool:  
+                """Looser detection to restore earlier behavior: smart IF cycle OR any strong hint."""
                 try:
-                    score = 0
-                    # Cycle-level heuristic contributes but is not sufficient alone
                     if smart_cycle:
-                        score += 1
-
-                    # Explicit boolean hints commonly present in payloads
-                    explicit_flags = [
-                        tx_obj.get("smart_money"),
-                        tx_obj.get("is_smart"),
-                        tx_obj.get("isTopWallet"),
-                    ]
-                    score += sum(1 for f in explicit_flags if bool(f))
-
-                    # Presence/size of top wallets list
+                        return True
+                    if any(bool(tx_obj.get(k)) for k in ("smart_money","is_smart","isTopWallet")):
+                        return True
                     top_wallets = tx_obj.get("top_wallets")
                     if isinstance(top_wallets, (list, tuple)) and len(top_wallets) > 0:
-                        score += 1
-
-                    # Wallet/trader PnL signals
-                    pnl_hit = False
-                    for key in ("wallet_pnl", "min_wallet_pnl", "trader_pnl", "pnl_usd"):
+                        return True
+                    for key in ("wallet_pnl","min_wallet_pnl","trader_pnl","pnl_usd"):
                         val = tx_obj.get(key)
-                        if isinstance(val, (int, float)) and val >= 2000:
-                            pnl_hit = True
-                            break
-                    if pnl_hit:
-                        score += 1
-
-                    # Label-based signal
+                        if isinstance(val, (int,float)) and val >= 1000:
+                            return True
                     labels = tx_obj.get("labels") or tx_obj.get("wallet_labels")
                     if labels:
-                        if isinstance(labels, (list, tuple)):
+                        if isinstance(labels,(list,tuple)):
                             label_text = ",".join(str(x) for x in labels).lower()
                         else:
                             label_text = str(labels).lower()
-                        if any(tag in label_text for tag in ("smart", "top", "alpha", "elite")):
-                            score += 1
-
-                    # Require at least 2 independent hints to classify as smart money
-                    return score >= 2
+                        if any(tag in label_text for tag in ("smart","top","alpha","elite")):
+                            return True
+                    return False
                 except Exception:
-                    # On parsing failure, do not over-ascribe; fall back to cycle only if present
                     return bool(smart_cycle)
 
             for tx in feed.get("transactions", []):

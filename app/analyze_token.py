@@ -46,6 +46,8 @@ from config import (
     NUANCED_INSIDERS_BUFFER,
     REQUIRE_HOLDER_STATS_FOR_LARGE_CAP_ALERT,
     LARGE_CAP_HOLDER_STATS_MCAP_USD,
+    ENFORCE_BUNDLER_CAP,
+    ENFORCE_INSIDER_CAP,
 )
 
 def _dexscreener_best_pair(pairs: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
@@ -383,9 +385,9 @@ def check_senior_strict(stats: Dict[str, Any], token_address: Optional[str] = No
 
     # Holder-composition strict caps (if available)
     hr = _extract_holder_risk(stats)
-    if (hr.get("bundlers") is not None) and (MAX_BUNDLERS_PERCENT or 0) and (hr["bundlers"] > float(MAX_BUNDLERS_PERCENT)):
+    if ENFORCE_BUNDLER_CAP and (hr.get("bundlers") is not None) and (MAX_BUNDLERS_PERCENT or 0) and (hr["bundlers"] > float(MAX_BUNDLERS_PERCENT)):
         return False
-    if (hr.get("insiders") is not None) and (MAX_INSIDERS_PERCENT or 0) and (hr["insiders"] > float(MAX_INSIDERS_PERCENT)):
+    if ENFORCE_INSIDER_CAP and (hr.get("insiders") is not None) and (MAX_INSIDERS_PERCENT or 0) and (hr["insiders"] > float(MAX_INSIDERS_PERCENT)):
         return False
 
     return True
@@ -494,9 +496,9 @@ def check_senior_nuanced(stats: Dict[str, Any], token_address: Optional[str] = N
     hr = _extract_holder_risk(stats)
     bundlers_cap = float(MAX_BUNDLERS_PERCENT or 0) + float(NUANCED_BUNDLERS_BUFFER or 0)
     insiders_cap = float(MAX_INSIDERS_PERCENT or 0) + float(NUANCED_INSIDERS_BUFFER or 0)
-    if (hr.get("bundlers") is not None) and bundlers_cap and (hr["bundlers"] > bundlers_cap):
+    if ENFORCE_BUNDLER_CAP and (hr.get("bundlers") is not None) and bundlers_cap and (hr["bundlers"] > bundlers_cap):
         return False
-    if (hr.get("insiders") is not None) and insiders_cap and (hr["insiders"] > insiders_cap):
+    if ENFORCE_INSIDER_CAP and (hr.get("insiders") is not None) and insiders_cap and (hr["insiders"] > insiders_cap):
         return False
 
     return True
