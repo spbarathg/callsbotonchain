@@ -302,6 +302,31 @@ def update_token_tracking(token_address: str, price_usd: float, market_cap_usd: 
             token_address,
         ),
     )
+    # Backfill baseline if missing (improves export completeness)
+    try:
+        row = c.execute(
+            """
+            SELECT first_price_usd, first_market_cap_usd, first_liquidity_usd, first_alert_at
+            FROM alerted_token_stats WHERE token_address = ?
+            """,
+            (token_address,),
+        ).fetchone()
+        if row:
+            first_p, first_m, first_l, first_at = row
+            if first_p is None or first_m is None or first_l is None:
+                c.execute(
+                    """
+                    UPDATE alerted_token_stats
+                    SET first_price_usd = COALESCE(first_price_usd, ?),
+                        first_market_cap_usd = COALESCE(first_market_cap_usd, ?),
+                        first_liquidity_usd = COALESCE(first_liquidity_usd, ?),
+                        first_alert_at = COALESCE(first_alert_at, CURRENT_TIMESTAMP)
+                    WHERE token_address = ?
+                    """,
+                    (price_usd, market_cap_usd, liquidity_usd, token_address),
+                )
+    except Exception:
+        pass
     # Rug/outcome heuristic and drawdown update always
     try:
         row = c.execute(
@@ -337,6 +362,16 @@ def update_token_tracking(token_address: str, price_usd: float, market_cap_usd: 
                     WHERE token_address = ?
                     """,
                     (drawdown_pct, token_address),
+                )
+            # Mark ongoing explicitly if no rug and we have at least one check
+            if outcome is None and not is_lp_gone and not is_hard_drawdown:
+                c.execute(
+                    """
+                    UPDATE alerted_token_stats
+                    SET outcome = COALESCE(outcome, 'ongoing')
+                    WHERE token_address = ?
+                    """,
+                    (token_address,),
                 )
     except Exception:
         pass
@@ -429,6 +464,9 @@ def ensure_indices() -> None:
     c = conn.cursor()
     try:
         c.execute("CREATE INDEX IF NOT EXISTS idx_token_activity_token_time ON token_activity(token_address, observed_at)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_alerted_stats_last_checked ON alerted_token_stats(last_checked_at)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_alerted_tokens_alerted_at ON alerted_tokens(alerted_at)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_alerted_stats_outcome ON alerted_token_stats(outcome)")
         conn.commit()
     except Exception:
         pass

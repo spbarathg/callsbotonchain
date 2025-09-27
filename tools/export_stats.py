@@ -20,13 +20,30 @@ def export_db_summary(db_path: str, out_csv: str) -> None:
         os.makedirs(out_dir, exist_ok=True)
     con = sqlite3.connect(db_path)
     c = con.cursor()
-    q = """
+    # Introspect schema to support older DBs gracefully
+    def _cols(table: str) -> set:
+        try:
+            return {row[1] for row in c.execute(f"PRAGMA table_info({table})").fetchall()}
+        except Exception:
+            return set()
+
+    t_cols = _cols('alerted_tokens')
+    s_cols = _cols('alerted_token_stats')
+
+    t_conv = "t.conviction_type" if 'conviction_type' in t_cols else "NULL AS conviction_type"
+    s_last_vol = "s.last_volume_24h_usd" if 'last_volume_24h_usd' in s_cols else "NULL AS last_volume_24h_usd"
+    s_peak_vol = "s.peak_volume_24h_usd" if 'peak_volume_24h_usd' in s_cols else "NULL AS peak_volume_24h_usd"
+    s_outcome = "s.outcome" if 'outcome' in s_cols else "NULL AS outcome"
+    s_outcome_at = "s.outcome_at" if 'outcome_at' in s_cols else "NULL AS outcome_at"
+    s_drawdown = "s.peak_drawdown_pct" if 'peak_drawdown_pct' in s_cols else "NULL AS peak_drawdown_pct"
+
+    q = f"""
     SELECT 
       t.token_address,
       t.alerted_at,
       t.final_score,
       t.smart_money_detected,
-      t.conviction_type,
+      {t_conv},
       s.first_alert_at,
       s.last_checked_at,
       s.first_price_usd,
@@ -35,15 +52,15 @@ def export_db_summary(db_path: str, out_csv: str) -> None:
       s.last_price_usd,
       s.last_market_cap_usd,
       s.last_liquidity_usd,
-      s.last_volume_24h_usd,
+      {s_last_vol},
       s.peak_price_usd,
       s.peak_market_cap_usd,
-      s.peak_volume_24h_usd,
+      {s_peak_vol},
       s.peak_price_at,
       s.peak_market_cap_at,
-      s.outcome,
-      s.outcome_at,
-      s.peak_drawdown_pct
+      {s_outcome},
+      {s_outcome_at},
+      {s_drawdown}
     FROM alerted_token_stats s
     JOIN alerted_tokens t ON t.token_address = s.token_address
     ORDER BY s.first_alert_at ASC
@@ -108,8 +125,9 @@ def export_db_summary(db_path: str, out_csv: str) -> None:
                 outcome_at,
                 peak_drawdown_pct,
             ) = r
-            peak_x_price = (peak_price / first_price) if (first_price or 0) else None
-            peak_x_mcap = (peak_mcap / first_mcap) if (first_mcap or 0) else None
+            # Only compute multiples if baselines are valid positive numbers
+            peak_x_price = (peak_price / first_price) if (first_price and first_price > 0 and peak_price) else None
+            peak_x_mcap = (peak_mcap / first_mcap) if (first_mcap and first_mcap > 0 and peak_mcap) else None
 
             # time deltas in seconds (strings -> naive parse)
             def _parse(ts: Optional[str]) -> Optional[datetime]:
@@ -126,8 +144,9 @@ def export_db_summary(db_path: str, out_csv: str) -> None:
             t0 = _parse(first_alert_at)
             tpp = _parse(peak_price_at)
             tpm = _parse(peak_mcap_at)
-            ttp_s = int((tpp - t0).total_seconds()) if (t0 and tpp) else None
-            ttm_s = int((tpm - t0).total_seconds()) if (t0 and tpm) else None
+            # time deltas: require well-formed timestamps and positive elapsed time
+            ttp_s = int((tpp - t0).total_seconds()) if (t0 and tpp and (tpp >= t0)) else None
+            ttm_s = int((tpm - t0).total_seconds()) if (t0 and tpm and (tpm >= t0)) else None
 
             w.writerow([
                 token,
