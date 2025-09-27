@@ -60,7 +60,7 @@ except Exception:
         return False
     def relay_contract_address_sync(*_args, **_kwargs) -> bool:
         return False
-from app.logger_utils import log_alert, log_tracking
+from app.logger_utils import log_alert, log_tracking, log_process, log_heartbeat
 import html
 
 # Global flag for graceful shutdown
@@ -199,6 +199,15 @@ def run_bot():
         f"<b>Status:</b> Monitoring Solana memecoin activity"
     )
     send_telegram_alert(startup_message)
+    try:
+        log_process({
+            "type": "startup",
+            "pid": os.getpid(),
+            "fetch_interval": FETCH_INTERVAL,
+            "gates": CURRENT_GATES or {},
+        })
+    except Exception:
+        pass
     
     is_smart_cycle = False
     while not shutdown_flag:
@@ -221,6 +230,15 @@ def run_bot():
                 elif retry_after_sec <= 0:
                     retry_after_sec = max(60, FETCH_INTERVAL)
                 print(f"Cielo {('quota' if feed_error=='quota_exceeded' else 'rate limit')} hit. Cooling down for {retry_after_sec}s")
+                try:
+                    log_process({
+                        "type": "cooldown",
+                        "pid": os.getpid(),
+                        "reason": feed_error,
+                        "retry_after_sec": retry_after_sec,
+                    })
+                except Exception:
+                    pass
                 for _ in range(retry_after_sec):
                     if shutdown_flag:
                         break
@@ -232,6 +250,16 @@ def run_bot():
             # Log the number of items returned this cycle for visibility
             items_count = len(feed.get("transactions", []))
             print(f"FEED ITEMS: {items_count}")
+            try:
+                log_heartbeat(os.getpid(), extra={
+                    "cycle": ("smart" if is_smart_cycle else "general"),
+                    "feed_items": items_count,
+                    "processed_count": processed_count,
+                    "api_calls_saved": api_calls_saved,
+                    "alerts_sent": alert_count,
+                })
+            except Exception:
+                pass
             
             if not feed.get("transactions"):
                 print(f"No new transactions found")
@@ -532,6 +560,17 @@ def run_bot():
                             session_alerted_tokens.add(token_address)
                             alert_count += 1
                             print(f"Alert #{alert_count} sent for token {token_address} (Final: {score}/10, Prelim: {preliminary_score}/10)")
+                            try:
+                                log_process({
+                                    "type": "alert_sent",
+                                    "pid": os.getpid(),
+                                    "token": token_address,
+                                    "final_score": score,
+                                    "prelim_score": preliminary_score,
+                                    "conviction_type": conviction_type,
+                                })
+                            except Exception:
+                                pass
                             try:
                                 # Velocity snapshot at alert time
                                 vel_snap = get_token_velocity(token_address, minutes_back=15) or {}

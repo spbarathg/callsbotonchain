@@ -39,3 +39,21 @@ def log_tracking(event: Dict[str, Any]) -> None:
     write_jsonl("tracking.jsonl", event)
 
 
+# Monitoring helpers
+def log_process(event: Dict[str, Any]) -> None:
+    """
+    Write a process/health event to process.jsonl. Accepts any dict and adds ts.
+    """
+    write_jsonl("process.jsonl", event)
+
+
+def log_heartbeat(pid: int, msg: str = "ok", extra: Optional[Dict[str, Any]] = None) -> None:
+    """
+    Emit a lightweight heartbeat with optional counters for live monitoring.
+    """
+    evt: Dict[str, Any] = {"type": "heartbeat", "pid": pid, "msg": msg}
+    if extra:
+        evt.update(extra)
+    write_jsonl("process.jsonl", evt)
+
+
