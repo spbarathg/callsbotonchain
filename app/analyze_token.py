@@ -44,6 +44,8 @@ from config import (
     MAX_INSIDERS_PERCENT,
     NUANCED_BUNDLERS_BUFFER,
     NUANCED_INSIDERS_BUFFER,
+    REQUIRE_HOLDER_STATS_FOR_LARGE_CAP_ALERT,
+    LARGE_CAP_HOLDER_STATS_MCAP_USD,
 )
 
 def _dexscreener_best_pair(pairs: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
@@ -362,6 +364,16 @@ def check_senior_strict(stats: Dict[str, Any], token_address: Optional[str] = No
             or liq.get('is_lp_burned')
         )
         if lp_locked is not True:
+            return False
+
+    # If very large cap and holder stats required, drop when holder data missing
+    try:
+        mcap_val = float(stats.get('market_cap_usd') or 0)
+    except Exception:
+        mcap_val = 0.0
+    if REQUIRE_HOLDER_STATS_FOR_LARGE_CAP_ALERT and mcap_val >= float(LARGE_CAP_HOLDER_STATS_MCAP_USD or 0):
+        holders = stats.get('holders') or {}
+        if not holders:
             return False
 
     # Top-10 concentration strict cap

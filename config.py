@@ -206,6 +206,12 @@ MAX_INSIDERS_PERCENT = _get_float("MAX_INSIDERS_PERCENT", 35.0)
 NUANCED_BUNDLERS_BUFFER = _get_float("NUANCED_BUNDLERS_BUFFER", 5.0)
 NUANCED_INSIDERS_BUFFER = _get_float("NUANCED_INSIDERS_BUFFER", 5.0)
 
+# Require holder stats for large-cap alerts (avoid blind calls on big tokens)
+REQUIRE_HOLDER_STATS_FOR_LARGE_CAP_ALERT = os.getenv(
+    "REQUIRE_HOLDER_STATS_FOR_LARGE_CAP_ALERT", "false"
+).lower() == "true"
+LARGE_CAP_HOLDER_STATS_MCAP_USD = _get_int("LARGE_CAP_HOLDER_STATS_MCAP_USD", 2_000_000)
+
 # Rug/outcome heuristics
 RUG_DRAWDOWN_PCT = _get_float("RUG_DRAWDOWN_PCT", 90.0)  # price drop from peak (%) to call a rug
 RUG_MIN_LIQUIDITY_USD = _get_int("RUG_MIN_LIQUIDITY_USD", 1)  # <= this treated as vanished LP
