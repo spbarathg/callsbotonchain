@@ -418,33 +418,40 @@ def run_bot():
                         if (velocity_bonus // 2) < (REQUIRE_VELOCITY_MIN_SCORE_FOR_ALERT // 2):
                             continue
 
-                    # --- PRIMARY EVALUATION (STRICT PATH)
+                    # --- PRIMARY EVALUATION (safety first)
                     if not check_senior_strict(stats, token_address):
                         print(f"REJECTED (Senior Strict): {token_address}")
                         continue
 
-                    if not check_junior_strict(stats, score):
-                        print(f"REJECTED (Junior Strict): {token_address}")
-                        continue
+                    jr_strict_ok = check_junior_strict(stats, score)
 
-                    # --- ONONDAGA (SMART MONEY CHECK)
+                    # --- DECISION: smart-money requires strict; others may fallback to nuanced junior
                     alert_token = False
                     conviction_type = None
 
                     if smart_involved:
-                        print(f"PASSED (Strict + Smart Money): {token_address}")
-                        alert_token = True
-                        conviction_type = "High Confidence (Smart Money)"
-                    else:
-                        # --- SECOND ROUND DEBATE (NUANCED PATH)
-                        print(f"ENTERING DEBATE (No Smart Money): {token_address}")
-                        if check_senior_nuanced(stats, token_address) and check_junior_nuanced(stats, score):
-                            print(f"PASSED (Nuanced Rules): {token_address}")
+                        if jr_strict_ok:
+                            print(f"PASSED (Strict + Smart Money): {token_address}")
                             alert_token = True
-                            conviction_type = "Nuanced Conviction"
+                            conviction_type = "High Confidence (Smart Money)"
                         else:
-                            print(f"REJECTED (Nuanced Debate): {token_address}")
+                            print(f"REJECTED (Junior Strict): {token_address}")
                             continue
+                    else:
+                        if jr_strict_ok:
+                            print(f"PASSED (Strict Rules): {token_address}")
+                            alert_token = True
+                            conviction_type = "High Confidence (Strict)"
+                        else:
+                            # Fallback: keep strict safety, allow nuanced junior metrics
+                            print(f"ENTERING DEBATE (No Smart Money; Strict-Junior failed): {token_address}")
+                            if check_junior_nuanced(stats, score):
+                                print(f"PASSED (Nuanced Junior): {token_address}")
+                                alert_token = True
+                                conviction_type = "Nuanced Conviction"
+                            else:
+                                print(f"REJECTED (Nuanced Debate): {token_address}")
+                                continue
 
                     if alert_token:
                         # Enhanced alert with conviction type
