@@ -83,7 +83,10 @@ def fetch_solana_feed(cursor=None, smart_money_only: bool = False) -> Dict[str, 
     # Respect configured MIN_USD_VALUE as-is to maximize visibility
     # Header name should be case-insensitive, keep canonical spelling
     # Cielo is case-insensitive, but align with other modules using X-API-Key
-    headers = {"X-API-Key": CIELO_API_KEY}
+    header_variants = [
+        {"X-API-Key": CIELO_API_KEY},
+        {"Authorization": f"Bearer {CIELO_API_KEY}"},
+    ]
     
     last_retry_after: Optional[int] = None
     quota_exceeded = False
@@ -96,61 +99,68 @@ def fetch_solana_feed(cursor=None, smart_money_only: bool = False) -> Dict[str, 
     except Exception:
         pass
     for attempt in range(max_retries):
-        result = request_json("GET", url, params=params, headers=headers, timeout=HTTP_TIMEOUT_FEED)
-        status = result.get("status_code")
-        if status == 200:
-            try:
-                get_budget().spend("feed")
-            except Exception:
-                pass
-            api_response = result.get("json") or {}
-            try:
-                # Convert Cielo API format to expected format
-                if api_response.get("status") == "ok" and "data" in api_response:
-                    data = api_response["data"]
-                    items = data.get("items") if isinstance(data, dict) else None
-                    if items is None and isinstance(api_response.get("data"), list):
-                        items = api_response["data"]
-                    return {
-                        "transactions": items or [],
-                        "next_cursor": (data.get("paging", {}).get("next_cursor")
-                                         if isinstance(data, dict) else None),
-                        "error": None,
-                    }
-            except Exception:
-                pass
-            # Unexpected shape but still HTTP 200
-            return {
-                "transactions": [],
-                "next_cursor": None,
-                "error": "unexpected_response_shape",
-            }
-        elif status == 429:
-            body = result.get("json") or {}
-            msg = (body.get("message") or "").lower()
-            if "maximum api credit" in msg or "quota" in msg:
-                quota_exceeded = True
-            # Build a fake response-like for header parsing compatibility
-            class _R:
-                def __init__(self, headers):
-                    self.headers = headers
-            retry_after = _parse_retry_after_seconds(_R(result.get("headers") or {}))
-            if retry_after is not None:
-                last_retry_after = max(last_retry_after or 0, retry_after)
-            print(f"Rate limited, waiting before retry... (attempt {attempt + 1})")
-            time.sleep(retry_after if retry_after is not None else (2 ** attempt))
-            continue
-        elif status is None:
-            print(f"Network exception on attempt {attempt + 1}: {result.get('error')}")
-            if attempt < max_retries - 1:
-                time.sleep(2 ** attempt)
+        # Try both header variants before counting an attempt
+        for headers in header_variants:
+            result = request_json("GET", url, params=params, headers=headers, timeout=HTTP_TIMEOUT_FEED)
+            status = result.get("status_code")
+            if status == 200:
+                try:
+                    get_budget().spend("feed")
+                except Exception:
+                    pass
+                api_response = result.get("json") or {}
+                try:
+                    # Convert Cielo API format to expected format
+                    if api_response.get("status") == "ok" and "data" in api_response:
+                        data = api_response["data"]
+                        items = data.get("items") if isinstance(data, dict) else None
+                        if items is None and isinstance(api_response.get("data"), list):
+                            items = api_response["data"]
+                        return {
+                            "transactions": items or [],
+                            "next_cursor": (data.get("paging", {}).get("next_cursor")
+                                             if isinstance(data, dict) else None),
+                            "error": None,
+                        }
+                except Exception:
+                    pass
+                # Unexpected shape but still HTTP 200
+                return {
+                    "transactions": [],
+                    "next_cursor": None,
+                    "error": "unexpected_response_shape",
+                }
+            elif status == 429:
+                body = result.get("json") or {}
+                msg = (body.get("message") or "").lower()
+                if "maximum api credit" in msg or "quota" in msg:
+                    quota_exceeded = True
+                # Build a fake response-like for header parsing compatibility
+                class _R:
+                    def __init__(self, headers):
+                        self.headers = headers
+                retry_after = _parse_retry_after_seconds(_R(result.get("headers") or {}))
+                if retry_after is not None:
+                    last_retry_after = max(last_retry_after or 0, retry_after)
+                print(f"Rate limited, waiting before retry... (attempt {attempt + 1})")
+                time.sleep(retry_after if retry_after is not None else (2 ** attempt))
+                break  # break header loop; retry after backoff
+            elif status in (401, 403):
+                # try next header variant within the same attempt
                 continue
-            return {"transactions": [], "next_cursor": None, "error": "network_exception"}
+            elif status is None:
+                print(f"Network exception on attempt {attempt + 1}: {result.get('error')}")
+                # try next header variant or move to next attempt if last
+                continue
+            else:
+                text = None
+                if result.get("json") is None:
+                    text = (result.get("text") or "")
+                print(f"Error fetching feed: {status}, {text}")
+                # try next header variant
+                continue
         else:
-            text = None
-            if result.get("json") is None:
-                text = (result.get("text") or "")
-            print(f"Error fetching feed: {status}, {text}")
+            # no header variant succeeded; proceed to next attempt with short wait
             if attempt < max_retries - 1:
                 time.sleep(1)
                 continue
