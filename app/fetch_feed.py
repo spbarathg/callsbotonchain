@@ -5,6 +5,7 @@ from typing import Optional
 from config import CIELO_API_KEY, MIN_USD_VALUE, CIELO_LIST_ID, CIELO_NEW_TRADE_ONLY
 from config import HTTP_TIMEOUT_FEED
 from app.http_client import request_json
+from app.budget import get_budget
 try:
     from config import CIELO_LIST_IDS  # optional multi-list support
 except Exception:
@@ -87,10 +88,21 @@ def fetch_solana_feed(cursor=None, smart_money_only: bool = False) -> Dict[str, 
     last_retry_after: Optional[int] = None
     quota_exceeded = False
     max_retries = 3
+    # Budget check (treat feed as low-cost but enforce cap)
+    try:
+        b = get_budget()
+        if not b.can_spend("feed"):
+            return {"transactions": [], "next_cursor": None, "error": "budget_exceeded"}
+    except Exception:
+        pass
     for attempt in range(max_retries):
         result = request_json("GET", url, params=params, headers=headers, timeout=HTTP_TIMEOUT_FEED)
         status = result.get("status_code")
         if status == 200:
+            try:
+                get_budget().spend("feed")
+            except Exception:
+                pass
             api_response = result.get("json") or {}
             try:
                 # Convert Cielo API format to expected format

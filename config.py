@@ -70,6 +70,17 @@ HTTP_MAX_RETRIES = int(os.getenv("HTTP_MAX_RETRIES", "3"))
 HTTP_BACKOFF_FACTOR = float(os.getenv("HTTP_BACKOFF_FACTOR", "0.5"))
 
 # ==============================================
+# BUDGET / CREDITS CONTROL
+# ==============================================
+BUDGET_ENABLED = os.getenv("BUDGET_ENABLED", "true").lower() == "true"
+BUDGET_PER_MINUTE_MAX = int(os.getenv("BUDGET_PER_MINUTE_MAX", "60"))  # 1 req/sec avg
+BUDGET_PER_DAY_MAX = int(os.getenv("BUDGET_PER_DAY_MAX", "5000"))      # daily ceiling
+BUDGET_FEED_COST = int(os.getenv("BUDGET_FEED_COST", "1"))
+BUDGET_STATS_COST = int(os.getenv("BUDGET_STATS_COST", "1"))
+BUDGET_HARD_BLOCK = os.getenv("BUDGET_HARD_BLOCK", "true").lower() == "true"
+CALLSBOT_BUDGET_FILE = os.getenv("CALLSBOT_BUDGET_FILE", os.path.join(os.path.dirname(__file__), "var", "credits_budget.json"))
+
+# ==============================================
 # SCORING THRESHOLDS (override via .env)
 # ==============================================
 def _get_int(name: str, default: int) -> int:

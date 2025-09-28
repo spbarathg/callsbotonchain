@@ -49,6 +49,7 @@ from config import (
 )
 from config import HTTP_TIMEOUT_STATS
 from app.http_client import request_json
+from app.budget import get_budget
 
 def _dexscreener_best_pair(pairs: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     if not pairs:
@@ -156,6 +157,13 @@ def get_token_stats(token_address: str) -> Dict[str, Any]:
     cached = _cache_get(token_address)
     if cached:
         return cached
+    # Enforce budget before hitting APIs
+    try:
+        b = get_budget()
+        if not b.can_spend("stats"):
+            return {}
+    except Exception:
+        pass
         
     base_urls = [
         "https://feed-api.cielo.finance/api/v1",
@@ -182,6 +190,10 @@ def get_token_stats(token_address: str) -> Dict[str, Any]:
         result = request_json("GET", url, params=params, headers=hdrs, timeout=HTTP_TIMEOUT_STATS)
         last_status = result.get("status_code")
         if last_status == 200:
+            try:
+                get_budget().spend("stats")
+            except Exception:
+                pass
             api_response = result.get("json") or {}
             try:
                 if api_response.get("status") == "ok" and "data" in api_response:
