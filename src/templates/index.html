@@ -164,7 +164,8 @@
           const r = await fetch('/api/stats');
           const data = await r.json();
 
-          document.getElementById('total_alerts').textContent = data.total_alerts ?? '-';
+          const sig = data.signals_summary || {};
+          document.getElementById('total_alerts').textContent = (sig.total_alerts ?? data.total_alerts) ?? '-';
           document.getElementById('cooldowns').textContent = data.cooldowns ?? '-';
           document.getElementById('tracking_count').textContent = data.tracking_count ?? '-';
 
@@ -197,7 +198,7 @@
           document.getElementById('trading_toggle').checked = !!toggles.trading_enabled;
 
           // summaries
-          const sig = data.signals_summary || {};
+          // already defined above
           const trad = data.trading_summary || {};
           document.getElementById('rate_2x').textContent = sig.rate_ge_2x != null ? (sig.rate_ge_2x * 100).toFixed(1) + '%' : '-';
           document.getElementById('rate_5x').textContent = sig.rate_ge_5x != null ? (sig.rate_ge_5x * 100).toFixed(1) + '%' : '-';

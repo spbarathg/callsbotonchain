@@ -56,6 +56,7 @@ def create_app() -> Flask:
         tracking = _read_jsonl(tracking_path, limit=500)
 
         # Totals
+        # Keep both: log_count (from alerts.jsonl slice) and db_count (from signals_summary)
         total_alerts = len(alerts)
         last_alert = alerts[-1] if alerts else None
         last_heartbeat = None
@@ -97,7 +98,8 @@ def create_app() -> Flask:
         trading_summary = _trading_metrics(trading_db)
         gates_summary = _gates_summary(alerts_path)
         data = {
-            "total_alerts": total_alerts,
+            "total_alerts": (signals_summary.get("total_alerts") if isinstance(signals_summary, dict) and signals_summary.get("total_alerts") is not None else total_alerts),
+            "log_alerts_count": total_alerts,
             "cooldowns": cooldowns,
             "last_alert": last_alert,
             "last_heartbeat": last_heartbeat,

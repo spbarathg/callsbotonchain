@@ -36,3 +36,5 @@ ENV CALLSBOT_LOG_STDOUT=true \
 
 # Entrypoint runs the bot
 CMD ["python", "scripts/bot.py"]
+
+
