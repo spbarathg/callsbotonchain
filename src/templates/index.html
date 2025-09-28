@@ -52,6 +52,10 @@
           <div class="value" id="rate_5x">-</div>
         </div>
         <div class="card">
+          <div class="label">Sub‑2x Rate</div>
+          <div class="value" id="rate_sub2x">-</div>
+        </div>
+        <div class="card">
           <div class="label">Rug Rate</div>
           <div class="value" id="rug_rate">-</div>
         </div>
@@ -62,6 +66,14 @@
         <div class="card">
           <div class="label">Realized PnL</div>
           <div class="value" id="realized_pnl">-</div>
+        </div>
+        <div class="card">
+          <div class="label">1h Avg PnL</div>
+          <div class="value" id="avg_pnl_1h">-</div>
+        </div>
+        <div class="card">
+          <div class="label">1h Win Rate</div>
+          <div class="value" id="win_rate_1h">-</div>
         </div>
       </div>
 
@@ -189,9 +201,14 @@
           const trad = data.trading_summary || {};
           document.getElementById('rate_2x').textContent = sig.rate_ge_2x != null ? (sig.rate_ge_2x * 100).toFixed(1) + '%' : '-';
           document.getElementById('rate_5x').textContent = sig.rate_ge_5x != null ? (sig.rate_ge_5x * 100).toFixed(1) + '%' : '-';
+          document.getElementById('rate_sub2x').textContent = sig.sub_2x_rate != null ? (sig.sub_2x_rate * 100).toFixed(1) + '%' : '-';
           document.getElementById('rug_rate').textContent = sig.rug_rate != null ? (sig.rug_rate * 100).toFixed(1) + '%' : '-';
           document.getElementById('median_ttp').textContent = sig.median_ttp_price_s != null ? sig.median_ttp_price_s : '-';
           document.getElementById('realized_pnl').textContent = trad.realized_pnl_total != null ? ('$' + Number(trad.realized_pnl_total).toLocaleString()) : '-';
+          const pnl1 = sig.avg_return_1h_pct;
+          document.getElementById('avg_pnl_1h').textContent = pnl1 != null ? (pnl1 >= 0 ? '+' : '') + pnl1.toFixed(1) + '%' : '-';
+          const wr1 = sig.win_rate_1h;
+          document.getElementById('win_rate_1h').textContent = wr1 != null ? (wr1 * 100).toFixed(1) + '%' : '-';
         } catch (e) {
           console.error('Failed to fetch stats', e);
         }

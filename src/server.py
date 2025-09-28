@@ -269,20 +269,23 @@ def _signals_metrics(db_path: str) -> Dict[str, Any]:
         # 24h alerts
         cur.execute("SELECT COUNT(1) FROM alerted_tokens WHERE alerted_at >= datetime('now','-1 day')")
         out["alerts_24h"] = int(cur.fetchone()[0])
-        # Success rates (2x and 5x) using alerted_token_stats
+        # Success rates (>=2x and >=5x), denominator considers rows with valid first_price
         cur.execute(
             """
             SELECT
-              SUM(CASE WHEN first_price_usd>0 AND peak_price_usd / first_price_usd >= 2.0 THEN 1 ELSE 0 END),
-              SUM(CASE WHEN first_price_usd>0 AND peak_price_usd / first_price_usd >= 5.0 THEN 1 ELSE 0 END),
-              COUNT(1)
+              SUM(CASE WHEN first_price_usd>0 AND peak_price_usd/first_price_usd >= 2.0 THEN 1 ELSE 0 END) AS ge2x,
+              SUM(CASE WHEN first_price_usd>0 AND peak_price_usd/first_price_usd >= 5.0 THEN 1 ELSE 0 END) AS ge5x,
+              SUM(CASE WHEN first_price_usd>0 THEN 1 ELSE 0 END) AS denom_pos,
+              SUM(CASE WHEN first_price_usd>0 AND peak_price_usd/first_price_usd < 2.0 THEN 1 ELSE 0 END) AS lt2x
             FROM alerted_token_stats
             """
         )
         row = cur.fetchone()
-        two_x, five_x, denom = (row or (0, 0, 0))
-        out["rate_ge_2x"] = (float(two_x) / float(denom)) if denom else 0.0
-        out["rate_ge_5x"] = (float(five_x) / float(denom)) if denom else 0.0
+        ge2x, ge5x, denom_pos, lt2x = (row or (0, 0, 0, 0))
+        denom_pos = float(denom_pos or 0)
+        out["rate_ge_2x"] = (float(ge2x) / denom_pos) if denom_pos else 0.0
+        out["rate_ge_5x"] = (float(ge5x) / denom_pos) if denom_pos else 0.0
+        out["sub_2x_rate"] = (float(lt2x) / denom_pos) if denom_pos else 0.0
         # Rug rate
         cur.execute("SELECT SUM(CASE WHEN outcome='rug' THEN 1 ELSE 0 END), COUNT(1) FROM alerted_token_stats")
         r = cur.fetchone(); rugs, n = (r or (0, 0))
@@ -306,6 +309,27 @@ def _signals_metrics(db_path: str) -> Dict[str, Any]:
         # Average peak multiple
         cur.execute("SELECT AVG(CASE WHEN first_price_usd>0 THEN peak_price_usd/first_price_usd END) FROM alerted_token_stats")
         row = cur.fetchone(); out["avg_peak_multiple"] = float(row[0]) if row and row[0] is not None else None
+
+        # 1-hour performance snapshot (PnL style using last vs first)
+        cur.execute(
+            """
+            SELECT
+              COUNT(1) as n,
+              AVG(last_price_usd/first_price_usd) as avg_mul,
+              SUM(CASE WHEN last_price_usd/first_price_usd > 1.0 THEN 1 ELSE 0 END) as winners
+            FROM alerted_token_stats
+            WHERE first_alert_at >= datetime('now','-1 hour')
+              AND first_price_usd > 0 AND last_price_usd IS NOT NULL
+            """
+        )
+        row = cur.fetchone() or (0, None, 0)
+        n1h = int(row[0] or 0)
+        avg_mul_1h = float(row[1]) if row[1] is not None else None
+        winners_1h = int(row[2] or 0)
+        out["alerts_1h"] = n1h
+        out["avg_return_1h_multiple"] = avg_mul_1h
+        out["avg_return_1h_pct"] = ((avg_mul_1h - 1.0) * 100.0) if (avg_mul_1h is not None) else None
+        out["win_rate_1h"] = (float(winners_1h) / float(n1h)) if n1h else None
         # Daily counts (last 14 days)
         cur.execute(
             """
