@@ -7,17 +7,16 @@
     <link rel="stylesheet" href="/static/styles.css">
   </head>
   <body>
-    <div class="layout">
-      <aside class="sidebar">
-        <div class="brand">CALLSBOTONCHAIN</div>
-        <nav class="navbar vertical">
-          <a href="#" class="nav-link active" data-tab="dashboard">Dashboard</a>
-          <a href="#" class="nav-link" data-tab="logs">Logs</a>
-          <a href="#" class="nav-link" data-tab="tracked">Tracked</a>
-        </nav>
-      </aside>
-      <main class="content">
-        <header class="content-header"><h1 class="page-title" id="page_title">Dashboard</h1></header>
+    <header class="topbar">
+      <div class="brand">CALLSBOTONCHAIN</div>
+      <nav class="navbar horizontal">
+        <a href="#" class="nav-link active" data-tab="dashboard">Dashboard</a>
+        <a href="#" class="nav-link" data-tab="logs">Logs</a>
+        <a href="#" class="nav-link" data-tab="tracked">Tracked</a>
+      </nav>
+    </header>
+    <main class="content">
+      <header class="content-header"><h1 class="page-title" id="page_title">Dashboard</h1></header>
       <section id="tab-dashboard" class="tab visible">
       <div class="cards">
         <div class="card">
@@ -134,7 +133,6 @@
         </table>
       </section>
       </main>
-    </div>
 
     <script>
       // ---------- Tabs ----------
