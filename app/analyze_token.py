@@ -66,7 +66,7 @@ def _dexscreener_best_pair(pairs: List[Dict[str, Any]]) -> Optional[Dict[str, An
 def _get_token_stats_dexscreener(token_address: str) -> Dict[str, Any]:
     url = f"https://api.dexscreener.com/latest/dex/tokens/{token_address}"
     max_retries = 3
-    timeout = 10
+    timeout = 20
     for attempt in range(max_retries):
         try:
             resp = requests.get(url, timeout=timeout)
@@ -150,7 +150,7 @@ def get_token_stats(token_address: str) -> Dict[str, Any]:
     
     # Add timeout and retry logic
     max_retries = 3
-    timeout = 10
+    timeout = 20
     
     # Skip Cielo if user disabled or we detected denial previously
     if CIELO_DISABLE_STATS or _deny_cache.get("stats_denied"):
@@ -167,7 +167,47 @@ def get_token_stats(token_address: str) -> Dict[str, Any]:
                 api_response = resp.json()
                 if api_response.get("status") == "ok" and "data" in api_response:
                     api_response["data"]["_source"] = "cielo"
-                    return api_response["data"]
+                    # Augment with DexScreener when critical fields are missing
+                    try:
+                        data = api_response["data"]
+                        def _missing_liq(d: Dict[str, Any]) -> bool:
+                            liq_obj = d.get('liquidity') or {}
+                            return not bool(d.get('liquidity_usd') or liq_obj.get('usd'))
+
+                        def _missing_vol(d: Dict[str, Any]) -> bool:
+                            return not bool(((d.get('volume') or {}).get('24h') or {}).get('volume_usd'))
+
+                        def _missing_mcap(d: Dict[str, Any]) -> bool:
+                            try:
+                                return float(d.get('market_cap_usd') or 0) <= 0
+                            except Exception:
+                                return True
+
+                        if _missing_liq(data) or _missing_vol(data) or _missing_mcap(data):
+                            ds = _get_token_stats_dexscreener(token_address)
+                            if ds:
+                                # Liquidity
+                                if _missing_liq(data) and (ds.get('liquidity_usd') or (ds.get('liquidity') or {}).get('usd')):
+                                    if ds.get('liquidity_usd') is not None:
+                                        data['liquidity_usd'] = ds.get('liquidity_usd')
+                                    if ds.get('liquidity'):
+                                        data['liquidity'] = ds.get('liquidity')
+                                # Volume (24h)
+                                if _missing_vol(data) and (((ds.get('volume') or {}).get('24h') or {}).get('volume_usd') is not None):
+                                    vol24 = ((ds.get('volume') or {}).get('24h') or {})
+                                    data.setdefault('volume', {}).setdefault('24h', {})['volume_usd'] = vol24.get('volume_usd')
+                                # Market cap
+                                if _missing_mcap(data) and (ds.get('market_cap_usd') is not None):
+                                    data['market_cap_usd'] = ds.get('market_cap_usd')
+                                # Mark composite source
+                                try:
+                                    data['_source'] = f"{data.get('_source') or 'cielo'}+ds"
+                                except Exception:
+                                    data['_source'] = 'cielo+ds'
+                        return data
+                    except Exception:
+                        # If augmentation fails for any reason, still return Cielo data
+                        return api_response["data"]
                 if isinstance(api_response, dict):
                     api_response["_source"] = "cielo"
                 return api_response
