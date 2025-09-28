@@ -3,6 +3,10 @@
 body { margin: 0; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; background: var(--bg); color: var(--text); }
 header { padding: 20px clamp(16px, 6vw, 64px); background: var(--panel); border-bottom: 1px solid #232837; }
 h1 { margin: 0; font-size: 20px; font-weight: 700; letter-spacing: 0.4px; }
+.navbar { display:flex; gap:12px; }
+.nav-link { color: var(--text); text-decoration: none; padding: 6px 10px; border-radius: 8px; border: 1px solid transparent; }
+.nav-link:hover { border-color: #232837; background: #141821; }
+.nav-link.active { background: #4cc9f0; color: #0f1115; }
 .subtitle { color: var(--muted); margin-top: 6px; font-size: 13px; }
 main { padding: 20px clamp(16px, 6vw, 64px); }
 .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; margin-bottom: 24px; }
@@ -15,6 +19,9 @@ th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid #232837;
 thead th { color: var(--muted); background: #141821; font-weight: 600; }
 tbody tr:hover { background: #141821; }
 code { background: #0e121a; padding: 2px 6px; border-radius: 6px; color: #a8b3cf; }
+
+.tab { display: none; }
+.tab.visible { display: block; }
 
 /* Toggle switch */
 .switch { position: relative; display: inline-block; width: 48px; height: 26px; }

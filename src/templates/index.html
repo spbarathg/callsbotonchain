@@ -9,10 +9,15 @@
   <body>
     <header>
       <h1>CALLSBOTONCHAIN</h1>
-      <div class="subtitle">Live Bot Status</div>
+      <nav class="navbar">
+        <a href="#" class="nav-link active" data-tab="dashboard">Dashboard</a>
+        <a href="#" class="nav-link" data-tab="logs">Logs</a>
+        <a href="#" class="nav-link" data-tab="tracked">Tracked</a>
+      </nav>
     </header>
     <main>
-      <section class="cards">
+      <section id="tab-dashboard" class="tab visible">
+      <div class="cards">
         <div class="card">
           <div class="label">Total Alerts</div>
           <div class="value" id="total_alerts">-</div>
@@ -57,7 +62,7 @@
           <div class="label">Realized PnL</div>
           <div class="value" id="realized_pnl">-</div>
         </div>
-      </section>
+      </div>
 
       <section>
         <h2>Recent Alerts</h2>
@@ -94,9 +99,51 @@
         <div id="sql_status" class="muted" style="margin:8px 0 4px;"></div>
         <div id="sql_results"></div>
       </section>
+      </section>
+
+      <section id="tab-logs" class="tab">
+        <h2>Logs</h2>
+        <div class="sql-controls">
+          <select id="logs_type">
+            <option value="combined">Combined</option>
+            <option value="alerts">Alerts</option>
+            <option value="process">Process</option>
+            <option value="tracking">Tracking</option>
+          </select>
+          <input id="logs_limit" type="number" value="300" min="50" step="50" style="width:120px" />
+          <button id="logs_refresh">Refresh</button>
+          <label style="margin-left:8px"><input id="logs_autorefresh" type="checkbox" checked /> auto</label>
+        </div>
+        <pre id="logs_output" style="height:420px;overflow:auto;background:#0d1117;color:#c9d1d9;padding:12px;border-radius:6px;"></pre>
+      </section>
+
+      <section id="tab-tracked" class="tab">
+        <h2>Tracked Alerts</h2>
+        <table id="tracked_table">
+          <thead>
+            <tr>
+              <th>Token</th><th>Alerted</th><th>Score</th><th>Conviction</th>
+              <th>Price (first → last → peak)</th>
+              <th>MCap (first → last → peak)</th>
+              <th>Last Liquidity</th><th>Last 24h Vol</th><th>Outcome</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </section>
     </main>
 
     <script>
+      // ---------- Tabs ----------
+      function showTab(name){
+        document.querySelectorAll('.nav-link').forEach(a=>a.classList.remove('active'));
+        document.querySelectorAll('.tab').forEach(s=>s.classList.remove('visible'));
+        document.querySelector(`.nav-link[data-tab="${name}"]`)?.classList.add('active');
+        document.getElementById(`tab-${name}`)?.classList.add('visible');
+      }
+      document.querySelectorAll('.nav-link').forEach(a=>a.addEventListener('click', e=>{e.preventDefault();showTab(a.dataset.tab);}));
+      showTab('dashboard');
+
       async function fetchStats() {
         try {
           const r = await fetch('/api/stats');
@@ -196,6 +243,59 @@
         }
       }
       document.getElementById('sql_run').addEventListener('click', runSQL);
+
+      // ---------- Logs ----------
+      let logsTimer = null;
+      async function fetchLogs(){
+        const type = document.getElementById('logs_type').value;
+        const limit = parseInt(document.getElementById('logs_limit').value||300,10);
+        try{
+          const r = await fetch(`/api/logs?type=${encodeURIComponent(type)}&limit=${limit}`);
+          const data = await r.json();
+          const out = (data.rows||[]).map(x=>{
+            try { return JSON.stringify(x); } catch(e) { return String(x); }
+          }).join('\n');
+          const pre = document.getElementById('logs_output');
+          const atBottom = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 5;
+          pre.textContent = out;
+          if(atBottom) pre.scrollTop = pre.scrollHeight;
+        }catch(e){/* ignore */}
+      }
+      function startLogsAuto(){
+        if (logsTimer) clearInterval(logsTimer);
+        if (document.getElementById('logs_autorefresh').checked){
+          logsTimer = setInterval(fetchLogs, 3000);
+        }
+      }
+      document.getElementById('logs_refresh').addEventListener('click', fetchLogs);
+      document.getElementById('logs_autorefresh').addEventListener('change', startLogsAuto);
+      fetchLogs(); startLogsAuto();
+
+      // ---------- Tracked ----------
+      async function fetchTracked(){
+        try{
+          const r = await fetch('/api/tracked?limit=200');
+          const data = await r.json();
+          const tbody = document.querySelector('#tracked_table tbody');
+          tbody.innerHTML = '';
+          (data.rows||[]).forEach(row=>{
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+              <td><code>${(row.token||'').slice(0,8)}...</code></td>
+              <td>${row.alerted_at||''}</td>
+              <td>${row.final_score??''}</td>
+              <td>${row.conviction||''}</td>
+              <td>${[row.first_price,row.last_price,row.peak_price].map(v=>v!=null?Number(v).toFixed(8):'').join(' → ')}</td>
+              <td>${[row.first_mcap,row.last_mcap,row.peak_mcap].map(v=>v!=null?('$'+Number(v).toLocaleString()):'').join(' → ')}</td>
+              <td>${row.last_liq!=null?('$'+Number(row.last_liq).toLocaleString()):''}</td>
+              <td>${row.last_vol24!=null?('$'+Number(row.last_vol24).toLocaleString()):''}</td>
+              <td>${row.outcome||''}${row.peak_drawdown_pct!=null?(' ('+Number(row.peak_drawdown_pct).toFixed(1)+'%)'):''}</td>
+            `;
+            tbody.appendChild(tr);
+          })
+        }catch(e){/* ignore */}
+      }
+      fetchTracked(); setInterval(fetchTracked, 15000);
     </script>
   </body>
   </html>

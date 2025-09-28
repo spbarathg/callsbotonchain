@@ -110,6 +110,90 @@ def create_app() -> Flask:
         }
         return jsonify(data)
 
+    @app.get("/api/logs")
+    def api_logs():
+        try:
+            log_type = (request.args.get("type") or "combined").lower()
+            limit = int(request.args.get("limit") or 300)
+        except Exception:
+            log_type = "combined"; limit = 300
+
+        alerts = _read_jsonl(alerts_path, limit=max(500, limit))
+        process = _read_jsonl(process_path, limit=max(500, limit))
+        tracking = _read_jsonl(tracking_path, limit=max(500, limit))
+
+        if log_type == "alerts":
+            return jsonify({"ok": True, "rows": alerts[-limit:]})
+        if log_type == "process":
+            return jsonify({"ok": True, "rows": process[-limit:]})
+        if log_type == "tracking":
+            return jsonify({"ok": True, "rows": tracking[-limit:]})
+
+        # combined view
+        def _tag(rows, tag):
+            out = []
+            for r in rows:
+                rr = dict(r); rr.setdefault("_type", tag); out.append(rr)
+            return out
+        combined = _tag(alerts, "alerts") + _tag(process, "process") + _tag(tracking, "tracking")
+        combined.sort(key=lambda r: _coerce_ts(r.get("ts")), reverse=True)
+        return jsonify({"ok": True, "rows": combined[:limit]})
+
+    @app.get("/api/tracked")
+    def api_tracked():
+        try:
+            limit = int(request.args.get("limit") or 200)
+        except Exception:
+            limit = 200
+        rows: List[Dict[str, Any]] = []
+        try:
+            con = sqlite3.connect(default_db, timeout=5)
+            cur = con.cursor()
+            cur.execute(
+                """
+                SELECT t.token_address,
+                       t.alerted_at,
+                       t.final_score,
+                       t.conviction_type,
+                       s.first_price_usd,
+                       s.last_price_usd,
+                       s.peak_price_usd,
+                       s.first_market_cap_usd,
+                       s.last_market_cap_usd,
+                       s.peak_market_cap_usd,
+                       s.last_liquidity_usd,
+                       s.last_volume_24h_usd,
+                       s.peak_drawdown_pct,
+                       s.outcome
+                FROM alerted_tokens t
+                JOIN alerted_token_stats s ON s.token_address = t.token_address
+                ORDER BY datetime(COALESCE(s.last_checked_at, t.alerted_at)) DESC
+                LIMIT ?
+                """,
+                (limit,)
+            )
+            for r in cur.fetchall() or []:
+                rows.append({
+                    "token": r[0],
+                    "alerted_at": r[1],
+                    "final_score": r[2],
+                    "conviction": r[3],
+                    "first_price": r[4],
+                    "last_price": r[5],
+                    "peak_price": r[6],
+                    "first_mcap": r[7],
+                    "last_mcap": r[8],
+                    "peak_mcap": r[9],
+                    "last_liq": r[10],
+                    "last_vol24": r[11],
+                    "peak_drawdown_pct": r[12],
+                    "outcome": r[13],
+                })
+            cur.close(); con.close()
+        except Exception:
+            rows = []
+        return jsonify({"ok": True, "rows": rows})
+
     @app.post("/api/toggles")
     def api_set_toggles():
         try:
