@@ -181,6 +181,6 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    print("Not a standalone entrypoint. Use: python scripts/bot.py run|web|trade")
 
 

@@ -1,35 +1,61 @@
-﻿# Secrets and env
-.env
-*.env
-
-# Databases and state
-alerted_tokens.db
-*.sqlite
-*.db
-var/*.db
-var/*.sqlite
-var/*.db-journal
-var/*.sqlite-journal
-var/*.session
-
-# Python artifacts
+﻿# Python
 __pycache__/
 *.py[cod]
-*.pyo
-*.pyd
+*$py.class
 
-# Virtual environments
-.venv/
+# Virtual envs
+.env
+.venv
 venv/
-env/
+ENV/
 
-# Editor/OS
-.vscode/
-.idea/.DS_Store
+# OS files
+.DS_Store
 Thumbs.db
 
-# Local data and analytics (keep private)
-data/
-exports/
+# Editor
+.vscode/
+.idea/
+*.code-workspace
+
+# Logs and runtime artifacts
 logs/
-analytics/
+*.log
+*.jsonl
+data/logs/
+var/
+*.pid
+*.lock
+
+# Databases and sessions
+*.db
+*.sqlite
+*.sqlite3
+**/relay_user.session
+
+# Exports, backups, analytics outputs
+exports/
+**/exports/
+**/backups/
+**/analysis_*/
+**/analysis_charts/
+**/simple_analysis_charts/
+**/analytics/*.png
+**/analytics/*.csv
+**/analytics/*.json
+
+# Notebooks and reports
+*.ipynb
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+
+# Environment files
+*.env
+.env.*
+
+# Coverage/test (no tests yet, but ignore if appear)
+.coverage
+htmlcov/

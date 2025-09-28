@@ -1,7 +1,8 @@
 # notify.py
-import requests
 import time
 from config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+from config import HTTP_TIMEOUT_TELEGRAM
+from app.http_client import request_json
 
 def send_telegram_alert(message: str) -> bool:
     if not message or not message.strip():
@@ -15,30 +16,27 @@ def send_telegram_alert(message: str) -> bool:
         "parse_mode": "HTML",  # Allow HTML formatting
     }
     
-    # Add timeout and retry logic
     max_retries = 3
-    timeout = 10
-    
     for attempt in range(max_retries):
-        try:
-            resp = requests.post(url, json=data, timeout=timeout)
-            if resp.status_code == 200:
-                print("✅ Telegram message sent successfully")
-                return True
-            elif resp.status_code == 429:  # Rate limited
-                print(f"Telegram rate limited, waiting... (attempt {attempt + 1})")
-                time.sleep(2 ** attempt)
-                continue
-            else:
-                print(f"Error sending Telegram message: {resp.status_code}, {resp.text}")
-                if attempt < max_retries - 1:
-                    time.sleep(1)
-                    continue
-        except requests.exceptions.RequestException as e:
-            print(f"Request exception on Telegram attempt {attempt + 1}: {e}")
+        result = request_json("POST", url, json=data, timeout=HTTP_TIMEOUT_TELEGRAM)
+        status = result.get("status_code")
+        if status == 200:
+            print("✅ Telegram message sent successfully")
+            return True
+        elif status == 429:
+            print(f"Telegram rate limited, waiting... (attempt {attempt + 1})")
+            time.sleep(2 ** attempt)
+            continue
+        elif status is None:
+            print(f"Request exception on Telegram attempt {attempt + 1}: {result.get('error')}")
             if attempt < max_retries - 1:
                 time.sleep(2 ** attempt)
                 continue
-    
+        else:
+            txt = result.get("text") if result.get("json") is None else None
+            print(f"Error sending Telegram message: {status}, {txt}")
+            if attempt < max_retries - 1:
+                time.sleep(1)
+                continue
     print(f"Failed to send Telegram message after {max_retries} attempts")
     return False

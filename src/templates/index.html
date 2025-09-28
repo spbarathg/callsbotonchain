@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>CALLSBOTONCHAIN Dashboard</title>
+    <link rel="stylesheet" href="/static/styles.css">
+  </head>
+  <body>
+    <header>
+      <h1>CALLSBOTONCHAIN</h1>
+      <div class="subtitle">Live Bot Status</div>
+    </header>
+    <main>
+      <section class="cards">
+        <div class="card">
+          <div class="label">Total Alerts</div>
+          <div class="value" id="total_alerts">-</div>
+        </div>
+        <div class="card">
+          <div class="label">Cooldowns</div>
+          <div class="value" id="cooldowns">-</div>
+        </div>
+        <div class="card">
+          <div class="label">Tracking Tokens</div>
+          <div class="value" id="tracking_count">-</div>
+        </div>
+        <div class="card">
+          <div class="label">Last Cycle</div>
+          <div class="value" id="last_cycle">-</div>
+        </div>
+        <div class="card">
+          <div class="label">Signals</div>
+          <div class="value"><label class="switch"><input type="checkbox" id="signals_toggle"><span class="slider"></span></label></div>
+        </div>
+        <div class="card">
+          <div class="label">Trading</div>
+          <div class="value"><label class="switch"><input type="checkbox" id="trading_toggle"><span class="slider"></span></label></div>
+        </div>
+        <div class="card">
+          <div class="label">2x Rate</div>
+          <div class="value" id="rate_2x">-</div>
+        </div>
+        <div class="card">
+          <div class="label">5x Rate</div>
+          <div class="value" id="rate_5x">-</div>
+        </div>
+        <div class="card">
+          <div class="label">Rug Rate</div>
+          <div class="value" id="rug_rate">-</div>
+        </div>
+        <div class="card">
+          <div class="label">Median TTP (s)</div>
+          <div class="value" id="median_ttp">-</div>
+        </div>
+        <div class="card">
+          <div class="label">Realized PnL</div>
+          <div class="value" id="realized_pnl">-</div>
+        </div>
+      </section>
+
+      <section>
+        <h2>Recent Alerts</h2>
+        <table id="alerts_table">
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>Token</th>
+              <th>Symbol</th>
+              <th>Score</th>
+              <th>Conviction</th>
+              <th>MCap</th>
+              <th>Liquidity</th>
+              <th>24h Vol</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </section>
+
+      <section>
+        <h2>SQL Console</h2>
+        <div class="sql-controls">
+          <select id="sql_target">
+            <option value="signals">Signals DB</option>
+            <option value="trading">Trading DB</option>
+            <option value="custom">Custom Path</option>
+          </select>
+          <input id="sql_path" type="text" placeholder="custom db path (when Custom selected)" style="width: 40%" />
+          <label><input id="sql_write" type="checkbox" /> allow writes</label>
+          <button id="sql_run">Run</button>
+        </div>
+        <textarea id="sql_query" rows="6" style="width:100%;margin-top:8px;" placeholder="SELECT * FROM alerted_tokens LIMIT 10;"></textarea>
+        <div id="sql_status" class="muted" style="margin:8px 0 4px;"></div>
+        <div id="sql_results"></div>
+      </section>
+    </main>
+
+    <script>
+      async function fetchStats() {
+        try {
+          const r = await fetch('/api/stats');
+          const data = await r.json();
+
+          document.getElementById('total_alerts').textContent = data.total_alerts ?? '-';
+          document.getElementById('cooldowns').textContent = data.cooldowns ?? '-';
+          document.getElementById('tracking_count').textContent = data.tracking_count ?? '-';
+
+          const hb = data.last_heartbeat || {};
+          const cycle = hb.cycle || '-';
+          const feedItems = hb.feed_items != null ? hb.feed_items : '-';
+          document.getElementById('last_cycle').textContent = `${cycle} (${feedItems})`;
+
+          const tbody = document.querySelector('#alerts_table tbody');
+          tbody.innerHTML = '';
+          (data.recent_alerts || []).forEach(a => {
+            const tr = document.createElement('tr');
+            const t = a.ts || '';
+            tr.innerHTML = `
+              <td>${t}</td>
+              <td><code>${(a.token || '').slice(0,8)}...</code></td>
+              <td>${a.symbol || ''}</td>
+              <td>${a.score != null ? a.score : ''}</td>
+              <td>${a.conviction || ''}</td>
+              <td>${a.market_cap != null ? ('$' + Number(a.market_cap).toLocaleString()) : ''}</td>
+              <td>${a.liquidity != null ? ('$' + Number(a.liquidity).toLocaleString()) : ''}</td>
+              <td>${a.vol24 != null ? ('$' + Number(a.vol24).toLocaleString()) : ''}</td>
+            `;
+            tbody.appendChild(tr);
+          });
+
+          // toggles
+          const toggles = data.toggles || {};
+          document.getElementById('signals_toggle').checked = !!toggles.signals_enabled;
+          document.getElementById('trading_toggle').checked = !!toggles.trading_enabled;
+
+          // summaries
+          const sig = data.signals_summary || {};
+          const trad = data.trading_summary || {};
+          document.getElementById('rate_2x').textContent = sig.rate_ge_2x != null ? (sig.rate_ge_2x * 100).toFixed(1) + '%' : '-';
+          document.getElementById('rate_5x').textContent = sig.rate_ge_5x != null ? (sig.rate_ge_5x * 100).toFixed(1) + '%' : '-';
+          document.getElementById('rug_rate').textContent = sig.rug_rate != null ? (sig.rug_rate * 100).toFixed(1) + '%' : '-';
+          document.getElementById('median_ttp').textContent = sig.median_ttp_price_s != null ? sig.median_ttp_price_s : '-';
+          document.getElementById('realized_pnl').textContent = trad.realized_pnl_total != null ? ('$' + Number(trad.realized_pnl_total).toLocaleString()) : '-';
+        } catch (e) {
+          console.error('Failed to fetch stats', e);
+        }
+      }
+      fetchStats();
+      setInterval(fetchStats, 5000);
+
+      async function postToggles() {
+        const signals_enabled = document.getElementById('signals_toggle').checked;
+        const trading_enabled = document.getElementById('trading_toggle').checked;
+        try {
+          await fetch('/api/toggles', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ signals_enabled, trading_enabled }) });
+        } catch (e) {
+          console.error('Failed to update toggles', e);
+        }
+      }
+      document.getElementById('signals_toggle').addEventListener('change', postToggles);
+      document.getElementById('trading_toggle').addEventListener('change', postToggles);
+
+      function renderTable(columns, rows) {
+        const el = document.createElement('table');
+        el.innerHTML = `
+          <thead><tr>${columns.map(c => `<th>${c}</th>`).join('')}</tr></thead>
+          <tbody>
+            ${rows.map(r => `<tr>${columns.map(c => `<td>${r[c] != null ? r[c] : ''}</td>`).join('')}</tr>`).join('')}
+          </tbody>
+        `;
+        return el;
+      }
+
+      async function runSQL() {
+        const target = document.getElementById('sql_target').value;
+        const path = document.getElementById('sql_path').value.trim();
+        const allow_writes = document.getElementById('sql_write').checked;
+        const query = document.getElementById('sql_query').value;
+        const status = document.getElementById('sql_status');
+        const results = document.getElementById('sql_results');
+        status.textContent = 'Running...';
+        results.innerHTML = '';
+        try {
+          const r = await fetch('/api/sql', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ target, path, allow_writes, query }) });
+          const data = await r.json();
+          if (!data.ok) {
+            status.textContent = `Error: ${data.error || 'unknown'}`;
+            return;
+          }
+          status.textContent = `OK • rows: ${data.rows.length} • db: ${data.db}`;
+          const table = renderTable(data.columns || [], data.rows || []);
+          results.appendChild(table);
+        } catch (e) {
+          status.textContent = 'Request failed';
+        }
+      }
+      document.getElementById('sql_run').addEventListener('click', runSQL);
+    </script>
+  </body>
+  </html>
+
+

@@ -254,17 +254,36 @@ def get_alerted_tokens_batch(limit: int = 25, older_than_minutes: int = 55):
     """Return a batch of alerted tokens that haven't been checked recently."""
     conn = _get_conn()
     c = conn.cursor()
-    c.execute(
-        """
-        SELECT t.token_address
-        FROM alerted_token_stats s
-        JOIN alerted_tokens t ON t.token_address = s.token_address
-        WHERE (strftime('%s','now') - strftime('%s', COALESCE(s.last_checked_at, '1970-01-01 00:00:00'))) > (? * 60)
-        ORDER BY (s.last_checked_at IS NOT NULL), s.last_checked_at ASC
-        LIMIT ?
-        """,
-        (older_than_minutes, limit),
-    )
+    try:
+        c.execute(
+            """
+            SELECT t.token_address
+            FROM alerted_token_stats s
+            JOIN alerted_tokens t ON t.token_address = s.token_address
+            WHERE s.last_checked_at IS NULL OR s.last_checked_at < datetime('now', printf('-%d minutes', ?))
+            ORDER BY (s.last_checked_at IS NOT NULL), s.last_checked_at ASC
+            LIMIT ?
+            """,
+            (older_than_minutes, limit),
+        )
+    except Exception as e:
+        from app.logger_utils import log_process
+        try:
+            log_process({"type": "error", "stage": "get_alerted_tokens_batch", "error": str(e)})
+        except Exception:
+            pass
+        # Fallback to previous expression if printf not supported
+        c.execute(
+            """
+            SELECT t.token_address
+            FROM alerted_token_stats s
+            JOIN alerted_tokens t ON t.token_address = s.token_address
+            WHERE (strftime('%s','now') - strftime('%s', COALESCE(s.last_checked_at, '1970-01-01 00:00:00'))) > (? * 60)
+            ORDER BY (s.last_checked_at IS NOT NULL), s.last_checked_at ASC
+            LIMIT ?
+            """,
+            (older_than_minutes, limit),
+        )
     rows = [r[0] for r in c.fetchall()]
     conn.close()
     return rows

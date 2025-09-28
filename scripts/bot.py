@@ -62,6 +62,32 @@ except Exception:
         return False
 from app.logger_utils import log_alert, log_tracking, log_process, log_heartbeat
 import html
+from app.toggles import signals_enabled
+
+# Optional Prometheus metrics (enable with CALLSBOT_METRICS_ENABLED=true)
+METRICS_ENABLED = (os.getenv("CALLSBOT_METRICS_ENABLED", "false").strip().lower() == "true")
+METRICS_PORT_ENV = os.getenv("CALLSBOT_METRICS_PORT")
+_metrics = {"enabled": False}
+if METRICS_ENABLED or METRICS_PORT_ENV:
+    try:
+        from prometheus_client import Counter, Gauge, start_http_server
+        _port = 9108
+        try:
+            if METRICS_PORT_ENV:
+                _port = int(METRICS_PORT_ENV)
+        except Exception:
+            _port = 9108
+        _addr = os.getenv("CALLSBOT_METRICS_ADDR", "0.0.0.0")
+        start_http_server(port=_port, addr=_addr)
+        _metrics["processed_total"] = Counter("callsbot_processed_total", "Total processed transactions")
+        _metrics["alerts_total"] = Counter("callsbot_alerts_total", "Total alerts sent")
+        _metrics["feed_items"] = Gauge("callsbot_feed_items", "Items received in last feed cycle")
+        _metrics["api_calls_saved"] = Gauge("callsbot_api_calls_saved", "API calls saved due to prelim gating")
+        _metrics["cooldowns_total"] = Counter("callsbot_cooldowns_total", "Cooldowns due to rate limit/quota", ["reason"]) 
+        _metrics["last_cycle_type"] = Gauge("callsbot_last_cycle_type", "Last cycle type: 1=smart, 0=general")
+        _metrics["enabled"] = True
+    except Exception:
+        _metrics["enabled"] = False
 
 # Global flag for graceful shutdown
 shutdown_flag = False
@@ -212,6 +238,15 @@ def run_bot():
     is_smart_cycle = False
     while not shutdown_flag:
         try:
+            # Respect signals toggle: if disabled, idle-loop while keeping heartbeats
+            if not signals_enabled():
+                print("Signals disabled via toggle. Sleeping...")
+                for _ in range(max(5, FETCH_INTERVAL // 2)):
+                    if shutdown_flag:
+                        break
+                    time.sleep(1)
+                continue
+
             # Alternate between general feed and smart-money-only feed
             if is_smart_cycle:
                 feed = fetch_solana_feed(cursor_smart, smart_money_only=True)
@@ -245,6 +280,12 @@ def run_bot():
                     time.sleep(1)
                 # Do not process this cycle; flip cycle to avoid hammering the same endpoint
                 is_smart_cycle = not is_smart_cycle
+                # Metrics: record cooldown
+                if _metrics.get("enabled"):
+                    try:
+                        _metrics["cooldowns_total"].labels(reason=str(feed_error)).inc()
+                    except Exception:
+                        pass
                 continue
 
             # Log the number of items returned this cycle for visibility
@@ -260,6 +301,13 @@ def run_bot():
                 })
             except Exception:
                 pass
+            # Metrics: update gauges for cycle and feed size
+            if _metrics.get("enabled"):
+                try:
+                    _metrics["feed_items"].set(items_count)
+                    _metrics["last_cycle_type"].set(1 if is_smart_cycle else 0)
+                except Exception:
+                    pass
             
             if not feed.get("transactions"):
                 print(f"No new transactions found")
@@ -327,6 +375,11 @@ def run_bot():
                     continue
 
                 processed_count += 1
+                if _metrics.get("enabled"):
+                    try:
+                        _metrics["processed_total"].inc()
+                    except Exception:
+                        pass
 
                 if token_address in session_alerted_tokens or has_been_alerted(token_address):
                     continue  # skip previously alerted tokens
@@ -359,6 +412,11 @@ def run_bot():
                     if not should_fetch_detailed_stats(token_address, preliminary_score):
                         print(f"Token {token_address} prelim: {preliminary_score}/10 (skipped detailed analysis)")
                         api_calls_saved += 1  # Track credits saved
+                        if _metrics.get("enabled"):
+                            try:
+                                _metrics["api_calls_saved"].set(api_calls_saved)
+                            except Exception:
+                                pass
                         continue
                     
                     # STEP 4: EXPENSIVE API CALL - Only for high-potential tokens
@@ -543,6 +601,11 @@ def run_bot():
                                 pass
                             session_alerted_tokens.add(token_address)
                             alert_count += 1
+                            if _metrics.get("enabled"):
+                                try:
+                                    _metrics["alerts_total"].inc()
+                                except Exception:
+                                    pass
                             print(f"Alert #{alert_count} sent for token {token_address} (Final: {score}/10, Prelim: {preliminary_score}/10)")
                             try:
                                 log_process({
@@ -740,8 +803,26 @@ def run_bot():
     print(f"Bot stopped gracefully. Processed {processed_count} tokens, sent {alert_count} alerts.")
 
 if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(description="CALLSBOTONCHAIN controller")
+    sub = parser.add_subparsers(dest="cmd")
+    sub.add_parser("run", help="Run the signals bot (default)")
+    webp = sub.add_parser("web", help="Run the dashboard web server")
+    webp.add_argument("--host", default=os.getenv("DASH_HOST", "0.0.0.0"))
+    webp.add_argument("--port", type=int, default=int(os.getenv("DASH_PORT", "8080")))
+    trad = sub.add_parser("trade", help="Run tradingSystem CLI loop (respects web toggle)")
+    args = parser.parse_args()
+    cmd = args.cmd or "run"
     try:
-        run_bot()
+        if cmd == "web":
+            from src.server import create_app
+            app = create_app()
+            app.run(host=args.host, port=args.port, debug=False)
+        elif cmd == "trade":
+            from tradingSystem.cli import run as trade_run
+            trade_run()
+        else:
+            run_bot()
     except Exception as e:
         print(f"Fatal error: {e}")
         sys.exit(1)

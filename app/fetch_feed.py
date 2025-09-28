@@ -1,9 +1,10 @@
 # fetch_feed.py
-import requests
 import time
 from datetime import datetime, timezone
 from typing import Optional
 from config import CIELO_API_KEY, MIN_USD_VALUE, CIELO_LIST_ID, CIELO_NEW_TRADE_ONLY
+from config import HTTP_TIMEOUT_FEED
+from app.http_client import request_json
 try:
     from config import CIELO_LIST_IDS  # optional multi-list support
 except Exception:
@@ -83,21 +84,18 @@ def fetch_solana_feed(cursor=None, smart_money_only: bool = False) -> Dict[str, 
     # Cielo is case-insensitive, but align with other modules using X-API-Key
     headers = {"X-API-Key": CIELO_API_KEY}
     
-    # Add timeout and retry logic
-    max_retries = 3
-    timeout = 10
-    
     last_retry_after: Optional[int] = None
     quota_exceeded = False
+    max_retries = 3
     for attempt in range(max_retries):
-        try:
-            resp = requests.get(url, params=params, headers=headers, timeout=timeout)
-            if resp.status_code == 200:
-                api_response = resp.json()
+        result = request_json("GET", url, params=params, headers=headers, timeout=HTTP_TIMEOUT_FEED)
+        status = result.get("status_code")
+        if status == 200:
+            api_response = result.get("json") or {}
+            try:
                 # Convert Cielo API format to expected format
                 if api_response.get("status") == "ok" and "data" in api_response:
                     data = api_response["data"]
-                    # Adapt to both items-based and flat list responses
                     items = data.get("items") if isinstance(data, dict) else None
                     if items is None and isinstance(api_response.get("data"), list):
                         items = api_response["data"]
@@ -107,47 +105,44 @@ def fetch_solana_feed(cursor=None, smart_money_only: bool = False) -> Dict[str, 
                                          if isinstance(data, dict) else None),
                         "error": None,
                     }
-                # Unexpected shape but still HTTP 200
-                return {
-                    "transactions": [],
-                    "next_cursor": None,
-                    "error": "unexpected_response_shape",
-                }
-            elif resp.status_code == 429:  # Rate limited
-                # Capture retry-after if available and detect quota exhaustion
-                try:
-                    body = resp.json()
-                except Exception:
-                    body = {}
-                msg = (body.get("message") or "").lower()
-                if "maximum api credit" in msg or "quota" in msg:
-                    quota_exceeded = True
-                retry_after = _parse_retry_after_seconds(resp)
-                if retry_after is not None:
-                    last_retry_after = max(last_retry_after or 0, retry_after)
-                print(f"Rate limited, waiting before retry... (attempt {attempt + 1})")
-                time.sleep(retry_after if retry_after is not None else (2 ** attempt))  # Backoff
-                continue
-            else:
-                print(f"Error fetching feed: {resp.status_code}, {resp.text}")
-                if attempt < max_retries - 1:
-                    time.sleep(1)  # Brief pause before retry
-                    continue
-                return {
-                    "transactions": [],
-                    "next_cursor": None,
-                    "error": f"http_{resp.status_code}",
-                }
-        except requests.exceptions.RequestException as e:
-            print(f"Request exception on attempt {attempt + 1}: {e}")
-            if attempt < max_retries - 1:
-                time.sleep(2 ** attempt)  # Exponential backoff
-                continue
+            except Exception:
+                pass
+            # Unexpected shape but still HTTP 200
             return {
                 "transactions": [],
                 "next_cursor": None,
-                "error": "network_exception",
+                "error": "unexpected_response_shape",
             }
+        elif status == 429:
+            body = result.get("json") or {}
+            msg = (body.get("message") or "").lower()
+            if "maximum api credit" in msg or "quota" in msg:
+                quota_exceeded = True
+            # Build a fake response-like for header parsing compatibility
+            class _R:
+                def __init__(self, headers):
+                    self.headers = headers
+            retry_after = _parse_retry_after_seconds(_R(result.get("headers") or {}))
+            if retry_after is not None:
+                last_retry_after = max(last_retry_after or 0, retry_after)
+            print(f"Rate limited, waiting before retry... (attempt {attempt + 1})")
+            time.sleep(retry_after if retry_after is not None else (2 ** attempt))
+            continue
+        elif status is None:
+            print(f"Network exception on attempt {attempt + 1}: {result.get('error')}")
+            if attempt < max_retries - 1:
+                time.sleep(2 ** attempt)
+                continue
+            return {"transactions": [], "next_cursor": None, "error": "network_exception"}
+        else:
+            text = None
+            if result.get("json") is None:
+                text = (result.get("text") or "")
+            print(f"Error fetching feed: {status}, {text}")
+            if attempt < max_retries - 1:
+                time.sleep(1)
+                continue
+            return {"transactions": [], "next_cursor": None, "error": f"http_{status}"}
     
     # All retries failed
     print(f"Failed to fetch feed after {max_retries} attempts")

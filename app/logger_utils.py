@@ -1,5 +1,6 @@
 import json
 import os
+import sys
 from datetime import datetime
 from typing import Any, Dict, Optional
 from threading import Lock
@@ -8,6 +9,9 @@ from threading import Lock
 # Persist logs locally under data/logs by default (never committed)
 LOG_DIR = os.getenv("CALLSBOT_LOG_DIR", os.path.join("data", "logs"))
 os.makedirs(LOG_DIR, exist_ok=True)
+
+# Optional: mirror JSON logs to stdout for containers/process supervisors
+LOG_STDOUT = (os.getenv("CALLSBOT_LOG_STDOUT", "false").strip().lower() == "true")
 
 _log_lock = Lock()
 
@@ -29,6 +33,14 @@ def write_jsonl(filename: str, record: Dict[str, Any]) -> None:
             os.write(fd, data)
         finally:
             os.close(fd)
+        if LOG_STDOUT:
+            try:
+                # Best-effort mirror to stdout for observability (container-friendly)
+                sys.stdout.write(line)
+                sys.stdout.flush()
+            except Exception:
+                # Never fail the main process due to logging
+                pass
 
 
 def log_alert(event: Dict[str, Any]) -> None:

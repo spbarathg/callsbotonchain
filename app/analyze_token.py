@@ -1,8 +1,6 @@
 # analyze_token.py
-import requests
 import time
 from typing import Dict, Tuple, List, Any, Optional
-from app.logger_utils import log_alert  # if needed later; safe to leave
 from config import (
     CIELO_API_KEY,
     CIELO_DISABLE_STATS,
@@ -49,6 +47,8 @@ from config import (
     ENFORCE_BUNDLER_CAP,
     ENFORCE_INSIDER_CAP,
 )
+from config import HTTP_TIMEOUT_STATS
+from app.http_client import request_json
 
 def _dexscreener_best_pair(pairs: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     if not pairs:
@@ -68,10 +68,11 @@ def _get_token_stats_dexscreener(token_address: str) -> Dict[str, Any]:
     max_retries = 3
     timeout = 20
     for attempt in range(max_retries):
-        try:
-            resp = requests.get(url, timeout=timeout)
-            if resp.status_code == 200:
-                data = resp.json() or {}
+        result = request_json("GET", url, timeout=HTTP_TIMEOUT_STATS)
+        status = result.get("status_code")
+        if status == 200:
+            data = result.get("json") or {}
+            try:
                 pairs = data.get("pairs") or []
                 best = _dexscreener_best_pair(pairs)
                 if not best:
@@ -117,16 +118,14 @@ def _get_token_stats_dexscreener(token_address: str) -> Dict[str, Any]:
                 }
                 stats["_source"] = "dexscreener"
                 return stats
-            elif resp.status_code == 429:
-                time.sleep(2 ** attempt)
-                continue
-            else:
-                if attempt < max_retries - 1:
-                    time.sleep(1)
-                    continue
-        except requests.exceptions.RequestException:
+            except Exception:
+                return {}
+        elif status == 429:
+            time.sleep(2 ** attempt)
+            continue
+        else:
             if attempt < max_retries - 1:
-                time.sleep(2 ** attempt)
+                time.sleep(1)
                 continue
     return {}
 
@@ -134,9 +133,29 @@ def _get_token_stats_dexscreener(token_address: str) -> Dict[str, Any]:
 _deny_cache = {"stats_denied": False}
 
 
+_stats_cache: Dict[str, Tuple[float, Dict[str, Any]]] = {}
+_STATS_TTL_SEC = 90
+
+def _cache_get(token_address: str) -> Optional[Dict[str, Any]]:
+    import time as _t
+    item = _stats_cache.get(token_address)
+    if not item:
+        return None
+    ts, data = item
+    if (_t.time() - ts) <= _STATS_TTL_SEC:
+        return data
+    return None
+
+def _cache_set(token_address: str, data: Dict[str, Any]) -> None:
+    import time as _t
+    _stats_cache[token_address] = (_t.time(), data)
+
 def get_token_stats(token_address: str) -> Dict[str, Any]:
     if not token_address:
         return {}
+    cached = _cache_get(token_address)
+    if cached:
+        return cached
         
     base_urls = [
         "https://feed-api.cielo.finance/api/v1",
@@ -159,12 +178,12 @@ def get_token_stats(token_address: str) -> Dict[str, Any]:
     combos = [(b, h) for b in base_urls for h in header_variants]
     last_status = None
     for idx, (base, hdrs) in enumerate(combos):
-        try:
-            url = f"{base}/token/stats"
-            resp = requests.get(url, params=params, headers=hdrs, timeout=timeout)
-            last_status = resp.status_code
-            if resp.status_code == 200:
-                api_response = resp.json()
+        url = f"{base}/token/stats"
+        result = request_json("GET", url, params=params, headers=hdrs, timeout=HTTP_TIMEOUT_STATS)
+        last_status = result.get("status_code")
+        if last_status == 200:
+            api_response = result.get("json") or {}
+            try:
                 if api_response.get("status") == "ok" and "data" in api_response:
                     api_response["data"]["_source"] = "cielo"
                     # Augment with DexScreener when critical fields are missing
@@ -204,28 +223,33 @@ def get_token_stats(token_address: str) -> Dict[str, Any]:
                                     data['_source'] = f"{data.get('_source') or 'cielo'}+ds"
                                 except Exception:
                                     data['_source'] = 'cielo+ds'
+                        _cache_set(token_address, data)
                         return data
                     except Exception:
                         # If augmentation fails for any reason, still return Cielo data
+                        _cache_set(token_address, api_response["data"])
                         return api_response["data"]
                 if isinstance(api_response, dict):
                     api_response["_source"] = "cielo"
+                _cache_set(token_address, api_response)
                 return api_response
-            elif resp.status_code == 429:
-                print(f"Rate limited on token stats, waiting... (variant {idx + 1})")
-                time.sleep(1)
-                continue
-            elif resp.status_code == 404:
-                print(f"Token {token_address} not found")
+            except Exception:
                 return {}
-            elif resp.status_code in (401, 403):
-                # Try next variant
-                continue
-            else:
-                print(f"Error fetching token stats: {resp.status_code}, {resp.text}")
-                continue
-        except requests.exceptions.RequestException as e:
-            print(f"Request exception on token stats (variant {idx + 1}): {e}")
+        elif last_status == 429:
+            print(f"Rate limited on token stats, waiting... (variant {idx + 1})")
+            time.sleep(1)
+            continue
+        elif last_status == 404:
+            print(f"Token {token_address} not found")
+            return {}
+        elif last_status in (401, 403):
+            # Try next variant
+            continue
+        else:
+            txt = None
+            if result.get("json") is None:
+                txt = result.get("text")
+            print(f"Error fetching token stats: {last_status}, {txt}")
             continue
 
     if last_status in (401, 403):
@@ -367,37 +391,31 @@ def _extract_holder_risk(stats: Dict[str, Any]) -> Dict[str, Optional[float]]:
     }
 
 
-def check_senior_strict(stats: Dict[str, Any], token_address: Optional[str] = None) -> bool:
-    """
-    Strict safety checks (Senior Moiety).
-    - Must not be a honeypot.
-    - Must not be a stable/major mint or blocklisted symbol.
-    - If REQUIRE_MINT_REVOKED: mint must be revoked (True).
-    - If REQUIRE_LP_LOCKED: LP must be locked/burned (True).
-    - Top 10 holder concentration must be <= MAX_TOP10_CONCENTRATION (if known).
-    """
+def _check_senior_common(stats: Dict[str, Any], token_address: Optional[str], *, allow_unknown: bool,
+                         top10_buffer: float, bundlers_buffer: float, insiders_buffer: float) -> bool:
     if not stats:
         return False
 
-    # Honeypot disqualifier
     security = stats.get('security') or {}
     if security.get('is_honeypot') is True:
         return False
 
-    # Blocklist/stable filters
     sym = (stats.get('symbol') or '').upper()
     if sym and sym in BLOCKLIST_SYMBOLS:
         return False
     if token_address and token_address in STABLE_MINTS:
         return False
 
-    # Mint revoked requirement
     if REQUIRE_MINT_REVOKED:
         mint_revoked = security.get('is_mint_revoked')
-        if mint_revoked is not True:
+        if mint_revoked is True:
+            pass
+        elif mint_revoked is None:
+            if not allow_unknown:
+                return False
+        else:
             return False
 
-    # LP locked requirement
     if REQUIRE_LP_LOCKED:
         liq = stats.get('liquidity') or {}
         lp_locked = (
@@ -405,10 +423,14 @@ def check_senior_strict(stats: Dict[str, Any], token_address: Optional[str] = No
             or liq.get('lock_status') in ("locked", "burned")
             or liq.get('is_lp_burned')
         )
-        if lp_locked is not True:
+        if lp_locked is True:
+            pass
+        elif lp_locked is None:
+            if not allow_unknown:
+                return False
+        else:
             return False
 
-    # If very large cap and holder stats required, drop when holder data missing
     try:
         mcap_val = float(stats.get('market_cap_usd') or 0)
     except Exception:
@@ -418,35 +440,37 @@ def check_senior_strict(stats: Dict[str, Any], token_address: Optional[str] = No
         if not holders:
             return False
 
-    # Top-10 concentration strict cap
     top10 = _extract_top10_concentration(stats)
-    if (MAX_TOP10_CONCENTRATION or 0) and (top10 is not None) and (top10 > float(MAX_TOP10_CONCENTRATION)):
+    cap = float(MAX_TOP10_CONCENTRATION or 0) + float(top10_buffer or 0)
+    if cap and (top10 is not None) and (top10 > cap):
         return False
 
-    # Holder-composition strict caps (if available)
     hr = _extract_holder_risk(stats)
-    if ENFORCE_BUNDLER_CAP and (hr.get("bundlers") is not None) and (MAX_BUNDLERS_PERCENT or 0) and (hr["bundlers"] > float(MAX_BUNDLERS_PERCENT)):
+    bundlers_cap = float(MAX_BUNDLERS_PERCENT or 0) + float(bundlers_buffer or 0)
+    if ENFORCE_BUNDLER_CAP and (hr.get("bundlers") is not None) and bundlers_cap and (hr["bundlers"] > bundlers_cap):
         return False
-    if ENFORCE_INSIDER_CAP and (hr.get("insiders") is not None) and (MAX_INSIDERS_PERCENT or 0) and (hr["insiders"] > float(MAX_INSIDERS_PERCENT)):
+    insiders_cap = float(MAX_INSIDERS_PERCENT or 0) + float(insiders_buffer or 0)
+    if ENFORCE_INSIDER_CAP and (hr.get("insiders") is not None) and insiders_cap and (hr["insiders"] > insiders_cap):
         return False
 
     return True
 
+def check_senior_strict(stats: Dict[str, Any], token_address: Optional[str] = None) -> bool:
+    return _check_senior_common(stats, token_address,
+                                allow_unknown=False,
+                                top10_buffer=0.0,
+                                bundlers_buffer=0.0,
+                                insiders_buffer=0.0)
 
-def check_junior_strict(stats: Dict[str, Any], final_score: int) -> bool:
-    """
-    Strict metric checks (Junior Moiety).
-    - Liquidity >= MIN_LIQUIDITY_USD
-    - 24h Volume >= VOL_24H_MIN_FOR_ALERT
-    - Market Cap <= MAX_MARKET_CAP_FOR_DEFAULT_ALERT (allow if strong 1h momentum)
-    - Volume/MCap ratio >= VOL_TO_MCAP_RATIO_MIN
-    - Final score >= HIGH_CONFIDENCE_SCORE
-    """
+
+def _check_junior_common(stats: Dict[str, Any], final_score: int, *,
+                         liquidity_factor: float, mcap_factor: float, vol_to_mcap_factor: float, score_reduction: int) -> bool:
     if not stats:
         return False
 
     liq_usd = _extract_liquidity_usd(stats)
-    if (MIN_LIQUIDITY_USD or 0) and liq_usd < float(MIN_LIQUIDITY_USD):
+    min_liq = float(MIN_LIQUIDITY_USD or 0) * float(liquidity_factor or 1.0)
+    if liq_usd < min_liq:
         return False
 
     volume_24h = stats.get('volume', {}).get('24h', {}).get('volume_usd', 0) or 0
@@ -454,7 +478,8 @@ def check_junior_strict(stats: Dict[str, Any], final_score: int) -> bool:
         volume_24h = float(volume_24h)
     except Exception:
         volume_24h = 0.0
-    if (VOL_24H_MIN_FOR_ALERT or 0) and volume_24h < float(VOL_24H_MIN_FOR_ALERT):
+    vol_min = float(VOL_24H_MIN_FOR_ALERT or 0)
+    if vol_min and volume_24h < vol_min:
         return False
 
     market_cap = stats.get('market_cap_usd', 0) or 0
@@ -467,124 +492,47 @@ def check_junior_strict(stats: Dict[str, Any], final_score: int) -> bool:
         change_1h = float(change_1h)
     except Exception:
         change_1h = 0.0
-    mcap_ok = (market_cap or 0) <= float(MAX_MARKET_CAP_FOR_DEFAULT_ALERT or 0)
+    mcap_cap = float(MAX_MARKET_CAP_FOR_DEFAULT_ALERT or 0) * float(mcap_factor or 1.0)
+    mcap_ok = (market_cap or 0) <= mcap_cap
     if not mcap_ok:
-        # allow large cap if strong momentum
         if not (change_1h >= float(LARGE_CAP_MOMENTUM_GATE_1H or 0)):
             return False
 
-    # Volume to MarketCap ratio
     ratio = 0.0
     try:
         ratio = (volume_24h or 0.0) / (market_cap or 1.0)
     except Exception:
         ratio = 0.0
-    if (VOL_TO_MCAP_RATIO_MIN or 0) and ratio < float(VOL_TO_MCAP_RATIO_MIN):
-        return False
-
-    if final_score < int(HIGH_CONFIDENCE_SCORE or 0):
-        return False
-
-    return True
-
-
-def check_senior_nuanced(stats: Dict[str, Any], token_address: Optional[str] = None) -> bool:
-    """
-    Nuanced safety checks (Senior Moiety).
-    - Same as strict, but allows unknown security fields when ALLOW_UNKNOWN_SECURITY is True.
-    - Top 10 holder concentration can be slightly higher (<= MAX_TOP10_CONCENTRATION + buffer).
-    """
-    if not stats:
-        return False
-
-    security = stats.get('security') or {}
-    if security.get('is_honeypot') is True:
-        return False
-
-    sym = (stats.get('symbol') or '').upper()
-    if sym and sym in BLOCKLIST_SYMBOLS:
-        return False
-    if token_address and token_address in STABLE_MINTS:
-        return False
-
-    if REQUIRE_MINT_REVOKED:
-        mint_revoked = security.get('is_mint_revoked')
-        if mint_revoked is False:
-            return False
-        if mint_revoked is None and not ALLOW_UNKNOWN_SECURITY:
-            return False
-
-    if REQUIRE_LP_LOCKED:
-        liq = stats.get('liquidity') or {}
-        lp_locked = (
-            liq.get('is_lp_locked')
-            or liq.get('lock_status') in ("locked", "burned")
-            or liq.get('is_lp_burned')
-        )
-        if lp_locked is False:
-            return False
-        if (lp_locked is None) and (not ALLOW_UNKNOWN_SECURITY):
-            return False
-
-    # Relaxed top-10 concentration
-    buffer_cap = float(MAX_TOP10_CONCENTRATION or 0) + float(NUANCED_TOP10_CONCENTRATION_BUFFER or 0)
-    top10 = _extract_top10_concentration(stats)
-    if (top10 is not None) and buffer_cap and (top10 > buffer_cap):
-        return False
-
-    # Relaxed holder-composition caps (allow small buffer)
-    hr = _extract_holder_risk(stats)
-    bundlers_cap = float(MAX_BUNDLERS_PERCENT or 0) + float(NUANCED_BUNDLERS_BUFFER or 0)
-    insiders_cap = float(MAX_INSIDERS_PERCENT or 0) + float(NUANCED_INSIDERS_BUFFER or 0)
-    if ENFORCE_BUNDLER_CAP and (hr.get("bundlers") is not None) and bundlers_cap and (hr["bundlers"] > bundlers_cap):
-        return False
-    if ENFORCE_INSIDER_CAP and (hr.get("insiders") is not None) and insiders_cap and (hr["insiders"] > insiders_cap):
-        return False
-
-    return True
-
-
-def check_junior_nuanced(stats: Dict[str, Any], final_score: int) -> bool:
-    """
-    Nuanced metric checks (Junior Moiety).
-    - Liquidity >= MIN_LIQUIDITY_USD * NUANCED_LIQUIDITY_FACTOR
-    - Market Cap <= MAX_MARKET_CAP_FOR_DEFAULT_ALERT * NUANCED_MCAP_FACTOR
-    - Volume/MCap ratio >= VOL_TO_MCAP_RATIO_MIN * NUANCED_VOL_TO_MCAP_FACTOR
-    - Final score >= HIGH_CONFIDENCE_SCORE - NUANCED_SCORE_REDUCTION
-    """
-    if not stats:
-        return False
-
-    liq_usd = _extract_liquidity_usd(stats)
-    min_liq = float(MIN_LIQUIDITY_USD or 0) * float(NUANCED_LIQUIDITY_FACTOR or 1.0)
-    if liq_usd < min_liq:
-        return False
-
-    market_cap = stats.get('market_cap_usd', 0) or 0
-    try:
-        market_cap = float(market_cap)
-    except Exception:
-        market_cap = 0.0
-    mcap_cap = float(MAX_MARKET_CAP_FOR_DEFAULT_ALERT or 0) * float(NUANCED_MCAP_FACTOR or 1.0)
-    if (mcap_cap or 0) and market_cap > mcap_cap:
-        return False
-
-    volume_24h = stats.get('volume', {}).get('24h', {}).get('volume_usd', 0) or 0
-    try:
-        volume_24h = float(volume_24h)
-    except Exception:
-        volume_24h = 0.0
-    ratio_req = float(VOL_TO_MCAP_RATIO_MIN or 0) * float(NUANCED_VOL_TO_MCAP_FACTOR or 1.0)
-    ratio = 0.0
-    try:
-        ratio = (volume_24h or 0.0) / (market_cap or 1.0)
-    except Exception:
-        ratio = 0.0
+    ratio_req = float(VOL_TO_MCAP_RATIO_MIN or 0) * float(vol_to_mcap_factor or 1.0)
     if (ratio_req or 0) and ratio < ratio_req:
         return False
 
-    min_score = int(HIGH_CONFIDENCE_SCORE or 0) - int(NUANCED_SCORE_REDUCTION or 0)
+    min_score = int(HIGH_CONFIDENCE_SCORE or 0) - int(score_reduction or 0)
     if final_score < max(0, min_score):
         return False
 
     return True
+
+
+def check_junior_strict(stats: Dict[str, Any], final_score: int) -> bool:
+    return _check_junior_common(stats, final_score,
+                                liquidity_factor=1.0,
+                                mcap_factor=1.0,
+                                vol_to_mcap_factor=1.0,
+                                score_reduction=0)
+
+
+def check_senior_nuanced(stats: Dict[str, Any], token_address: Optional[str] = None) -> bool:
+    return _check_senior_common(stats, token_address,
+                                allow_unknown=ALLOW_UNKNOWN_SECURITY,
+                                top10_buffer=float(NUANCED_TOP10_CONCENTRATION_BUFFER or 0),
+                                bundlers_buffer=float(NUANCED_BUNDLERS_BUFFER or 0),
+                                insiders_buffer=float(NUANCED_INSIDERS_BUFFER or 0))
+
+
+def check_junior_nuanced(stats: Dict[str, Any], final_score: int) -> bool:
+    return _check_junior_common(stats, final_score,
+                                liquidity_factor=float(NUANCED_LIQUIDITY_FACTOR or 1.0),
+                                mcap_factor=float(NUANCED_MCAP_FACTOR or 1.0),
+                                vol_to_mcap_factor=float(NUANCED_VOL_TO_MCAP_FACTOR or 1.0),
+                                score_reduction=int(NUANCED_SCORE_REDUCTION or 0))

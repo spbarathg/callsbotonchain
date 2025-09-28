@@ -60,6 +60,16 @@ if FETCH_INTERVAL < 30:
     raise ValueError("FETCH_INTERVAL should be at least 30 seconds to avoid rate limiting")
 
 # ==============================================
+# HTTP/NETWORK SETTINGS
+# ==============================================
+# Centralize HTTP knobs to tune behavior without code changes
+HTTP_TIMEOUT_FEED = int(os.getenv("HTTP_TIMEOUT_FEED", "10"))
+HTTP_TIMEOUT_STATS = int(os.getenv("HTTP_TIMEOUT_STATS", "20"))
+HTTP_TIMEOUT_TELEGRAM = int(os.getenv("HTTP_TIMEOUT_TELEGRAM", "10"))
+HTTP_MAX_RETRIES = int(os.getenv("HTTP_MAX_RETRIES", "3"))
+HTTP_BACKOFF_FACTOR = float(os.getenv("HTTP_BACKOFF_FACTOR", "0.5"))
+
+# ==============================================
 # SCORING THRESHOLDS (override via .env)
 # ==============================================
 def _get_int(name: str, default: int) -> int:
@@ -228,33 +238,41 @@ RUG_MIN_LIQUIDITY_USD = _get_int("RUG_MIN_LIQUIDITY_USD", 1)  # <= this treated 
 # TIER3 (Exploratory/Relax): score>=8, liq>=5k, mcap<=5M, vol/mcap>=0.3
 GATE_MODE = (os.getenv("GATE_MODE", "TIER2") or "TIER2").upper()
 
+GATE_PRESETS = {
+    "TIER1": {
+        "HIGH_CONFIDENCE_SCORE": 9,
+        "MIN_LIQUIDITY_USD": 20_000,
+        "VOL_24H_MIN_FOR_ALERT": 50_000,
+        "MAX_MARKET_CAP_FOR_DEFAULT_ALERT": 1_500_000,
+        "VOL_TO_MCAP_RATIO_MIN": 0.60,
+    },
+    "TIER2": {
+        "HIGH_CONFIDENCE_SCORE": 9,
+        "MIN_LIQUIDITY_USD": 10_000,
+        "VOL_24H_MIN_FOR_ALERT": 0,
+        "MAX_MARKET_CAP_FOR_DEFAULT_ALERT": 1_500_000,
+        "VOL_TO_MCAP_RATIO_MIN": 0.60,
+    },
+    "TIER3": {
+        "HIGH_CONFIDENCE_SCORE": 8,
+        "MIN_LIQUIDITY_USD": 5_000,
+        "VOL_24H_MIN_FOR_ALERT": 0,
+        "MAX_MARKET_CAP_FOR_DEFAULT_ALERT": 5_000_000,
+        "VOL_TO_MCAP_RATIO_MIN": 0.30,
+    },
+}
+
 def _apply_gate_mode_overrides() -> None:
-    """
-    Apply tiered gate overrides. When GATE_MODE is set, we treat these
-    overrides as authoritative (do not let older .env values dilute the tier).
-    """
     global HIGH_CONFIDENCE_SCORE, MIN_LIQUIDITY_USD, VOL_24H_MIN_FOR_ALERT
     global MAX_MARKET_CAP_FOR_DEFAULT_ALERT, VOL_TO_MCAP_RATIO_MIN
-    mode = GATE_MODE
-    if mode == "TIER1":
-        HIGH_CONFIDENCE_SCORE = 9
-        MIN_LIQUIDITY_USD = 20_000
-        VOL_24H_MIN_FOR_ALERT = 50_000
-        MAX_MARKET_CAP_FOR_DEFAULT_ALERT = 1_500_000
-        VOL_TO_MCAP_RATIO_MIN = 0.60
-    elif mode == "TIER2":
-        HIGH_CONFIDENCE_SCORE = 9
-        MIN_LIQUIDITY_USD = 10_000
-        VOL_24H_MIN_FOR_ALERT = 0
-        MAX_MARKET_CAP_FOR_DEFAULT_ALERT = 1_500_000
-        VOL_TO_MCAP_RATIO_MIN = 0.60
-    elif mode == "TIER3":
-        HIGH_CONFIDENCE_SCORE = 8
-        MIN_LIQUIDITY_USD = 5_000
-        VOL_24H_MIN_FOR_ALERT = 0
-        MAX_MARKET_CAP_FOR_DEFAULT_ALERT = 5_000_000
-        VOL_TO_MCAP_RATIO_MIN = 0.30
-    # else: unknown mode → keep env/defaults
+    preset = GATE_PRESETS.get(GATE_MODE)
+    if not preset:
+        return
+    HIGH_CONFIDENCE_SCORE = preset["HIGH_CONFIDENCE_SCORE"]
+    MIN_LIQUIDITY_USD = preset["MIN_LIQUIDITY_USD"]
+    VOL_24H_MIN_FOR_ALERT = preset["VOL_24H_MIN_FOR_ALERT"]
+    MAX_MARKET_CAP_FOR_DEFAULT_ALERT = preset["MAX_MARKET_CAP_FOR_DEFAULT_ALERT"]
+    VOL_TO_MCAP_RATIO_MIN = preset["VOL_TO_MCAP_RATIO_MIN"]
 
 _apply_gate_mode_overrides()
 

@@ -1,0 +1,26 @@
+:root { --bg: #0f1115; --panel: #171a21; --text: #e6eaf0; --muted: #9aa4b2; --accent: #4cc9f0; }
+* { box-sizing: border-box; }
+body { margin: 0; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; background: var(--bg); color: var(--text); }
+header { padding: 20px clamp(16px, 6vw, 64px); background: var(--panel); border-bottom: 1px solid #232837; }
+h1 { margin: 0; font-size: 20px; font-weight: 700; letter-spacing: 0.4px; }
+.subtitle { color: var(--muted); margin-top: 6px; font-size: 13px; }
+main { padding: 20px clamp(16px, 6vw, 64px); }
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; margin-bottom: 24px; }
+.card { background: var(--panel); border: 1px solid #232837; border-radius: 10px; padding: 14px; }
+.label { color: var(--muted); font-size: 12px; margin-bottom: 6px; }
+.value { font-size: 28px; font-weight: 800; color: var(--accent); }
+section h2 { font-size: 14px; color: var(--muted); letter-spacing: 0.3px; margin: 18px 0 10px; }
+table { width: 100%; border-collapse: collapse; background: var(--panel); border: 1px solid #232837; border-radius: 10px; overflow: hidden; }
+th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid #232837; font-size: 13px; }
+thead th { color: var(--muted); background: #141821; font-weight: 600; }
+tbody tr:hover { background: #141821; }
+code { background: #0e121a; padding: 2px 6px; border-radius: 6px; color: #a8b3cf; }
+
+/* Toggle switch */
+.switch { position: relative; display: inline-block; width: 48px; height: 26px; }
+.switch input { opacity: 0; width: 0; height: 0; }
+.slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #2a3242; transition: .2s; border-radius: 26px; border: 1px solid #3a4356; }
+.slider:before { position: absolute; content: ""; height: 20px; width: 20px; left: 3px; bottom: 3px; background-color: #c6d2e3; transition: .2s; border-radius: 50%; }
+input:checked + .slider { background-color: #19c37d; }
+input:checked + .slider:before { transform: translateX(22px); }
+
