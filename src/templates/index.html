@@ -7,15 +7,17 @@
     <link rel="stylesheet" href="/static/styles.css">
   </head>
   <body>
-    <header>
-      <h1>CALLSBOTONCHAIN</h1>
-      <nav class="navbar">
-        <a href="#" class="nav-link active" data-tab="dashboard">Dashboard</a>
-        <a href="#" class="nav-link" data-tab="logs">Logs</a>
-        <a href="#" class="nav-link" data-tab="tracked">Tracked</a>
-      </nav>
-    </header>
-    <main>
+    <div class="layout">
+      <aside class="sidebar">
+        <div class="brand">CALLSBOTONCHAIN</div>
+        <nav class="navbar vertical">
+          <a href="#" class="nav-link active" data-tab="dashboard">Dashboard</a>
+          <a href="#" class="nav-link" data-tab="logs">Logs</a>
+          <a href="#" class="nav-link" data-tab="tracked">Tracked</a>
+        </nav>
+      </aside>
+      <main class="content">
+        <header class="content-header"><h1 class="page-title" id="page_title">Dashboard</h1></header>
       <section id="tab-dashboard" class="tab visible">
       <div class="cards">
         <div class="card">
@@ -131,7 +133,8 @@
           <tbody></tbody>
         </table>
       </section>
-    </main>
+      </main>
+    </div>
 
     <script>
       // ---------- Tabs ----------
@@ -140,6 +143,8 @@
         document.querySelectorAll('.tab').forEach(s=>s.classList.remove('visible'));
         document.querySelector(`.nav-link[data-tab="${name}"]`)?.classList.add('active');
         document.getElementById(`tab-${name}`)?.classList.add('visible');
+        const title = name.charAt(0).toUpperCase()+name.slice(1);
+        const el = document.getElementById('page_title'); if (el) el.textContent = title;
       }
       document.querySelectorAll('.nav-link').forEach(a=>a.addEventListener('click', e=>{e.preventDefault();showTab(a.dataset.tab);}));
       showTab('dashboard');
@@ -252,9 +257,8 @@
         try{
           const r = await fetch(`/api/logs?type=${encodeURIComponent(type)}&limit=${limit}`);
           const data = await r.json();
-          const out = (data.rows||[]).map(x=>{
-            try { return JSON.stringify(x); } catch(e) { return String(x); }
-          }).join('\n');
+          const pretty = (o)=>{ try{ return JSON.stringify(o, null, 2); }catch(e){ return String(o); } };
+          const out = (data.rows||[]).map(pretty).join('\n\n');
           const pre = document.getElementById('logs_output');
           const atBottom = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 5;
           pre.textContent = out;
@@ -269,6 +273,17 @@
       }
       document.getElementById('logs_refresh').addEventListener('click', fetchLogs);
       document.getElementById('logs_autorefresh').addEventListener('change', startLogsAuto);
+      // optional wrap/copy controls if present
+      const wrapEl = document.getElementById('logs_wrap');
+      if (wrapEl) wrapEl.addEventListener('change', ()=>{
+        const pre = document.getElementById('logs_output');
+        if (wrapEl.checked){ pre.style.whiteSpace='pre-wrap'; pre.style.wordBreak='break-word'; }
+        else { pre.style.whiteSpace='pre'; pre.style.wordBreak='normal'; }
+      });
+      const copyEl = document.getElementById('logs_copy');
+      if (copyEl) copyEl.addEventListener('click', async ()=>{
+        try{ await navigator.clipboard.writeText(document.getElementById('logs_output').textContent||''); }catch(e){}
+      });
       fetchLogs(); startLogsAuto();
 
       // ---------- Tracked ----------
