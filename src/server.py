@@ -151,29 +151,55 @@ def create_app() -> Flask:
         try:
             con = sqlite3.connect(default_db, timeout=5)
             cur = con.cursor()
-            cur.execute(
-                """
-                SELECT t.token_address,
-                       t.alerted_at,
-                       t.final_score,
-                       t.conviction_type,
-                       s.first_price_usd,
-                       s.last_price_usd,
-                       s.peak_price_usd,
-                       s.first_market_cap_usd,
-                       s.last_market_cap_usd,
-                       s.peak_market_cap_usd,
-                       s.last_liquidity_usd,
-                       s.last_volume_24h_usd,
-                       s.peak_drawdown_pct,
-                       s.outcome
-                FROM alerted_tokens t
-                LEFT JOIN alerted_token_stats s ON s.token_address = t.token_address
-                ORDER BY datetime(COALESCE(s.last_checked_at, t.alerted_at)) DESC
-                LIMIT ?
-                """,
-                (limit,)
-            )
+            try:
+                cur.execute(
+                    """
+                    SELECT t.token_address,
+                           t.alerted_at,
+                           t.final_score,
+                           t.conviction_type,
+                           s.first_price_usd,
+                           s.last_price_usd,
+                           s.peak_price_usd,
+                           s.first_market_cap_usd,
+                           s.last_market_cap_usd,
+                           s.peak_market_cap_usd,
+                           s.last_liquidity_usd,
+                           s.last_volume_24h_usd,
+                           s.peak_drawdown_pct,
+                           s.outcome
+                    FROM alerted_tokens t
+                    LEFT JOIN alerted_token_stats s ON s.token_address = t.token_address
+                    ORDER BY datetime(COALESCE(s.last_checked_at, t.alerted_at)) DESC
+                    LIMIT ?
+                    """,
+                    (limit,)
+                )
+            except Exception:
+                # Fallback for older schemas missing some columns; select a compatible subset
+                cur.execute(
+                    """
+                    SELECT t.token_address,
+                           t.alerted_at,
+                           t.final_score,
+                           t.conviction_type,
+                           s.first_price_usd,
+                           s.last_price_usd,
+                           s.peak_price_usd,
+                           NULL AS first_market_cap_usd,
+                           NULL AS last_market_cap_usd,
+                           NULL AS peak_market_cap_usd,
+                           NULL AS last_liquidity_usd,
+                           NULL AS last_volume_24h_usd,
+                           NULL AS peak_drawdown_pct,
+                           NULL AS outcome
+                    FROM alerted_tokens t
+                    LEFT JOIN alerted_token_stats s ON s.token_address = t.token_address
+                    ORDER BY datetime(t.alerted_at) DESC
+                    LIMIT ?
+                    """,
+                    (limit,)
+                )
             for r in cur.fetchall() or []:
                 rows.append({
                     "token": r[0],
