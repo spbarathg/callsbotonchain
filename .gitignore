@@ -1,4 +1,12 @@
-﻿# Python
+﻿# Ignore runtime data and logs
+/var/
+/data/logs/
+
+# Editor and OS files
+.DS_Store
+Thumbs.db
+
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
