@@ -1,0 +1,25 @@
+.git
+__pycache__/
+.venv/
+venv/
+*.pyc
+
+# runtime/state data (use volumes in prod)
+state/
+var/
+data/
+exports/
+logs/
+*.db
+*.sqlite
+*.sqlite3
+
+# archives
+*.tar
+*.tar.gz
+*.tgz
+*.zip
+
+.DS_Store
+Thumbs.db
+
