@@ -5,6 +5,8 @@ from typing import Dict, Any, List
 import sqlite3
 
 from flask import Flask, jsonify, render_template, request
+from flask import Response
+import time
 from app.toggles import get_toggles, set_toggles
 
 
@@ -140,6 +142,73 @@ def create_app() -> Flask:
             "gates_summary": gates_summary,
         }
         return jsonify(data)
+
+    @app.get("/api/stream")
+    def api_stream():
+        def _gen():
+            while True:
+                try:
+                    alerts = _read_jsonl(alerts_path, limit=500)
+                    process = _read_jsonl(process_path, limit=1000)
+                    tracking = _read_jsonl(tracking_path, limit=500)
+
+                    total_alerts = len(alerts)
+                    last_alert = alerts[-1] if alerts else None
+                    last_heartbeat = None
+                    cooldowns: int = 0
+                    for rec in process:
+                        if rec.get("type") == "heartbeat":
+                            last_heartbeat = rec
+                        if rec.get("type") == "cooldown":
+                            cooldowns += 1
+
+                    recent_alerts = [
+                        {
+                            "token": a.get("token"),
+                            "symbol": a.get("symbol"),
+                            "score": a.get("final_score"),
+                            "conviction": a.get("conviction_type"),
+                            "market_cap": a.get("market_cap"),
+                            "liquidity": a.get("liquidity"),
+                            "vol24": a.get("volume_24h"),
+                            "ts": a.get("ts"),
+                        }
+                        for a in alerts[-20:]
+                    ][::-1]
+
+                    last_tracking: Dict[str, Dict[str, Any]] = {}
+                    for t in tracking:
+                        tok = t.get("token")
+                        if not tok:
+                            continue
+                        prev = last_tracking.get(tok)
+                        if not prev or _coerce_ts(t.get("ts")) > _coerce_ts(prev.get("ts")):
+                            last_tracking[tok] = t
+
+                    toggles = get_toggles()
+                    signals_db = _pick_signals_db_path(default_db)
+                    signals_summary = _signals_metrics(signals_db)
+                    trading_summary = _trading_metrics(trading_db)
+                    gates_summary = _gates_summary(alerts_path)
+                    payload = {
+                        "total_alerts": total_alerts,
+                        "cooldowns": cooldowns,
+                        "last_alert": last_alert,
+                        "last_heartbeat": last_heartbeat,
+                        "recent_alerts": recent_alerts,
+                        "tracking_count": len(last_tracking),
+                        "toggles": toggles,
+                        "signals_summary": signals_summary,
+                        "trading_summary": trading_summary,
+                        "gates_summary": gates_summary,
+                    }
+                    yield f"data: {json.dumps(payload)}\n\n"
+                except Exception:
+                    # keep the stream alive even if an iteration fails
+                    yield "event: ping\ndata: {}\n\n"
+                time.sleep(2)
+
+        return Response(_gen(), mimetype="text/event-stream")
 
     @app.get("/api/logs")
     def api_logs():

@@ -163,63 +163,73 @@
       document.querySelectorAll('.nav-link').forEach(a=>a.addEventListener('click', e=>{e.preventDefault();showTab(a.dataset.tab);}));
       showTab('dashboard');
 
+      let sseConnected = false;
+      function applyStats(data){
+        const sig = data.signals_summary || {};
+        document.getElementById('total_alerts').textContent = (sig.total_alerts ?? data.total_alerts) ?? '-';
+        document.getElementById('cooldowns').textContent = data.cooldowns ?? '-';
+        document.getElementById('tracking_count').textContent = data.tracking_count ?? '-';
+
+        const hb = data.last_heartbeat || {};
+        const cycle = hb.cycle || '-';
+        const feedItems = hb.feed_items != null ? hb.feed_items : '-';
+        document.getElementById('last_cycle').textContent = `${cycle} (${feedItems})`;
+
+        const tbody = document.querySelector('#alerts_table tbody');
+        tbody.innerHTML = '';
+        (data.recent_alerts || []).forEach(a => {
+          const tr = document.createElement('tr');
+          const t = a.ts || '';
+          tr.innerHTML = `
+            <td>${t}</td>
+            <td><code>${(a.token || '').slice(0,8)}...</code></td>
+            <td>${a.symbol || ''}</td>
+            <td>${a.score != null ? a.score : ''}</td>
+            <td>${a.conviction || ''}</td>
+            <td>${a.market_cap != null ? ('$' + Number(a.market_cap).toLocaleString()) : ''}</td>
+            <td>${a.liquidity != null ? ('$' + Number(a.liquidity).toLocaleString()) : ''}</td>
+            <td>${a.vol24 != null ? ('$' + Number(a.vol24).toLocaleString()) : ''}</td>
+          `;
+          tbody.appendChild(tr);
+        });
+
+        const toggles = data.toggles || {};
+        document.getElementById('signals_toggle').checked = !!toggles.signals_enabled;
+        document.getElementById('trading_toggle').checked = !!toggles.trading_enabled;
+
+        const sig2 = data.signals_summary || {};
+        const trad = data.trading_summary || {};
+        document.getElementById('rate_2x').textContent = sig2.rate_ge_2x != null ? (sig2.rate_ge_2x * 100).toFixed(1) + '%' : '-';
+        document.getElementById('rate_5x').textContent = sig2.rate_ge_5x != null ? (sig2.rate_ge_5x * 100).toFixed(1) + '%' : '-';
+        document.getElementById('rate_sub2x').textContent = sig2.sub_2x_rate != null ? (sig2.sub_2x_rate * 100).toFixed(1) + '%' : '-';
+        document.getElementById('rug_rate').textContent = sig2.rug_rate != null ? (sig2.rug_rate * 100).toFixed(1) + '%' : '-';
+        document.getElementById('median_ttp').textContent = sig2.median_ttp_price_s != null ? sig2.median_ttp_price_s : '-';
+        document.getElementById('realized_pnl').textContent = trad.realized_pnl_total != null ? ('$' + Number(trad.realized_pnl_total).toLocaleString()) : '-';
+        const pnl1 = sig2.avg_return_1h_pct;
+        document.getElementById('avg_pnl_1h').textContent = pnl1 != null ? (pnl1 >= 0 ? '+' : '') + pnl1.toFixed(1) + '%' : '-';
+        const wr1 = sig2.win_rate_1h;
+        document.getElementById('win_rate_1h').textContent = wr1 != null ? (wr1 * 100).toFixed(1) + '%' : '-';
+      }
+
       async function fetchStats() {
         try {
           const r = await fetch('/api/stats');
           const data = await r.json();
-
-          const sig = data.signals_summary || {};
-          document.getElementById('total_alerts').textContent = (sig.total_alerts ?? data.total_alerts) ?? '-';
-          document.getElementById('cooldowns').textContent = data.cooldowns ?? '-';
-          document.getElementById('tracking_count').textContent = data.tracking_count ?? '-';
-
-          const hb = data.last_heartbeat || {};
-          const cycle = hb.cycle || '-';
-          const feedItems = hb.feed_items != null ? hb.feed_items : '-';
-          document.getElementById('last_cycle').textContent = `${cycle} (${feedItems})`;
-
-          const tbody = document.querySelector('#alerts_table tbody');
-          tbody.innerHTML = '';
-          (data.recent_alerts || []).forEach(a => {
-            const tr = document.createElement('tr');
-            const t = a.ts || '';
-            tr.innerHTML = `
-              <td>${t}</td>
-              <td><code>${(a.token || '').slice(0,8)}...</code></td>
-              <td>${a.symbol || ''}</td>
-              <td>${a.score != null ? a.score : ''}</td>
-              <td>${a.conviction || ''}</td>
-              <td>${a.market_cap != null ? ('$' + Number(a.market_cap).toLocaleString()) : ''}</td>
-              <td>${a.liquidity != null ? ('$' + Number(a.liquidity).toLocaleString()) : ''}</td>
-              <td>${a.vol24 != null ? ('$' + Number(a.vol24).toLocaleString()) : ''}</td>
-            `;
-            tbody.appendChild(tr);
-          });
-
-          // toggles
-          const toggles = data.toggles || {};
-          document.getElementById('signals_toggle').checked = !!toggles.signals_enabled;
-          document.getElementById('trading_toggle').checked = !!toggles.trading_enabled;
-
-          // summaries
-          // already defined above
-          const trad = data.trading_summary || {};
-          document.getElementById('rate_2x').textContent = sig.rate_ge_2x != null ? (sig.rate_ge_2x * 100).toFixed(1) + '%' : '-';
-          document.getElementById('rate_5x').textContent = sig.rate_ge_5x != null ? (sig.rate_ge_5x * 100).toFixed(1) + '%' : '-';
-          document.getElementById('rate_sub2x').textContent = sig.sub_2x_rate != null ? (sig.sub_2x_rate * 100).toFixed(1) + '%' : '-';
-          document.getElementById('rug_rate').textContent = sig.rug_rate != null ? (sig.rug_rate * 100).toFixed(1) + '%' : '-';
-          document.getElementById('median_ttp').textContent = sig.median_ttp_price_s != null ? sig.median_ttp_price_s : '-';
-          document.getElementById('realized_pnl').textContent = trad.realized_pnl_total != null ? ('$' + Number(trad.realized_pnl_total).toLocaleString()) : '-';
-          const pnl1 = sig.avg_return_1h_pct;
-          document.getElementById('avg_pnl_1h').textContent = pnl1 != null ? (pnl1 >= 0 ? '+' : '') + pnl1.toFixed(1) + '%' : '-';
-          const wr1 = sig.win_rate_1h;
-          document.getElementById('win_rate_1h').textContent = wr1 != null ? (wr1 * 100).toFixed(1) + '%' : '-';
+          applyStats(data);
         } catch (e) {
           console.error('Failed to fetch stats', e);
         }
       }
+      try {
+        const evt = new EventSource('/api/stream');
+        evt.onmessage = (ev)=>{
+          sseConnected = true;
+          try { const data = JSON.parse(ev.data||'{}'); applyStats(data); } catch(e){}
+        };
+        evt.onerror = ()=>{ sseConnected = false; };
+      } catch (e) { /* ignore */ }
       fetchStats();
-      setInterval(fetchStats, 5000);
+      setInterval(()=>{ if (!sseConnected) fetchStats(); }, 5000);
 
       async function postToggles() {
         const signals_enabled = document.getElementById('signals_toggle').checked;
