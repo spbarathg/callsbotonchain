@@ -39,6 +39,32 @@ def _coerce_ts(s: Any) -> float:
         return 0.0
 
 
+def _pick_signals_db_path(preferred_path: str) -> str:
+    """Return the best available signals DB path by checking several candidates
+    and picking the one with the highest alerted_tokens row count.
+    """
+    candidates = [
+        preferred_path,
+        "/app/state/alerted_tokens.db",
+        "/app/var/alerted_tokens.db",
+        os.path.join("var", "alerted_tokens.db"),
+    ]
+    best_path = preferred_path
+    best_count = -1
+    for p in candidates:
+        try:
+            con = sqlite3.connect(p, timeout=3)
+            cur = con.cursor()
+            cur.execute("SELECT COUNT(1) FROM alerted_tokens")
+            n = int(cur.fetchone()[0])
+            cur.close(); con.close()
+            if n > best_count:
+                best_count = n; best_path = p
+        except Exception:
+            continue
+    return best_path
+
+
 def create_app() -> Flask:
     app = Flask(__name__, template_folder="templates", static_folder="static")
 
@@ -94,29 +120,7 @@ def create_app() -> Flask:
 
         toggles = get_toggles()
         # Choose best available signals DB (env, state, var) based on row counts
-        def _pick_signals_db() -> str:
-            candidates = [
-                default_db,
-                "/app/state/alerted_tokens.db",
-                "/app/var/alerted_tokens.db",
-                os.path.join("var", "alerted_tokens.db"),
-            ]
-            best_path = default_db
-            best_count = -1
-            for p in candidates:
-                try:
-                    con = sqlite3.connect(p, timeout=3)
-                    cur = con.cursor()
-                    cur.execute("SELECT COUNT(1) FROM alerted_tokens")
-                    n = int(cur.fetchone()[0])
-                    cur.close(); con.close()
-                    if n > best_count:
-                        best_count = n; best_path = p
-                except Exception:
-                    continue
-            return best_path
-
-        signals_db = _pick_signals_db()
+        signals_db = _pick_signals_db_path(default_db)
 
         # Derived summaries
         signals_summary = _signals_metrics(signals_db)
@@ -174,7 +178,8 @@ def create_app() -> Flask:
             limit = 200
         rows: List[Dict[str, Any]] = []
         try:
-            con = sqlite3.connect(default_db, timeout=5)
+            signals_db = _pick_signals_db_path(default_db)
+            con = sqlite3.connect(signals_db, timeout=5)
             cur = con.cursor()
             try:
                 cur.execute(
