@@ -93,8 +93,33 @@ def create_app() -> Flask:
                 last_tracking[tok] = t
 
         toggles = get_toggles()
+        # Choose best available signals DB (env, state, var) based on row counts
+        def _pick_signals_db() -> str:
+            candidates = [
+                default_db,
+                "/app/state/alerted_tokens.db",
+                "/app/var/alerted_tokens.db",
+                os.path.join("var", "alerted_tokens.db"),
+            ]
+            best_path = default_db
+            best_count = -1
+            for p in candidates:
+                try:
+                    con = sqlite3.connect(p, timeout=3)
+                    cur = con.cursor()
+                    cur.execute("SELECT COUNT(1) FROM alerted_tokens")
+                    n = int(cur.fetchone()[0])
+                    cur.close(); con.close()
+                    if n > best_count:
+                        best_count = n; best_path = p
+                except Exception:
+                    continue
+            return best_path
+
+        signals_db = _pick_signals_db()
+
         # Derived summaries
-        signals_summary = _signals_metrics(default_db)
+        signals_summary = _signals_metrics(signals_db)
         trading_summary = _trading_metrics(trading_db)
         gates_summary = _gates_summary(alerts_path)
         data = {
