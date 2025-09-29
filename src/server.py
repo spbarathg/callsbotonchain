@@ -168,7 +168,7 @@ def create_app() -> Flask:
                        s.peak_drawdown_pct,
                        s.outcome
                 FROM alerted_tokens t
-                JOIN alerted_token_stats s ON s.token_address = t.token_address
+                LEFT JOIN alerted_token_stats s ON s.token_address = t.token_address
                 ORDER BY datetime(COALESCE(s.last_checked_at, t.alerted_at)) DESC
                 LIMIT ?
                 """,
