@@ -214,7 +214,7 @@ def get_token_stats(token_address: str) -> Dict[str, Any]:
                             except Exception:
                                 return True
 
-                        if _missing_liq(data) or _missing_vol(data) or _missing_mcap(data):
+                        if _missing_liq(data) or _missing_vol(data) or _missing_mcap(data) or not data.get('symbol') or not data.get('name'):
                             ds = _get_token_stats_dexscreener(token_address)
                             if ds:
                                 # Liquidity
@@ -230,6 +230,11 @@ def get_token_stats(token_address: str) -> Dict[str, Any]:
                                 # Market cap
                                 if _missing_mcap(data) and (ds.get('market_cap_usd') is not None):
                                     data['market_cap_usd'] = ds.get('market_cap_usd')
+                                # Symbol/name enrichment for UI/alerts
+                                if (not data.get('symbol')) and ds.get('symbol'):
+                                    data['symbol'] = ds.get('symbol')
+                                if (not data.get('name')) and ds.get('name'):
+                                    data['name'] = ds.get('name')
                                 # Mark composite source
                                 try:
                                     data['_source'] = f"{data.get('_source') or 'cielo'}+ds"
