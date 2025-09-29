@@ -38,3 +38,4 @@ ENV CALLSBOT_LOG_STDOUT=true \
 CMD ["python", "scripts/bot.py"]
 
 
+
