@@ -330,6 +330,10 @@ def run_bot():
                             fallback_items = _fallback_feed_from_dexscreener(limit=40, smart_money_only=is_smart_cycle)
                     except Exception:
                         fallback_items = []
+                try:
+                    print(f"Fallback items count: {len(fallback_items) if fallback_items else 0}")
+                except Exception:
+                    pass
                 if fallback_items:
                     feed["transactions"] = fallback_items
                     items_count = len(fallback_items)
