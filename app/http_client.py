@@ -49,6 +49,22 @@ def request_json(method: str, url: str, *, params: Optional[Dict[str, Any]] = No
         "accept": "application/json, text/plain, */*",
         "user-agent": "callsbotonchain/1.0 (+https://github.com/spbarathg/callsbotonchain)",
     }
+    try:
+        # Host-specific header hints
+        if "geckoterminal.com" in url:
+            default_headers.update({
+                "referer": "https://www.geckoterminal.com/",
+                "origin": "https://www.geckoterminal.com",
+                "accept-language": "en-US,en;q=0.9",
+                "cache-control": "no-cache",
+            })
+        if "dexscreener.com" in url:
+            default_headers.update({
+                "referer": "https://dexscreener.com/",
+                "origin": "https://dexscreener.com",
+            })
+    except Exception:
+        pass
     merged_headers = dict(default_headers)
     if headers:
         try:
