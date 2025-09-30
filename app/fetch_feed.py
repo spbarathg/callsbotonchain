@@ -3,6 +3,7 @@ import requests
 import time
 from datetime import datetime, timezone
 from typing import Optional
+import os
 from config import CIELO_API_KEY, MIN_USD_VALUE, CIELO_LIST_ID, CIELO_NEW_TRADE_ONLY
 from config import HTTP_TIMEOUT_FEED
 from app.http_client import request_json
@@ -52,6 +53,20 @@ from typing import Dict, Any
 
 
 def fetch_solana_feed(cursor=None, smart_money_only: bool = False) -> Dict[str, Any]:
+    # Emergency switch: force fallback feed for resilience/testing
+    if os.getenv("CALLSBOT_FORCE_FALLBACK", "false").strip().lower() == "true":
+        try:
+            items = _fallback_feed_from_geckoterminal(limit=40)
+            if not items:
+                items = _fallback_feed_from_dexscreener(limit=40, smart_money_only=smart_money_only)
+            if items:
+                try:
+                    log_process({"type": "feed_fallback_forced", "count": len(items)})
+                except Exception:
+                    pass
+                return {"transactions": items, "next_cursor": None, "error": None}
+        except Exception:
+            return {"transactions": [], "next_cursor": None, "error": "forced_fallback_failed"}
     url = "https://feed-api.cielo.finance/api/v1/feed"
 
     # Base parameters (keep minimal to maximize visibility). We will try
