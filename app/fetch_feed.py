@@ -298,7 +298,9 @@ def _fallback_feed_from_dexscreener(limit: int = 30, smart_money_only: bool = Fa
             vol24 = float(vol24 or 0)
         except Exception:
             vol24 = 0.0
-        usd_val = max(300.0, min(max(liq * 0.015, vol24 * 0.02), 5000.0))
+        # Encourage detailed analysis by ensuring prelim score crosses threshold
+        min_usd = 1200.0 if smart_money_only else 800.0
+        usd_val = max(min_usd, min(max(float(liq or 0) * 0.02, float(vol24 or 0) * 0.03), 5000.0))
         tx = {
             # Structure mimics a Cielo feed item for downstream parsing
             "token0_address": sol_mint,
@@ -368,12 +370,22 @@ def _fallback_feed_from_geckoterminal(limit: int = 30) -> list:
                 continue
             # Synthesize usd_value from pool liquidity/volume where available
             attrs = item.get("attributes") or {}
-            liq_usd = float(attrs.get("liquidity_usd") or attrs.get("fdv_usd") or 0) if isinstance(attrs.get("liquidity_usd"), (int, float)) or isinstance(attrs.get("fdv_usd"), (int, float)) else 0.0
+            # Prefer FDV/MCAP to approximate activity if liquidity not present in this endpoint
+            fdv = 0.0
             try:
-                vol24 = float(((attrs.get("transactions") or {}).get("h24") or {}).get("volume") or 0)
+                fdv = float(attrs.get("fdv_usd") or attrs.get("market_cap_usd") or 0)
             except Exception:
-                vol24 = 0.0
-            usd_val = max(300.0, min(max(liq_usd * 0.01, vol24 * 0.02), 7500.0))
+                fdv = 0.0
+            base_price = 0.0
+            try:
+                base_price = float(attrs.get("base_token_price_usd") or 0)
+            except Exception:
+                base_price = 0.0
+            # Heuristic USD trade size: 1% of FDV capped, or synthetic from price
+            min_usd = 1000.0
+            est_from_fdv = (fdv * 0.01) if fdv > 0 else 0.0
+            est_from_price = (base_price * 120000.0) if base_price > 0 else 0.0
+            usd_val = max(min_usd, min(max(est_from_fdv, est_from_price), 7500.0))
             txs.append({
                 "token0_address": sol_mint,
                 "token1_address": token_addr,
