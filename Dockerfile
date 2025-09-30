@@ -40,3 +40,6 @@ CMD ["python", "scripts/bot.py"]
 
 
 
+
+
+

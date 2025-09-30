@@ -52,27 +52,28 @@ from typing import Dict, Any
 
 def fetch_solana_feed(cursor=None, smart_money_only: bool = False) -> Dict[str, Any]:
     url = "https://feed-api.cielo.finance/api/v1/feed"
-    
-    # Base parameters (keep minimal to maximize visibility)
-    params = {
+
+    # Base parameters (keep minimal to maximize visibility). We will try
+    # multiple variants because upstream APIs sometimes toggle between
+    # "chain" and "chains", and occasionally accept no chain filter.
+    base_params = {
         "limit": 100,
-        "chains": "solana",
-        "cursor": cursor
+        "cursor": cursor,
     }
     # Only include minimum_usd_value if configured > 0
     if MIN_USD_VALUE and MIN_USD_VALUE > 0:
-        params["minimum_usd_value"] = MIN_USD_VALUE
+        base_params["minimum_usd_value"] = MIN_USD_VALUE
     # Multi-list support: if CIELO_LIST_IDS present, prefer it; else fallback to single CIELO_LIST_ID
     if CIELO_LIST_IDS:
-        params["list_id"] = ",".join(str(x) for x in CIELO_LIST_IDS)
+        base_params["list_id"] = ",".join(str(x) for x in CIELO_LIST_IDS)
     elif CIELO_LIST_ID is not None:
-        params["list_id"] = CIELO_LIST_ID
+        base_params["list_id"] = CIELO_LIST_ID
     if CIELO_NEW_TRADE_ONLY:
-        params["new_trade"] = "true"
+        base_params["new_trade"] = "true"
     
     # Add smart money filters for enhanced detection
     if smart_money_only:
-        params.update({
+        base_params.update({
             "smart_money": "true",
             "min_wallet_pnl": "1000",  # Only profitable wallets
             "top_wallets": "true"
@@ -99,10 +100,50 @@ def fetch_solana_feed(cursor=None, smart_money_only: bool = False) -> Dict[str, 
             return {"transactions": [], "next_cursor": None, "error": "budget_exceeded"}
     except Exception:
         pass
+    # Build a small set of parameter variants to maximize compatibility
+    # with upstream API quirks.
+    def _param_variants() -> list:
+        variants = []
+        # Preferred modern form
+        v1 = dict(base_params)
+        v1["chains"] = "solana"
+        variants.append(v1)
+        # Single chain key variant
+        v2 = dict(base_params)
+        v2["chain"] = "solana"
+        variants.append(v2)
+        # Last resort: no chain filter
+        v3 = dict(base_params)
+        v3.pop("cursor", None) if v3.get("cursor") is None else None
+        variants.append(v3)
+        return variants
+
+    def _parse_items(api_response: Dict[str, Any]) -> Dict[str, Any]:
+        try:
+            # Shape A: {status:"ok", data:{items:[...], paging:{next_cursor}}}
+            if api_response.get("status") == "ok" and isinstance(api_response.get("data"), dict):
+                data = api_response["data"]
+                items = data.get("items") or []
+                next_cursor = (data.get("paging", {}) or {}).get("next_cursor")
+                return {"items": items or [], "next_cursor": next_cursor}
+            # Shape B: {status:"ok", data:[...]}
+            if api_response.get("status") == "ok" and isinstance(api_response.get("data"), list):
+                return {"items": api_response.get("data") or [], "next_cursor": None}
+            # Shape C: {items:[...], next_cursor:...}
+            if isinstance(api_response.get("items"), list):
+                return {"items": api_response.get("items") or [], "next_cursor": api_response.get("next_cursor")}
+            # Shape D: top-level list
+            if isinstance(api_response, list):
+                return {"items": api_response, "next_cursor": None}
+        except Exception:
+            pass
+        return {"items": [], "next_cursor": None}
+
     for attempt in range(max_retries):
-        # Try both header variants before counting an attempt
+        # Try both header and parameter variants before counting an attempt
         for headers in header_variants:
-            result = request_json("GET", url, params=params, headers=headers, timeout=HTTP_TIMEOUT_FEED)
+            for params in _param_variants():
+                result = request_json("GET", url, params=params, headers=headers, timeout=HTTP_TIMEOUT_FEED)
             status = result.get("status_code")
             if status == 200:
                 try:
@@ -110,27 +151,11 @@ def fetch_solana_feed(cursor=None, smart_money_only: bool = False) -> Dict[str, 
                 except Exception:
                     pass
                 api_response = result.get("json") or {}
-                try:
-                    # Convert Cielo API format to expected format
-                    if api_response.get("status") == "ok" and "data" in api_response:
-                        data = api_response["data"]
-                        items = data.get("items") if isinstance(data, dict) else None
-                        if items is None and isinstance(api_response.get("data"), list):
-                            items = api_response["data"]
-                        return {
-                            "transactions": items or [],
-                            "next_cursor": (data.get("paging", {}).get("next_cursor")
-                                             if isinstance(data, dict) else None),
-                            "error": None,
-                        }
-                except Exception:
-                    pass
-                # Unexpected shape but still HTTP 200
-                return {
-                    "transactions": [],
-                    "next_cursor": None,
-                    "error": "unexpected_response_shape",
-                }
+                parsed = _parse_items(api_response)
+                if parsed["items"]:
+                    return {"transactions": parsed["items"], "next_cursor": parsed.get("next_cursor"), "error": None}
+                # If 200 but empty, continue trying next param variant (could be filter mismatch)
+                continue
             elif status == 429:
                 body = result.get("json") or {}
                 msg = (body.get("message") or "").lower()
@@ -146,6 +171,7 @@ def fetch_solana_feed(cursor=None, smart_money_only: bool = False) -> Dict[str, 
                 print(f"Rate limited, waiting before retry... (attempt {attempt + 1})")
                 time.sleep(retry_after if retry_after is not None else (2 ** attempt))
                 break  # break header loop; retry after backoff
+            # Auth issues: try next header variant within the same attempt
             elif status in (401, 403):
                 # try next header variant within the same attempt
                 continue
