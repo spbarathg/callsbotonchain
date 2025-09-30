@@ -1,0 +1,13 @@
+:80 {
+	encode zstd gzip
+
+	@blocksql path /api/sql
+	respond @blocksql 403
+
+	basicauth /* {
+		# replace hash with output of: docker run --rm caddy:2 caddy hash-password --plaintext 'YOUR_PASSWORD'
+		admin JDJhJDEwJHByZWFjb21wdXRlLWhhc2gtdG8tcmVwbGFjZS1oZXJl
+	}
+
+	reverse_proxy web:8080
+}

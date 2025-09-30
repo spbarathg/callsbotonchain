@@ -335,6 +335,11 @@ def create_app() -> Flask:
 
     @app.post("/api/sql")
     def api_sql():
+        # Require admin key header if configured; default deny when not set
+        admin_key = os.getenv("CALLSBOT_SQL_KEY", "").strip()
+        req_key = request.headers.get("X-Callsbot-Admin-Key", "").strip()
+        if not admin_key or req_key != admin_key:
+            return jsonify({"ok": False, "error": "forbidden"}), 403
         body = request.get_json(force=True, silent=True) or {}
         query = str(body.get("query") or "").strip()
         target = str(body.get("target") or "signals")  # signals | trading | custom

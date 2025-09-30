@@ -1,25 +1,20 @@
-.git
 __pycache__/
-.venv/
-venv/
 *.pyc
-
-# runtime/state data (use volumes in prod)
-state/
-var/
-data/
-exports/
+*.pyo
+*.pyd
+*.db-shm
+*.db-wal
+.env
+.git/
+.gitignore
+pytest_output.txt
 logs/
-*.db
-*.sqlite
-*.sqlite3
-
-# archives
-*.tar
+node_modules/
+.data/
 *.tar.gz
-*.tgz
-*.zip
-
-.DS_Store
-Thumbs.db
+exports/
+var/*.session
+var/*.db
+var/*.db-wal
+var/*.db-shm
 

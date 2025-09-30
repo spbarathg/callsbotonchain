@@ -19,46 +19,6 @@ try:
 except Exception:
     pass
 
-from app.fetch_feed import fetch_solana_feed
-try:
-    # Optional fallbacks to synthesize feed items when upstream feed is empty
-    from app.fetch_feed import _fallback_feed_from_geckoterminal, _fallback_feed_from_dexscreener
-except Exception:
-    _fallback_feed_from_geckoterminal = None
-    _fallback_feed_from_dexscreener = None
-from app.analyze_token import (
-    get_token_stats,
-    score_token,
-    calculate_preliminary_score,
-    check_senior_strict,
-    check_junior_strict,
-    check_senior_nuanced,
-    check_junior_nuanced,
-)
-from app.notify import send_telegram_alert
-from app.storage import (init_db, has_been_alerted, mark_as_alerted, 
-                    record_token_activity, get_token_velocity, should_fetch_detailed_stats,
-                    ensure_indices, prune_old_activity, get_alerted_tokens_batch, update_token_tracking,
-                    get_tracking_snapshot)
-from config import HIGH_CONFIDENCE_SCORE, FETCH_INTERVAL, DEBUG_PRELIM, TELEGRAM_ALERT_MIN_INTERVAL, TRACK_INTERVAL_MIN, TRACK_BATCH_SIZE, REQUIRE_SMART_MONEY_FOR_ALERT, REQUIRE_VELOCITY_MIN_SCORE_FOR_ALERT
-from config import (
-    MIN_LIQUIDITY_USD,
-    VOL_24H_MIN_FOR_ALERT,
-    VOL_TO_MCAP_RATIO_MIN,
-    MCAP_MICRO_MAX,
-    MAX_MARKET_CAP_FOR_DEFAULT_ALERT,
-    MOMENTUM_1H_STRONG,
-    LARGE_CAP_MOMENTUM_GATE_1H,
-    MAX_TOP10_CONCENTRATION,
-    REQUIRE_MINT_REVOKED,
-    REQUIRE_LP_LOCKED,
-    ALLOW_UNKNOWN_SECURITY,
-)
-try:
-    # Gate mode snapshot for logging
-    from config import CURRENT_GATES
-except Exception:
-    CURRENT_GATES = None
 try:
     from tools.relay import relay_contract_address_sync, relay_enabled
 except Exception:
@@ -191,6 +151,54 @@ def signal_handler(sig, frame):
 
 def run_bot():
     global shutdown_flag
+    # Lazy import all config-dependent modules to avoid requiring secrets in web-only mode
+    from app.fetch_feed import fetch_solana_feed
+    try:
+        from app.fetch_feed import _fallback_feed_from_geckoterminal, _fallback_feed_from_dexscreener
+    except Exception:
+        _fallback_feed_from_geckoterminal = None
+        _fallback_feed_from_dexscreener = None
+    from app.analyze_token import (
+        get_token_stats,
+        score_token,
+        calculate_preliminary_score,
+        check_senior_strict,
+        check_junior_strict,
+        check_senior_nuanced,
+        check_junior_nuanced,
+    )
+    from app.notify import send_telegram_alert
+    from app.storage import (
+        init_db,
+        has_been_alerted,
+        mark_as_alerted,
+        record_token_activity,
+        get_token_velocity,
+        should_fetch_detailed_stats,
+        ensure_indices,
+        prune_old_activity,
+        get_alerted_tokens_batch,
+        update_token_tracking,
+        get_tracking_snapshot,
+    )
+    from config import HIGH_CONFIDENCE_SCORE, FETCH_INTERVAL, DEBUG_PRELIM, TELEGRAM_ALERT_MIN_INTERVAL, TRACK_INTERVAL_MIN, TRACK_BATCH_SIZE, REQUIRE_SMART_MONEY_FOR_ALERT, REQUIRE_VELOCITY_MIN_SCORE_FOR_ALERT
+    from config import (
+        MIN_LIQUIDITY_USD,
+        VOL_24H_MIN_FOR_ALERT,
+        VOL_TO_MCAP_RATIO_MIN,
+        MCAP_MICRO_MAX,
+        MAX_MARKET_CAP_FOR_DEFAULT_ALERT,
+        MOMENTUM_1H_STRONG,
+        LARGE_CAP_MOMENTUM_GATE_1H,
+        MAX_TOP10_CONCENTRATION,
+        REQUIRE_MINT_REVOKED,
+        REQUIRE_LP_LOCKED,
+        ALLOW_UNKNOWN_SECURITY,
+    )
+    try:
+        from config import CURRENT_GATES
+    except Exception:
+        CURRENT_GATES = None
     
     # Setup signal handlers for graceful shutdown
     signal.signal(signal.SIGINT, signal_handler)
@@ -220,7 +228,7 @@ def run_bot():
     
     print("SMART MONEY ENHANCED SOLANA MEMECOIN BOT STARTED")
     print(f"Configuration: Score threshold = {HIGH_CONFIDENCE_SCORE}, Fetch interval = {FETCH_INTERVAL}s")
-    if CURRENT_GATES:
+    if 'CURRENT_GATES' in globals() and CURRENT_GATES:
         gm = CURRENT_GATES.get('GATE_MODE')
         print(f"Gate Mode: {gm} | Gates: score>={CURRENT_GATES.get('HIGH_CONFIDENCE_SCORE')}, liq>={CURRENT_GATES.get('MIN_LIQUIDITY_USD')}, vol24>={CURRENT_GATES.get('VOL_24H_MIN_FOR_ALERT')}, mcap<={CURRENT_GATES.get('MAX_MARKET_CAP_FOR_DEFAULT_ALERT')}, vol/mcap>={CURRENT_GATES.get('VOL_TO_MCAP_RATIO_MIN')}")
     print("Features: Smart Money Detection + Enhanced Scoring + Detailed Analysis")

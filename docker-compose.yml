@@ -1,0 +1,66 @@
+version: '3.8'
+
+services:
+  worker:
+    build: .
+    container_name: callsbot-worker
+    command: ["python", "scripts/bot.py", "run"]
+    restart: unless-stopped
+    environment:
+      - CALLSBOT_LOG_STDOUT=true
+      - CALLSBOT_METRICS_ENABLED=true
+    volumes:
+      - ./var:/app/var
+      - ./data/logs:/app/data/logs
+    ports:
+      - "9108:9108"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  web:
+    build: .
+    container_name: callsbot-web
+    command: ["gunicorn", "-w", "2", "-b", "0.0.0.0:8080", "src.server:create_app()"]
+    restart: unless-stopped
+    environment:
+      - DASH_PORT=8080
+      - CALLSBOT_LOG_STDOUT=true
+      - CALLSBOT_SQL_KEY=${CALLSBOT_SQL_KEY}
+    volumes:
+      - ./var:/app/var:ro
+      - ./data/logs:/app/data/logs:ro
+    expose:
+      - "8080"
+    healthcheck:
+      disable: true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  caddy:
+    image: caddy:2
+    container_name: callsbot-proxy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - web
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  caddy_data:
+  caddy_config:
