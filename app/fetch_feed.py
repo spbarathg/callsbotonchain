@@ -329,24 +329,7 @@ def _fallback_feed_from_geckoterminal(limit: int = 30) -> list:
         return []
     j = r.get("json") or {}
     data = j.get("data") or []
-    included = j.get("included") or []
-    # Build token lookup from included
-    token_by_rel = {}
-    for inc in included:
-        try:
-            if inc.get("type") != "token":
-                continue
-            tid = inc.get("id") or ""
-            # id is like "solana_<tokenAddress>"
-            if not isinstance(tid, str) or not tid.startswith("solana_"):
-                continue
-            addr = tid.split("_", 1)[1]
-            token_by_rel[tid] = {
-                "address": addr,
-                "symbol": ((inc.get("attributes") or {}).get("symbol")),
-            }
-        except Exception:
-            continue
+    # We don't require 'included'. Extract token addresses directly from relationship ids
 
     sol_mint = "So11111111111111111111111111111111111111112"
     txs = []
@@ -355,17 +338,15 @@ def _fallback_feed_from_geckoterminal(limit: int = 30) -> list:
             rel = item.get("relationships") or {}
             base_rel = ((rel.get("base_token") or {}).get("data") or {}).get("id")
             q_rel = ((rel.get("quote_token") or {}).get("data") or {}).get("id")
-            base = token_by_rel.get(base_rel)
-            quote = token_by_rel.get(q_rel)
-            # Choose the non-SOL as target; base is usually the memecoin on SOL pairs
-            token_addr = None
-            if base and (not (base.get("symbol") or "").upper().startswith("SOL")):
-                token_addr = base.get("address")
-            elif quote and (not (quote.get("symbol") or "").upper().startswith("SOL")):
-                token_addr = quote.get("address")
-            else:
-                # Fallback to base
-                token_addr = base.get("address") if base else None
+            def _addr_from_rel(rel_id: str) -> str:
+                if not rel_id or not isinstance(rel_id, str):
+                    return ""
+                if rel_id.startswith("solana_"):
+                    return rel_id.split("_", 1)[1]
+                return rel_id
+            base_addr = _addr_from_rel(base_rel)
+            quote_addr = _addr_from_rel(q_rel)
+            token_addr = base_addr or quote_addr
             if not token_addr:
                 continue
             # Synthesize usd_value from pool liquidity/volume where available
