@@ -44,8 +44,19 @@ def get_session(max_retries: int = HTTP_MAX_RETRIES, backoff_factor: float = HTT
 def request_json(method: str, url: str, *, params: Optional[Dict[str, Any]] = None, headers: Optional[Dict[str, str]] = None,
                  json: Optional[Dict[str, Any]] = None, timeout: float = 10.0) -> Dict[str, Any]:
     sess = get_session()
+    # Apply conservative default headers to avoid upstream blocks (CF/proxies)
+    default_headers = {
+        "accept": "application/json, text/plain, */*",
+        "user-agent": "callsbotonchain/1.0 (+https://github.com/spbarathg/callsbotonchain)",
+    }
+    merged_headers = dict(default_headers)
+    if headers:
+        try:
+            merged_headers.update(headers)
+        except Exception:
+            pass
     try:
-        resp = sess.request(method.upper(), url, params=params, headers=headers, json=json, timeout=timeout)
+        resp = sess.request(method.upper(), url, params=params, headers=merged_headers, json=json, timeout=timeout)
         result: Dict[str, Any] = {"status_code": resp.status_code}
         try:
             result["json"] = resp.json()
