@@ -79,6 +79,11 @@
 
       <section>
         <h2>Recent Alerts</h2>
+        <div class="sql-controls" style="margin-bottom:8px; display:flex; gap:8px; align-items:center;">
+          <input id="alerts_filter" placeholder="Filter by symbol or token" style="flex:1; max-width:320px" />
+          <label class="muted"><input type="checkbox" id="alerts_only_smart" /> smart only</label>
+          <label class="muted"><input type="checkbox" id="alerts_only_high" /> score ≥ 9</label>
+        </div>
         <div class="table-wrap">
         <table id="alerts_table">
           <thead>
@@ -176,8 +181,20 @@
         document.getElementById('last_cycle').textContent = `${cycle} (${feedItems})`;
 
         const tbody = document.querySelector('#alerts_table tbody');
+        const filter = (document.getElementById('alerts_filter').value||'').toLowerCase();
+        const onlySmart = document.getElementById('alerts_only_smart').checked;
+        const onlyHigh = document.getElementById('alerts_only_high').checked;
         tbody.innerHTML = '';
-        (data.recent_alerts || []).forEach(a => {
+        let rows = (data.recent_alerts || []);
+        rows = rows.filter(a=>{
+          const sym = (a.symbol||'').toLowerCase();
+          const tok = (a.token||'').toLowerCase();
+          if (filter && !(sym.includes(filter) || tok.includes(filter))) return false;
+          if (onlyHigh && !((a.score||0) >= 9)) return false;
+          if (onlySmart && !String(a.conviction||'').toLowerCase().includes('high confidence')) return false;
+          return true;
+        });
+        rows.forEach(a => {
           const tr = document.createElement('tr');
           const t = a.ts || '';
           tr.innerHTML = `
@@ -278,6 +295,9 @@
         }
       }
       document.getElementById('sql_run').addEventListener('click', runSQL);
+      document.getElementById('alerts_filter').addEventListener('input', fetchStats);
+      document.getElementById('alerts_only_smart').addEventListener('change', fetchStats);
+      document.getElementById('alerts_only_high').addEventListener('change', fetchStats);
 
       // ---------- Logs ----------
       let logsTimer = null;

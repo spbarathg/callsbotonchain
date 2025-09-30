@@ -16,6 +16,9 @@ args = parser.parse_args()
 
 file_path = args.input
 df = pd.read_csv(file_path)
+for col in ['outcome','alerted_at','final_score','peak_x_price','first_liquidity_usd','first_market_cap_usd','last_volume_24h_usd','peak_drawdown_pct','time_to_peak_price_s']:
+    if col not in df.columns:
+        df[col] = pd.NA
 
 # ========================
 # 2. Create output folder
@@ -27,7 +30,7 @@ os.makedirs(output_dir, exist_ok=True)
 # 3. Data preprocessing
 # ========================
 df['outcome'] = df['outcome'].fillna('ongoing')
-df['alerted_at'] = pd.to_datetime(df['alerted_at'])
+df['alerted_at'] = pd.to_datetime(df['alerted_at'], errors='coerce')
 
 # Set style
 plt.style.use('default')

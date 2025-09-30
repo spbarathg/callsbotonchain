@@ -5,6 +5,12 @@ import seaborn as sns
 
 # Load the data
 df = pd.read_csv("exports/alerts_training_2025-09-26_133546.csv")
+for col in [
+    'alerted_at','first_alert_at','last_checked_at','first_price_usd','peak_price_usd',
+    'first_market_cap_usd','peak_market_cap_usd','last_price_usd','peak_x_price','smart_money_detected','outcome'
+]:
+    if col not in df.columns:
+        df[col] = pd.NA
 
 print("="*60)
 print("🔍 DATA VALIDATION & ACCURACY ANALYSIS")
@@ -66,9 +72,9 @@ print(f"Outliers in peak X price: {len(outliers)} records")
 print("\n⏰ TIME CONSISTENCY CHECKS:")
 
 # Convert to datetime
-df['alerted_at'] = pd.to_datetime(df['alerted_at'])
-df['first_alert_at'] = pd.to_datetime(df['first_alert_at'])
-df['last_checked_at'] = pd.to_datetime(df['last_checked_at'])
+df['alerted_at'] = pd.to_datetime(df['alerted_at'], errors='coerce')
+df['first_alert_at'] = pd.to_datetime(df['first_alert_at'], errors='coerce')
+df['last_checked_at'] = pd.to_datetime(df['last_checked_at'], errors='coerce')
 
 # Check if first_alert_at matches alerted_at
 time_mismatches = df[df['alerted_at'] != df['first_alert_at']]

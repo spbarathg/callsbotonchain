@@ -19,6 +19,15 @@ args = parser.parse_args()
 
 file_path = args.input
 df = pd.read_csv(file_path)
+required_cols = [
+    'alerted_at','first_alert_at','last_checked_at','final_score','peak_x_price',
+    'smart_money_detected','first_price_usd','peak_price_usd','first_market_cap_usd','peak_market_cap_usd',
+    'last_liquidity_usd','last_volume_24h_usd','peak_drawdown_pct','peak_volume_24h_usd','outcome',
+    'time_to_peak_price_s','time_to_peak_mcap_s'
+]
+for col in required_cols:
+    if col not in df.columns:
+        df[col] = pd.NA
 
 # ========================
 # 2. Create output folder
@@ -30,20 +39,20 @@ os.makedirs(output_dir, exist_ok=True)
 # 3. Data preprocessing
 # ========================
 # Convert datetime columns
-df['alerted_at'] = pd.to_datetime(df['alerted_at'])
-df['first_alert_at'] = pd.to_datetime(df['first_alert_at'])
-df['last_checked_at'] = pd.to_datetime(df['last_checked_at'])
+df['alerted_at'] = pd.to_datetime(df['alerted_at'], errors='coerce')
+df['first_alert_at'] = pd.to_datetime(df['first_alert_at'], errors='coerce')
+df['last_checked_at'] = pd.to_datetime(df['last_checked_at'], errors='coerce')
 
 # Handle missing values in outcome column
 df['outcome'] = df['outcome'].fillna('ongoing')
 
 # Create performance categories
-df['performance_category'] = pd.cut(df['peak_x_price'], 
+df['performance_category'] = pd.cut(pd.to_numeric(df['peak_x_price'], errors='coerce').fillna(0), 
                                    bins=[0, 1, 2, 5, float('inf')], 
                                    labels=['Loss/Flat', '2x', '5x', '5x+'])
 
 # Create score categories
-df['score_category'] = pd.cut(df['final_score'], 
+df['score_category'] = pd.cut(pd.to_numeric(df['final_score'], errors='coerce').fillna(0), 
                              bins=[0, 6, 8, 10], 
                              labels=['Low (6-)', 'Medium (7-8)', 'High (9-10)'])
 

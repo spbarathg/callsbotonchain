@@ -157,80 +157,87 @@ def fetch_solana_feed(cursor=None, smart_money_only: bool = False) -> Dict[str, 
 
     empty_200_seen = False
     for attempt in range(max_retries):
-        # Try both header and parameter variants before counting an attempt
+        # Try both header and parameter variants within the attempt
+        made_progress = False
+        rate_limited_encountered = False
         for headers in header_variants:
             for params in _param_variants():
                 result = request_json("GET", url, params=params, headers=headers, timeout=HTTP_TIMEOUT_FEED)
-            status = result.get("status_code")
-            if status == 200:
-                try:
-                    get_budget().spend("feed")
-                except Exception:
-                    pass
-                api_response = result.get("json") or {}
-                parsed = _parse_items(api_response)
-                if parsed["items"]:
-                    return {"transactions": parsed["items"], "next_cursor": parsed.get("next_cursor"), "error": None}
-                # If 200 but empty, continue trying next param variant (could be filter mismatch)
-                try:
-                    # Emit a lightweight debug breadcrumb once per attempt to aid diagnosis
-                    log_process({
-                        "type": "feed_debug",
-                        "status": int(status),
-                        "params": {k: v for k, v in (params or {}).items() if k in ("limit","chains","chain","new_trade","smart_money")},
-                        "message": (api_response.get("message") or "")[:160],
-                        "shape_keys": list(api_response.keys())[:8],
-                        "items_len": 0,
-                    })
-                except Exception:
-                    pass
-                empty_200_seen = True
-                continue
-            elif status == 429:
-                body = result.get("json") or {}
-                msg = (body.get("message") or "").lower()
-                if "maximum api credit" in msg or "quota" in msg:
-                    quota_exceeded = True
-                # Build a fake response-like for header parsing compatibility
-                class _R:
-                    def __init__(self, headers):
-                        self.headers = headers
-                retry_after = _parse_retry_after_seconds(_R(result.get("headers") or {}))
-                if retry_after is not None:
-                    last_retry_after = max(last_retry_after or 0, retry_after)
-                print(f"Rate limited, waiting before retry... (attempt {attempt + 1})")
-                time.sleep(retry_after if retry_after is not None else (2 ** attempt))
-                break  # break header loop; retry after backoff
-            # Auth issues: try next header variant within the same attempt
-            elif status in (401, 403):
-                # try next header variant within the same attempt
-                continue
-            elif status is None:
-                print(f"Network exception on attempt {attempt + 1}: {result.get('error')}")
-                # try next header variant or move to next attempt if last
-                continue
-            else:
-                text = None
-                if result.get("json") is None:
-                    text = (result.get("text") or "")
-                print(f"Error fetching feed: {status}, {text}")
-                try:
-                    log_process({
-                        "type": "feed_error",
-                        "status": status,
-                        "text": (text or "")[:200],
-                    })
-                except Exception:
-                    pass
-                # try next header variant
-                continue
-        else:
-            # No header/param variant produced items this attempt
-            if attempt < max_retries - 1:
+                status = result.get("status_code")
+                if status == 200:
+                    try:
+                        get_budget().spend("feed")
+                    except Exception:
+                        pass
+                    api_response = result.get("json") or {}
+                    parsed = _parse_items(api_response)
+                    if parsed["items"]:
+                        return {"transactions": parsed["items"], "next_cursor": parsed.get("next_cursor"), "error": None}
+                    # If 200 but empty, continue trying next param variant (could be filter mismatch)
+                    try:
+                        log_process({
+                            "type": "feed_debug",
+                            "status": int(status),
+                            "params": {k: v for k, v in (params or {}).items() if k in ("limit","chains","chain","new_trade","smart_money")},
+                            "message": (api_response.get("message") or "")[:160],
+                            "shape_keys": list(api_response.keys())[:8],
+                            "items_len": 0,
+                        })
+                    except Exception:
+                        pass
+                    empty_200_seen = True
+                    made_progress = True
+                    continue
+                elif status == 429:
+                    body = result.get("json") or {}
+                    msg = (body.get("message") or "").lower()
+                    if "maximum api credit" in msg or "quota" in msg:
+                        quota_exceeded = True
+                    class _R:
+                        def __init__(self, headers):
+                            self.headers = headers
+                    retry_after = _parse_retry_after_seconds(_R(result.get("headers") or {}))
+                    if retry_after is not None:
+                        last_retry_after = max(last_retry_after or 0, retry_after)
+                    print(f"Rate limited, waiting before retry... (attempt {attempt + 1})")
+                    time.sleep(retry_after if retry_after is not None else (2 ** attempt))
+                    # Move to next attempt after backoff
+                    made_progress = True
+                    rate_limited_encountered = True
+                    break
+                elif status in (401, 403):
+                    # try next header variant within the same attempt
+                    continue
+                elif status is None:
+                    print(f"Network exception on attempt {attempt + 1}: {result.get('error')}")
+                    # try next param/header variant
+                    continue
+                else:
+                    text = None
+                    if result.get("json") is None:
+                        text = (result.get("text") or "")
+                    print(f"Error fetching feed: {status}, {text}")
+                    try:
+                        log_process({
+                            "type": "feed_error",
+                            "status": status,
+                            "text": (text or "")[:200],
+                        })
+                    except Exception:
+                        pass
+                    # try next param/header variant
+                    continue
+            # if we hit rate-limit we already broke param loop; break header loop as well to proceed to next attempt
+            if rate_limited_encountered:
+                break
+        # No header/param variant produced items this attempt
+        if attempt < max_retries - 1:
+            # Only sleep a bit between attempts if we made a request but got empty/other errors
+            if made_progress and not quota_exceeded and (last_retry_after is None):
                 time.sleep(1)
-                continue
-            # Allow fallback logic below to engage (avoid returning http_200 on empty)
-            break
+            continue
+        # Allow fallback logic below to engage (avoid returning http_200 on empty)
+        break
     
     # All retries failed
     print(f"Failed to fetch feed after {max_retries} attempts")

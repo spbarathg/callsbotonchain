@@ -424,10 +424,13 @@ def _signals_metrics(db_path: str) -> Dict[str, Any]:
               SELECT CAST((JULIANDAY(peak_price_at)-JULIANDAY(first_alert_at))*86400 AS INTEGER) AS time_to_peak_price_s
               FROM alerted_token_stats
               WHERE peak_price_at IS NOT NULL AND first_alert_at IS NOT NULL
-              AND time_to_peak_price_s >= 0
-              ORDER BY time_to_peak_price_s
-            ) LIMIT 1 OFFSET (
-              SELECT (COUNT(1)-1)/2 FROM alerted_token_stats WHERE peak_price_at IS NOT NULL AND first_alert_at IS NOT NULL
+            )
+            WHERE time_to_peak_price_s >= 0
+            ORDER BY time_to_peak_price_s
+            LIMIT 1 OFFSET (
+              SELECT (COUNT(1)-1)/2 FROM (
+                SELECT 1 FROM alerted_token_stats WHERE peak_price_at IS NOT NULL AND first_alert_at IS NOT NULL
+              )
             )
             """
         )

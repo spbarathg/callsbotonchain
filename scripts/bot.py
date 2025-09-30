@@ -126,6 +126,12 @@ def acquire_singleton_lock() -> bool:
     Returns True if lock acquired; False if another instance holds the lock.
     """
     global _singleton_lock_file
+    # If already acquired in this process, treat as success
+    try:
+        if _singleton_lock_file is not None:
+            return True
+    except Exception:
+        pass
     lock_path = os.path.join(PROJECT_ROOT, "var", "bot.lock")
     os.makedirs(os.path.dirname(lock_path), exist_ok=True)
 

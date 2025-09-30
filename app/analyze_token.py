@@ -135,7 +135,7 @@ _deny_cache = {"stats_denied": False}
 
 
 _stats_cache: Dict[str, Tuple[float, Dict[str, Any]]] = {}
-_STATS_TTL_SEC = 90
+_STATS_TTL_SEC = 120  # increase TTL to reduce API churn
 
 def _cache_get(token_address: str) -> Optional[Dict[str, Any]]:
     import time as _t
@@ -201,6 +201,8 @@ def get_token_stats(token_address: str) -> Dict[str, Any]:
                     # Augment with DexScreener when critical fields are missing
                     try:
                         data = api_response["data"]
+                        # Normalize schema keys for downstream consumers
+                        data = _normalize_stats_schema(data)
                         def _missing_liq(d: Dict[str, Any]) -> bool:
                             liq_obj = d.get('liquidity') or {}
                             return not bool(d.get('liquidity_usd') or liq_obj.get('usd'))
@@ -244,12 +246,14 @@ def get_token_stats(token_address: str) -> Dict[str, Any]:
                         return data
                     except Exception:
                         # If augmentation fails for any reason, still return Cielo data
-                        _cache_set(token_address, api_response["data"])
-                        return api_response["data"]
+                        norm = _normalize_stats_schema(api_response["data"]) if isinstance(api_response.get("data"), dict) else api_response.get("data")
+                        _cache_set(token_address, norm)
+                        return norm
                 if isinstance(api_response, dict):
                     api_response["_source"] = "cielo"
-                _cache_set(token_address, api_response)
-                return api_response
+                norm = _normalize_stats_schema(api_response) if isinstance(api_response, dict) else api_response
+                _cache_set(token_address, norm)
+                return norm
             except Exception:
                 return {}
         elif last_status == 429:
@@ -274,7 +278,56 @@ def get_token_stats(token_address: str) -> Dict[str, Any]:
         print("Cielo token stats denied across variants – using DexScreener fallback")
     else:
         print(f"Cielo token stats unavailable (last status={last_status}); using DexScreener fallback")
-    return _get_token_stats_dexscreener(token_address)
+    return _normalize_stats_schema(_get_token_stats_dexscreener(token_address) or {})
+
+def _normalize_stats_schema(d: Dict[str, Any]) -> Dict[str, Any]:
+    """Ensure consistent keys and types across Cielo and DexScreener shapes.
+    - Guarantees: market_cap_usd (float), price_usd (float), liquidity_usd (float|None),
+      volume.24h.volume_usd (float), change.{1h,24h} (float), security/liquidity/holders dicts present.
+    """
+    if not isinstance(d, dict):
+        return {}
+    out: Dict[str, Any] = dict(d)
+    # Market cap
+    try:
+        out["market_cap_usd"] = float(out.get("market_cap_usd") or 0)
+    except Exception:
+        out["market_cap_usd"] = 0.0
+    # Price
+    try:
+        out["price_usd"] = float(out.get("price_usd") or 0)
+    except Exception:
+        out["price_usd"] = 0.0
+    # Liquidity
+    liq_obj = out.get("liquidity") or {}
+    try:
+        liq_usd = out.get("liquidity_usd")
+        if liq_usd is None:
+            liq_usd = liq_obj.get("usd")
+        out["liquidity_usd"] = float(liq_usd) if liq_usd is not None else None
+    except Exception:
+        out["liquidity_usd"] = None
+    # Volume
+    v = (out.get("volume") or {})
+    v24 = (v.get("24h") or {})
+    try:
+        v24_usd = float(v24.get("volume_usd") or 0)
+    except Exception:
+        v24_usd = 0.0
+    out.setdefault("volume", {}).setdefault("24h", {})["volume_usd"] = v24_usd
+    # Change
+    ch = out.get("change") or {}
+    for k in ("1h", "24h"):
+        try:
+            ch_val = float(ch.get(k) or 0)
+        except Exception:
+            ch_val = 0.0
+        out.setdefault("change", {})[k] = ch_val
+    # Containers
+    for k in ("security", "liquidity", "holders"):
+        if not isinstance(out.get(k), dict):
+            out[k] = {}
+    return out
 
 def calculate_preliminary_score(tx_data: Dict[str, Any], smart_money_detected: bool = False) -> int:
     """
