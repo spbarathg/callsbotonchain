@@ -6,6 +6,7 @@ from typing import Optional
 from config import CIELO_API_KEY, MIN_USD_VALUE, CIELO_LIST_ID, CIELO_NEW_TRADE_ONLY
 from config import HTTP_TIMEOUT_FEED
 from app.http_client import request_json
+from app.logger_utils import log_process
 from app.budget import get_budget
 try:
     from config import CIELO_LIST_IDS  # optional multi-list support
@@ -155,6 +156,18 @@ def fetch_solana_feed(cursor=None, smart_money_only: bool = False) -> Dict[str, 
                 if parsed["items"]:
                     return {"transactions": parsed["items"], "next_cursor": parsed.get("next_cursor"), "error": None}
                 # If 200 but empty, continue trying next param variant (could be filter mismatch)
+                try:
+                    # Emit a lightweight debug breadcrumb once per attempt to aid diagnosis
+                    log_process({
+                        "type": "feed_debug",
+                        "status": int(status),
+                        "params": {k: v for k, v in (params or {}).items() if k in ("limit","chains","chain","new_trade","smart_money")},
+                        "message": (api_response.get("message") or "")[:160],
+                        "shape_keys": list(api_response.keys())[:8],
+                        "items_len": 0,
+                    })
+                except Exception:
+                    pass
                 continue
             elif status == 429:
                 body = result.get("json") or {}
@@ -184,6 +197,14 @@ def fetch_solana_feed(cursor=None, smart_money_only: bool = False) -> Dict[str, 
                 if result.get("json") is None:
                     text = (result.get("text") or "")
                 print(f"Error fetching feed: {status}, {text}")
+                try:
+                    log_process({
+                        "type": "feed_error",
+                        "status": status,
+                        "text": (text or "")[:200],
+                    })
+                except Exception:
+                    pass
                 # try next header variant
                 continue
         else:
