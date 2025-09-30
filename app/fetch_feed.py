@@ -229,12 +229,15 @@ def fetch_solana_feed(cursor=None, smart_money_only: bool = False) -> Dict[str, 
         }
     # As a last resort, build a fallback feed from DexScreener trending pairs
     try:
+        # Try DexScreener first; if blocked by Cloudflare, try GeckoTerminal
         fallback = _fallback_feed_from_dexscreener(limit=30, smart_money_only=smart_money_only)
+        if not fallback:
+            fallback = _fallback_feed_from_geckoterminal(limit=30)
         if fallback and len(fallback) > 0:
             try:
                 log_process({
                     "type": "feed_fallback",
-                    "provider": "dexscreener_trending",
+                    "provider": "dexscreener_or_gecko",
                     "count": len(fallback),
                 })
             except Exception:
@@ -305,4 +308,78 @@ def _fallback_feed_from_dexscreener(limit: int = 30, smart_money_only: bool = Fa
         txs.append(tx)
         if len(txs) >= int(limit or 30):
             break
+    return txs
+
+
+def _fallback_feed_from_geckoterminal(limit: int = 30) -> list:
+    """
+    Build a synthetic feed using GeckoTerminal trending pools for Solana.
+    This endpoint is generally accessible without Cloudflare challenges.
+    """
+    from app.http_client import request_json as _rq
+    url = "https://api.geckoterminal.com/api/v2/networks/solana/trending_pools"
+    r = _rq("GET", url, timeout=HTTP_TIMEOUT_FEED)
+    if r.get("status_code") != 200:
+        return []
+    j = r.get("json") or {}
+    data = j.get("data") or []
+    included = j.get("included") or []
+    # Build token lookup from included
+    token_by_rel = {}
+    for inc in included:
+        try:
+            if inc.get("type") != "token":
+                continue
+            tid = inc.get("id") or ""
+            # id is like "solana_<tokenAddress>"
+            if not isinstance(tid, str) or not tid.startswith("solana_"):
+                continue
+            addr = tid.split("_", 1)[1]
+            token_by_rel[tid] = {
+                "address": addr,
+                "symbol": ((inc.get("attributes") or {}).get("symbol")),
+            }
+        except Exception:
+            continue
+
+    sol_mint = "So11111111111111111111111111111111111111112"
+    txs = []
+    for item in data:
+        try:
+            rel = item.get("relationships") or {}
+            base_rel = ((rel.get("base_token") or {}).get("data") or {}).get("id")
+            q_rel = ((rel.get("quote_token") or {}).get("data") or {}).get("id")
+            base = token_by_rel.get(base_rel)
+            quote = token_by_rel.get(q_rel)
+            # Choose the non-SOL as target; base is usually the memecoin on SOL pairs
+            token_addr = None
+            if base and (not (base.get("symbol") or "").upper().startswith("SOL")):
+                token_addr = base.get("address")
+            elif quote and (not (quote.get("symbol") or "").upper().startswith("SOL")):
+                token_addr = quote.get("address")
+            else:
+                # Fallback to base
+                token_addr = base.get("address") if base else None
+            if not token_addr:
+                continue
+            # Synthesize usd_value from pool liquidity/volume where available
+            attrs = item.get("attributes") or {}
+            liq_usd = float(attrs.get("liquidity_usd") or attrs.get("fdv_usd") or 0) if isinstance(attrs.get("liquidity_usd"), (int, float)) or isinstance(attrs.get("fdv_usd"), (int, float)) else 0.0
+            try:
+                vol24 = float(((attrs.get("transactions") or {}).get("h24") or {}).get("volume") or 0)
+            except Exception:
+                vol24 = 0.0
+            usd_val = max(300.0, min(max(liq_usd * 0.01, vol24 * 0.02), 7500.0))
+            txs.append({
+                "token0_address": sol_mint,
+                "token1_address": token_addr,
+                "token0_amount_usd": 0,
+                "token1_amount_usd": usd_val,
+                "tx_type": "gecko_trending_fallback",
+                "dex": "geckoterminal",
+            })
+            if len(txs) >= int(limit or 30):
+                break
+        except Exception:
+            continue
     return txs
