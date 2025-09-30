@@ -20,6 +20,12 @@ except Exception:
     pass
 
 from app.fetch_feed import fetch_solana_feed
+try:
+    # Optional fallbacks to synthesize feed items when upstream feed is empty
+    from app.fetch_feed import _fallback_feed_from_geckoterminal, _fallback_feed_from_dexscreener
+except Exception:
+    _fallback_feed_from_geckoterminal = None
+    _fallback_feed_from_dexscreener = None
 from app.analyze_token import (
     get_token_stats,
     score_token,
@@ -309,8 +315,33 @@ def run_bot():
                 except Exception:
                     pass
             
+            # If upstream feed is empty, attempt local fallbacks to keep signals flowing
             if not feed.get("transactions"):
                 print(f"No new transactions found")
+                fallback_items = []
+                try:
+                    if _fallback_feed_from_geckoterminal:
+                        fallback_items = _fallback_feed_from_geckoterminal(limit=40)
+                except Exception:
+                    fallback_items = []
+                if not fallback_items:
+                    try:
+                        if _fallback_feed_from_dexscreener:
+                            fallback_items = _fallback_feed_from_dexscreener(limit=40, smart_money_only=is_smart_cycle)
+                    except Exception:
+                        fallback_items = []
+                if fallback_items:
+                    feed["transactions"] = fallback_items
+                    items_count = len(fallback_items)
+                    print(f"Using fallback feed items: {items_count}")
+                    try:
+                        log_process({
+                            "type": "feed_fallback_injected",
+                            "count": items_count,
+                            "smart_cycle": bool(is_smart_cycle),
+                        })
+                    except Exception:
+                        pass
             
             def _tx_has_smart_money(tx_obj: dict, smart_cycle: bool) -> bool:  
                 """Looser detection to restore earlier behavior: smart IF cycle OR any strong hint."""
