@@ -235,6 +235,10 @@ def fetch_solana_feed(cursor=None, smart_money_only: bool = False) -> Dict[str, 
             fallback = _fallback_feed_from_geckoterminal(limit=30)
         if fallback and len(fallback) > 0:
             try:
+                print(f"Fallback feed used: {len(fallback)} items")
+            except Exception:
+                pass
+            try:
                 log_process({
                     "type": "feed_fallback",
                     "provider": "dexscreener_or_gecko",
