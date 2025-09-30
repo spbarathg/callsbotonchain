@@ -401,6 +401,9 @@ def run_bot():
                 # attach usd_value into tx for preliminary scoring
                 tx["usd_value"] = usd_value
                 smart_involved = _tx_has_smart_money(tx, is_smart_cycle)
+                # Treat fallback-origin signals as smart-involved during smart cycle to keep parity
+                if tx.get('tx_type', '').endswith('_fallback') and is_smart_cycle:
+                    smart_involved = True
 
                 if not token_address or usd_value == 0:
                     continue
@@ -440,7 +443,8 @@ def run_bot():
                     )
                     
                     # STEP 3: CREDIT-EFFICIENT DECISION - Only fetch detailed stats if warranted
-                    if not should_fetch_detailed_stats(token_address, preliminary_score):
+                    is_fallback_tx = tx.get('tx_type', '').endswith('_fallback')
+                    if (not is_fallback_tx) and (not should_fetch_detailed_stats(token_address, preliminary_score)):
                         print(f"Token {token_address} prelim: {preliminary_score}/10 (skipped detailed analysis)")
                         api_calls_saved += 1  # Track credits saved
                         if _metrics.get("enabled"):
