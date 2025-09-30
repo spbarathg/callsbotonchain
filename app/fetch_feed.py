@@ -140,6 +140,7 @@ def fetch_solana_feed(cursor=None, smart_money_only: bool = False) -> Dict[str, 
             pass
         return {"items": [], "next_cursor": None}
 
+    empty_200_seen = False
     for attempt in range(max_retries):
         # Try both header and parameter variants before counting an attempt
         for headers in header_variants:
@@ -168,6 +169,7 @@ def fetch_solana_feed(cursor=None, smart_money_only: bool = False) -> Dict[str, 
                     })
                 except Exception:
                     pass
+                empty_200_seen = True
                 continue
             elif status == 429:
                 body = result.get("json") or {}
@@ -208,11 +210,12 @@ def fetch_solana_feed(cursor=None, smart_money_only: bool = False) -> Dict[str, 
                 # try next header variant
                 continue
         else:
-            # no header variant succeeded; proceed to next attempt with short wait
+            # No header/param variant produced items this attempt
             if attempt < max_retries - 1:
                 time.sleep(1)
                 continue
-            return {"transactions": [], "next_cursor": None, "error": f"http_{status}"}
+            # Allow fallback logic below to engage (avoid returning http_200 on empty)
+            break
     
     # All retries failed
     print(f"Failed to fetch feed after {max_retries} attempts")
