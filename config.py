@@ -8,18 +8,16 @@ load_dotenv()
 # ==============================================
 # CIELO API INTEGRATION
 # ==============================================
-CIELO_API_KEY = os.getenv("CIELO_API_KEY")
-if not CIELO_API_KEY:
-    raise ValueError("CIELO_API_KEY is required in .env file")
+# Treat CIELO key as optional; when missing, code paths will rely on fallbacks
+CIELO_API_KEY = os.getenv("CIELO_API_KEY", "")
 
 # ==============================================
-# TELEGRAM PUBLISHER SETTINGS
+# TELEGRAM PUBLISHER SETTINGS (optional)
 # ==============================================
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
-
-if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-    raise ValueError("TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID are required in .env file")
+# If either is missing, treat Telegram as disabled; do not raise
+TELEGRAM_ENABLED = bool(TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID)
 
 # ==============================================
 # BOT SETTINGS

@@ -638,77 +638,95 @@ def run_bot():
                                     time.sleep(1)
                             last_alert_time = time.time()
 
-                        if send_telegram_alert(message):
-                            # Baseline metrics for tracking
-                            baseline_price = float(price or 0)
-                            baseline_mcap = float(market_cap or 0)
-                            baseline_liq = float(liquidity or 0)
-                            baseline_vol = float(volume_24h or 0)
-                            mark_as_alerted(token_address, score, smart_involved,
-                                            baseline_price, baseline_mcap, baseline_liq, baseline_vol,
-                                            conviction_type=conviction_type)
+                        telegram_ok = False
+                        try:
+                            telegram_ok = send_telegram_alert(message)
+                        except Exception:
+                            telegram_ok = False
+
+                        # Baseline metrics for tracking (log alerts regardless of Telegram status)
+                        baseline_price = float(price or 0)
+                        baseline_mcap = float(market_cap or 0)
+                        baseline_liq = float(liquidity or 0)
+                        baseline_vol = float(volume_24h or 0)
+                        mark_as_alerted(
+                            token_address,
+                            score,
+                            smart_involved,
+                            baseline_price,
+                            baseline_mcap,
+                            baseline_liq,
+                            baseline_vol,
+                            conviction_type=conviction_type,
+                        )
+                        try:
+                            if relay_enabled():
+                                relay_contract_address_sync(token_address)
+                        except Exception:
+                            pass
+                        session_alerted_tokens.add(token_address)
+                        alert_count += 1
+                        if _metrics.get("enabled"):
                             try:
-                                if relay_enabled():
-                                    relay_contract_address_sync(token_address)
+                                _metrics["alerts_total"].inc()
                             except Exception:
                                 pass
-                            session_alerted_tokens.add(token_address)
-                            alert_count += 1
-                            if _metrics.get("enabled"):
-                                try:
-                                    _metrics["alerts_total"].inc()
-                                except Exception:
-                                    pass
-                            print(f"Alert #{alert_count} sent for token {token_address} (Final: {score}/10, Prelim: {preliminary_score}/10)")
-                            try:
-                                log_process({
+                        print(
+                            f"Alert #{alert_count} for token {token_address} (Final: {score}/10, Prelim: {preliminary_score}/10, telegram_ok={telegram_ok})"
+                        )
+                        try:
+                            log_process(
+                                {
                                     "type": "alert_sent",
                                     "pid": os.getpid(),
                                     "token": token_address,
                                     "final_score": score,
                                     "prelim_score": preliminary_score,
                                     "conviction_type": conviction_type,
-                                })
-                            except Exception:
-                                pass
-                            try:
-                                # Velocity snapshot at alert time
-                                vel_snap = get_token_velocity(token_address, minutes_back=15) or {}
-                                # Lightweight score components snapshot (derived from details where possible)
-                                score_components = {
-                                    "smart_money": 3 if is_smart_cycle else 0,
-                                    "market_cap": None,
-                                    "volume": None,
-                                    "momentum": None,
-                                    "security_penalties": None,
+                                    "telegram_ok": bool(telegram_ok),
                                 }
+                            )
+                        except Exception:
+                            pass
+                        try:
+                            # Velocity snapshot at alert time
+                            vel_snap = get_token_velocity(token_address, minutes_back=15) or {}
+                            # Lightweight score components snapshot (derived from details where possible)
+                            score_components = {
+                                "smart_money": 3 if is_smart_cycle else 0,
+                                "market_cap": None,
+                                "volume": None,
+                                "momentum": None,
+                                "security_penalties": None,
+                            }
 
-                                # Enriched safety and gate logging
-                                buyers_24 = (stats.get('volume', {}) or {}).get('24h', {}) or {}
-                                unique_buyers_24h = buyers_24.get('unique_buyers') or 0
-                                unique_sellers_24h = buyers_24.get('unique_sellers') or 0
+                            # Enriched safety and gate logging
+                            buyers_24 = (stats.get('volume', {}) or {}).get('24h', {}) or {}
+                            unique_buyers_24h = buyers_24.get('unique_buyers') or 0
+                            unique_sellers_24h = buyers_24.get('unique_sellers') or 0
+                            vol_to_mcap_ratio = None
+                            try:
+                                vol_to_mcap_ratio = (volume_24h or 0) / (market_cap or 1)
+                            except Exception:
                                 vol_to_mcap_ratio = None
-                                try:
-                                    vol_to_mcap_ratio = (volume_24h or 0) / (market_cap or 1)
-                                except Exception:
-                                    vol_to_mcap_ratio = None
 
-                                # Gate pass/fail snapshot at alert time
-                                liq_gate = (baseline_liq or 0) >= (MIN_LIQUIDITY_USD or 0)
-                                vol_gate = (baseline_vol or 0) >= (VOL_24H_MIN_FOR_ALERT or 0)
-                                vtm_gate = (vol_to_mcap_ratio or 0) >= (VOL_TO_MCAP_RATIO_MIN or 0)
-                                mcap_micro_gate = (baseline_mcap or 0) <= (MCAP_MICRO_MAX or float('inf'))
-                                top10_gate = True
-                                if isinstance(top10, (int, float)) and MAX_TOP10_CONCENTRATION:
-                                    top10_gate = float(top10) <= float(MAX_TOP10_CONCENTRATION)
+                            # Gate pass/fail snapshot at alert time
+                            liq_gate = (baseline_liq or 0) >= (MIN_LIQUIDITY_USD or 0)
+                            vol_gate = (baseline_vol or 0) >= (VOL_24H_MIN_FOR_ALERT or 0)
+                            vtm_gate = (vol_to_mcap_ratio or 0) >= (VOL_TO_MCAP_RATIO_MIN or 0)
+                            mcap_micro_gate = (baseline_mcap or 0) <= (MCAP_MICRO_MAX or float('inf'))
+                            top10_gate = True
+                            if isinstance(top10, (int, float)) and MAX_TOP10_CONCENTRATION:
+                                top10_gate = float(top10) <= float(MAX_TOP10_CONCENTRATION)
 
-                                log_alert({
+                            log_alert(
+                                {
                                     "token": token_address,
                                     "name": name,
                                     "symbol": symbol,
                                     "final_score": score,
                                     "prelim_score": preliminary_score,
-                                    "velocity_bonus": int(velocity_bonus//2),
+                                    "velocity_bonus": int(velocity_bonus // 2),
                                     "velocity_score_15m": vel_snap.get('velocity_score'),
                                     "unique_traders_15m": vel_snap.get('unique_traders'),
                                     "volume_24h": volume_24h,
@@ -762,11 +780,10 @@ def run_bot():
                                             "top10_concentration": top10_gate,
                                         },
                                     },
-                                })
-                            except Exception:
-                                pass
-                        else:
-                            print(f"Failed to send alert for token {token_address}")
+                                }
+                            )
+                        except Exception:
+                            pass
                             
                 except Exception as e:
                     print(f"Error processing token {token_address}: {e}")

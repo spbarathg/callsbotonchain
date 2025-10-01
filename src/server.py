@@ -67,6 +67,95 @@ def _pick_signals_db_path(preferred_path: str) -> str:
     return best_path
 
 
+def _window_to_sqlite_clause(window: str) -> str:
+    """Return a SQLite datetime WHERE clause for first_alert_at based on a simple window string.
+    Examples: '90m', '2h', '1d'. Defaults to 3 hours if unparsable.
+    """
+    try:
+        w = (window or "").strip().lower()
+        if w.endswith("m"):
+            n = int(w[:-1] or "0")
+            return f"first_alert_at >= datetime('now','-{n} minute')"
+        if w.endswith("h"):
+            n = int(w[:-1] or "0")
+            return f"first_alert_at >= datetime('now','-{n} hour')"
+        if w.endswith("d"):
+            n = int(w[:-1] or "0")
+            return f"first_alert_at >= datetime('now','-{n} day')"
+    except Exception:
+        pass
+    return "first_alert_at >= datetime('now','-3 hour')"
+
+
+def _paper_metrics(db_path: str, *, window: str, stop_pct: float, trail_retention: float,
+                   cap_multiple: float, strict_only: bool = True,
+                   max_mcap_usd: float | None = None) -> Dict[str, Any]:
+    """Compute paper-trading expectancy using a simple trailing/stop model over a window.
+    Model: ret = min(cap_multiple, trail_retention * peak/first) - 1; ret floored at -stop_pct.
+    Filters: optional strict_only via conviction_type; optional max_mcap_usd via first_market_cap_usd when available.
+    """
+    out: Dict[str, Any] = {}
+    where = _window_to_sqlite_clause(window)
+    try:
+        con = sqlite3.connect(db_path, timeout=10)
+        cur = con.cursor()
+        # Build base selection with optional joins/filters
+        sel = [
+            "SELECT",
+            "  t.conviction_type AS conv,",
+            "  s.first_price_usd AS f,",
+            "  s.peak_price_usd AS p,",
+            "  s.first_market_cap_usd AS fmcap",
+            "FROM alerted_token_stats s",
+            "LEFT JOIN alerted_tokens t ON t.token_address = s.token_address",
+            f"WHERE {where} AND s.first_price_usd > 0",
+        ]
+        if strict_only:
+            sel.append("AND (t.conviction_type LIKE 'High Confidence (Strict)%')")
+        if max_mcap_usd is not None:
+            sel.append("AND (s.first_market_cap_usd IS NULL OR s.first_market_cap_usd <= ?)")
+        query = "\n".join(sel)
+        params: tuple[Any, ...] = (max_mcap_usd,) if max_mcap_usd is not None else tuple()
+        cur.execute(query, params)
+        rows = cur.fetchall() or []
+        n = 0
+        wins = 0
+        sum_ret = 0.0
+        win_sum = 0.0
+        loss_sum = 0.0
+        for _conv, f, p, _fmcap in rows:
+            try:
+                f_val = float(f or 0)
+                p_val = float(p or 0)
+                if f_val <= 0:
+                    continue
+                # Trailing realization from peak
+                mul_trail = trail_retention * (p_val / f_val) if p_val > 0 else 1.0
+                eff_mul = min(max(mul_trail, 0.0), float(cap_multiple))
+                ret = eff_mul - 1.0
+                if ret < -float(stop_pct):
+                    ret = -float(stop_pct)
+                n += 1
+                sum_ret += ret
+                if ret >= 0:
+                    wins += 1
+                    win_sum += ret
+                else:
+                    loss_sum += abs(ret)
+            except Exception:
+                continue
+        out["n"] = n
+        out["win_rate"] = (float(wins) / float(n)) if n else None
+        out["avg_ret"] = (sum_ret / float(n)) if n else None
+        out["avg_win"] = (win_sum / float(wins)) if wins else None
+        losses = n - wins
+        out["avg_loss"] = (loss_sum / float(losses)) if losses > 0 else None
+        con.close()
+    except Exception as e:
+        out = {"error": str(e)}
+    return out
+
+
 def create_app() -> Flask:
     app = Flask(__name__, template_folder="templates", static_folder="static")
 
@@ -300,6 +389,11 @@ def create_app() -> Flask:
                     (limit,)
                 )
             for r in cur.fetchall() or []:
+                first_price = float(r[4] or 0)
+                last_price = float(r[5] or 0)
+                peak_price = float(r[6] or 0)
+                peak_multiple = (peak_price / first_price) if (first_price > 0 and peak_price > 0) else None
+                last_multiple = (last_price / first_price) if (first_price > 0 and last_price > 0) else None
                 rows.append({
                     "token": r[0],
                     "alerted_at": r[1],
@@ -315,6 +409,8 @@ def create_app() -> Flask:
                     "last_vol24": r[11],
                     "peak_drawdown_pct": r[12],
                     "outcome": r[13],
+                    "peak_multiple": peak_multiple,
+                    "last_multiple": last_multiple,
                 })
             cur.close(); con.close()
         except Exception:
@@ -382,6 +478,38 @@ def create_app() -> Flask:
             except Exception:
                 pass
             return jsonify({"ok": False, "error": str(e)}), 400
+
+    @app.post("/api/paper")
+    def api_paper():
+        body = request.get_json(force=True, silent=True) or {}
+        window = str(body.get("window") or "3h")
+        stop_pct = float(body.get("stop_pct") or 0.25)
+        trail_ret = float(body.get("trail_retention") or 0.70)
+        cap_mul = float(body.get("cap_multiple") or 2.0)
+        strict_only = bool(body.get("strict_only") if body.get("strict_only") is not None else True)
+        max_mcap = body.get("max_mcap_usd")
+        try:
+            max_mcap_val = float(max_mcap) if (max_mcap is not None and max_mcap != "") else None
+        except Exception:
+            max_mcap_val = None
+
+        signals_db = _pick_signals_db_path(default_db)
+        metrics = _paper_metrics(
+            signals_db,
+            window=window,
+            stop_pct=stop_pct,
+            trail_retention=trail_ret,
+            cap_multiple=cap_mul,
+            strict_only=strict_only,
+            max_mcap_usd=max_mcap_val,
+        )
+        return jsonify({"ok": True, "window": window, "params": {
+            "stop_pct": stop_pct,
+            "trail_retention": trail_ret,
+            "cap_multiple": cap_mul,
+            "strict_only": strict_only,
+            "max_mcap_usd": max_mcap_val,
+        }, "metrics": metrics})
 
     @app.get("/")
     def index():

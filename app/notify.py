@@ -1,6 +1,6 @@
 # notify.py
 import time
-from config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+from config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, TELEGRAM_ENABLED
 from config import HTTP_TIMEOUT_TELEGRAM
 from app.http_client import request_json
 
@@ -8,14 +8,18 @@ def send_telegram_alert(message: str) -> bool:
     if not message or not message.strip():
         print("Error: Empty message provided")
         return False
-        
+
+    # If Telegram is not configured, no-op so the rest of the pipeline continues
+    if not TELEGRAM_ENABLED:
+        return True
+
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     data = {
         "chat_id": TELEGRAM_CHAT_ID,
         "text": message,
         "parse_mode": "HTML",  # Allow HTML formatting
     }
-    
+
     max_retries = 3
     for attempt in range(max_retries):
         result = request_json("POST", url, json=data, timeout=HTTP_TIMEOUT_TELEGRAM)

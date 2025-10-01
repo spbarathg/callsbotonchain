@@ -145,6 +145,7 @@
             <tr>
               <th>Token</th><th>Alerted</th><th>Score</th><th>Conviction</th>
               <th>Price (first → last → peak)</th>
+              <th>Peak Multiple</th>
               <th>MCap (first → last → peak)</th>
               <th>Last Liquidity</th><th>Last 24h Vol</th><th>Outcome</th>
             </tr>
@@ -356,6 +357,7 @@
               <td>${[fmtMoney(row.first_mcap),fmtMoney(row.last_mcap),fmtMoney(row.peak_mcap)].join(' → ')}</td>
               <td>${fmtMoney(row.last_liq)}</td>
               <td>${fmtMoney(row.last_vol24)}</td>
+              <td>${row.peak_multiple!=null?('×'+Number(row.peak_multiple).toFixed(2)):'-'}</td>
               <td>${row.outcome||'-'}${row.peak_drawdown_pct!=null?(' ('+Number(row.peak_drawdown_pct).toFixed(1)+'%)'):''}</td>
             `;
             tbody.appendChild(tr);

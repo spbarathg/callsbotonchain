@@ -30,7 +30,7 @@ services:
       - CALLSBOT_LOG_STDOUT=true
       - CALLSBOT_SQL_KEY=${CALLSBOT_SQL_KEY}
     volumes:
-      - ./var:/app/var:ro
+      - ./var:/app/var
       - ./data/logs:/app/data/logs:ro
     expose:
       - "8080"
