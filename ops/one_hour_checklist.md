@@ -10,6 +10,7 @@ Prereqs
 Quick Reference
 - Web UI: http://64.227.157.221:8080/
 - Local API base (from host): http://127.0.0.1:8080
+ - Prometheus alert rules: ops/alert_rules.yml
 
 ---
 
@@ -66,6 +67,7 @@ ssh root@64.227.157.221 "du -xhd1 /opt/callsbotonchain/data/logs; du -xh /opt/ca
 Guidelines:
 - data/logs ≤ 1–2 GB; DB file size reasonable for retention.
 - If large, rotate/truncate logs, export DB if needed.
+- Ensure alerts loaded: check Prometheus for rules from `ops/alert_rules.yml` (ApiErrorRateHigh, CacheMissRatioHigh, StatsDenyFrequent)
 
 5) Quick remediation playbook (time‑boxed)
 - 502 proxy → fix Caddy upstream + network + reload.

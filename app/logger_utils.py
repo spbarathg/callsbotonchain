@@ -3,6 +3,9 @@ import os
 import sys
 from datetime import datetime
 from typing import Any, Dict, Optional
+from hashlib import sha256
+import urllib.request
+import urllib.error
 from threading import Lock
 
 
@@ -20,9 +23,51 @@ def _log_path(name: str) -> str:
     return os.path.join(LOG_DIR, name)
 
 
+def mask_secret(value: Optional[str], *, show: int = 4) -> str:
+    """Return a masked representation of a secret with an optional fingerprint.
+
+    Example: abcdefgh -> ****f3a1 (keeps last N and adds sha256 tail)
+    """
+    try:
+        s = str(value or "")
+        if not s:
+            return ""
+        tail = s[-max(0, int(show)):] if show > 0 else ""
+        fp = sha256(s.encode("utf-8")).hexdigest()[:4]
+        return ("*" * max(4, len(s) - len(tail))) + tail + ":" + fp
+    except Exception:
+        return "***"
+
+
+def _sanitize_obj(obj: Any) -> Any:
+    """Deep-copy sanitize of objects for logging: redact sensitive keys and headers.
+    - Redacts keys: authorization, x-api-key, x-callsbot-admin-key, api_key, token, password, secret
+    - Applies recursively to dicts/lists
+    """
+    try:
+        if isinstance(obj, dict):
+            out: Dict[str, Any] = {}
+            for k, v in obj.items():
+                lk = str(k).lower()
+                if lk in ("authorization", "x-api-key", "x-callsbot-admin-key", "api_key", "apikey", "token", "password", "secret") or ("authorization" in lk) or ("api-key" in lk) or ("admin-key" in lk):
+                    out[k] = mask_secret(str(v) if v is not None else "")
+                else:
+                    out[k] = _sanitize_obj(v)
+            return out
+        if isinstance(obj, list):
+            return [_sanitize_obj(x) for x in obj]
+        return obj
+    except Exception:
+        return "<sanitization_error>"
+
+
 def write_jsonl(filename: str, record: Dict[str, Any]) -> None:
     path = _log_path(filename)
-    record = dict(record)
+    rec = dict(record)
+    # Inject defaults for structured logs
+    rec.setdefault("level", "info")
+    rec.setdefault("component", filename.replace(".jsonl", ""))
+    record = _sanitize_obj(rec)
     record["ts"] = record.get("ts") or datetime.utcnow().isoformat()
     line = json.dumps(record, ensure_ascii=False) + "\n"
     data = line.encode("utf-8")
@@ -41,6 +86,21 @@ def write_jsonl(filename: str, record: Dict[str, Any]) -> None:
             except Exception:
                 # Never fail the main process due to logging
                 pass
+
+
+def alert_critical(message: str) -> None:
+    """Best-effort critical alert via webhook if configured.
+    Supports Slack-compatible webhook in env CALLSBOT_SLACK_WEBHOOK.
+    """
+    url = os.getenv("CALLSBOT_SLACK_WEBHOOK")
+    if not url:
+        return
+    try:
+        payload = json.dumps({"text": message}).encode("utf-8")
+        req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})
+        urllib.request.urlopen(req, timeout=5).read()
+    except Exception:
+        pass
 
 
 def log_alert(event: Dict[str, Any]) -> None:

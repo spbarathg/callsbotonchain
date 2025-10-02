@@ -179,10 +179,29 @@ def deny_mark_denied(value: bool = True) -> None:
 
 _stats_cache: Dict[str, Tuple[float, Dict[str, Any]]] = {}
 _stats_lock = threading.Lock()
-_STATS_TTL_SEC = int(os.getenv("STATS_TTL_SEC", "600"))  # default 10 minutes; reduce churn
+_STATS_TTL_SEC = int(os.getenv("STATS_TTL_SEC", os.getenv("CALLSBOT_STATS_TTL", "900")))  # default 15 minutes
+
+_REDIS_URL = os.getenv("REDIS_URL") or os.getenv("CALLSBOT_REDIS_URL") or ""
+_redis_client = None
+if _REDIS_URL:
+    try:
+        import redis  # type: ignore
+        _redis_client = redis.from_url(_REDIS_URL, decode_responses=False)
+    except Exception:
+        _redis_client = None
 
 def _cache_get(token_address: str) -> Optional[Dict[str, Any]]:
     import time as _t
+    key = f"stats:{token_address}"
+    # Prefer Redis when available
+    if _redis_client is not None:
+        try:
+            raw = _redis_client.get(key)
+            if raw:
+                return json.loads(raw.decode("utf-8"))
+        except Exception:
+            pass
+    # Fallback in-memory
     with _stats_lock:
         item = _stats_cache.get(token_address)
         if not item:
@@ -190,7 +209,6 @@ def _cache_get(token_address: str) -> Optional[Dict[str, Any]]:
         ts, data = item
         if (_t.time() - ts) <= _STATS_TTL_SEC:
             return data
-        # expired entry; remove to keep cache tight
         try:
             _stats_cache.pop(token_address, None)
         except Exception:
@@ -199,6 +217,14 @@ def _cache_get(token_address: str) -> Optional[Dict[str, Any]]:
 
 def _cache_set(token_address: str, data: Dict[str, Any]) -> None:
     import time as _t
+    key = f"stats:{token_address}"
+    payload = json.dumps(data, ensure_ascii=False).encode("utf-8")
+    if _redis_client is not None:
+        try:
+            _redis_client.setex(key, _STATS_TTL_SEC, payload)
+            return
+        except Exception:
+            pass
     with _stats_lock:
         _stats_cache[token_address] = (_t.time(), data)
 
@@ -207,7 +233,18 @@ def get_token_stats(token_address: str) -> Dict[str, Any]:
         return {}
     cached = _cache_get(token_address)
     if cached:
+        try:
+            from app.metrics import cache_hit
+            cache_hit()
+        except Exception:
+            pass
         return cached
+    else:
+        try:
+            from app.metrics import cache_miss
+            cache_miss()
+        except Exception:
+            pass
     # Enforce budget before hitting paid APIs; fall back to DexScreener if blocked
     try:
         b = get_budget()
@@ -233,7 +270,7 @@ def get_token_stats(token_address: str) -> Dict[str, Any]:
     params = {"token_address": token_address, "chain": "solana"}
     
     # Add timeout and retry logic
-    max_retries = 3
+    max_retries = 4
     
     # Skip Cielo if user disabled or we detected denial previously
     if CIELO_DISABLE_STATS or deny_is_denied():
@@ -241,6 +278,7 @@ def get_token_stats(token_address: str) -> Dict[str, Any]:
 
     combos = [(b, h) for b in base_urls for h in header_variants]
     last_status = None
+    import random as _rand
     for idx, (base, hdrs) in enumerate(combos):
         url = f"{base}/token/stats"
         result = request_json("GET", url, params=params, headers=hdrs, timeout=HTTP_TIMEOUT_STATS)
@@ -248,6 +286,11 @@ def get_token_stats(token_address: str) -> Dict[str, Any]:
         if last_status == 200:
             try:
                 get_budget().spend("stats")
+                try:
+                    from app.metrics import add_stats_budget_used
+                    add_stats_budget_used(1)
+                except Exception:
+                    pass
             except Exception:
                 pass
             api_response = result.get("json") or {}
@@ -313,11 +356,32 @@ def get_token_stats(token_address: str) -> Dict[str, Any]:
             except Exception:
                 return {}
         elif last_status == 429:
+            # Respect Retry-After header and backoff with jitter; mark denied on persistent blocks
             try:
                 log_process({"type": "token_stats_rate_limited", "variant": int(idx + 1)})
+                try:
+                    from app.metrics import inc_deny
+                    inc_deny()
+                except Exception:
+                    pass
             except Exception:
                 pass
-            time.sleep(1)
+            headers = result.get("headers") or {}
+            retry_after = 0
+            try:
+                ra = headers.get("Retry-After")
+                if ra:
+                    retry_after = int(float(ra))
+            except Exception:
+                retry_after = 0
+            if retry_after <= 0:
+                # Exponential backoff with jitter based on idx
+                base_delay = 2 ** max(0, idx)
+                jitter = _rand.uniform(0, 0.5)
+                retry_after = base_delay + jitter
+            time.sleep(min(30, retry_after))
+            if idx >= len(combos) - 1:
+                deny_mark_denied(True)
             continue
         elif last_status == 404:
             try:
@@ -353,46 +417,62 @@ def get_token_stats(token_address: str) -> Dict[str, Any]:
 
 def _normalize_stats_schema(d: Dict[str, Any]) -> Dict[str, Any]:
     """Ensure consistent keys and types across Cielo and DexScreener shapes.
-    - Guarantees: market_cap_usd (float), price_usd (float), liquidity_usd (float|None),
-      volume.24h.volume_usd (float), change.{1h,24h} (float), security/liquidity/holders dicts present.
+    - Guarantees numeric normalization and unknown flags.
+    - Fields: market_cap_usd, price_usd, liquidity_usd, volume.24h.volume_usd, change.{1h,24h}.
     """
     if not isinstance(d, dict):
         return {}
     out: Dict[str, Any] = dict(d)
     # Market cap
     try:
-        out["market_cap_usd"] = float(out.get("market_cap_usd") or 0)
+        out["market_cap_usd"] = float(out.get("market_cap_usd"))
+        out["market_cap_unknown"] = False
     except Exception:
-        out["market_cap_usd"] = 0.0
+        out["market_cap_usd"] = float("nan")
+        out["market_cap_unknown"] = True
     # Price
     try:
-        out["price_usd"] = float(out.get("price_usd") or 0)
+        out["price_usd"] = float(out.get("price_usd"))
+        out["price_unknown"] = False
     except Exception:
-        out["price_usd"] = 0.0
+        out["price_usd"] = float("nan")
+        out["price_unknown"] = True
     # Liquidity
     liq_obj = out.get("liquidity") or {}
     try:
         liq_usd = out.get("liquidity_usd")
         if liq_usd is None:
             liq_usd = liq_obj.get("usd")
-        out["liquidity_usd"] = float(liq_usd) if liq_usd is not None else None
+        if liq_usd is None:
+            out["liquidity_usd"] = float("nan")
+            out["liquidity_unknown"] = True
+        else:
+            out["liquidity_usd"] = float(liq_usd)
+            out["liquidity_unknown"] = False
     except Exception:
-        out["liquidity_usd"] = None
+        out["liquidity_usd"] = float("nan")
+        out["liquidity_unknown"] = True
     # Volume
     v = (out.get("volume") or {})
     v24 = (v.get("24h") or {})
     try:
-        v24_usd = float(v24.get("volume_usd") or 0)
+        v24_usd = float(v24.get("volume_usd"))
+        out.setdefault("volume", {}).setdefault("24h", {})["volume_usd_unknown"] = False
     except Exception:
-        v24_usd = 0.0
+        v24_usd = float("nan")
+        out.setdefault("volume", {}).setdefault("24h", {})["volume_usd_unknown"] = True
     out.setdefault("volume", {}).setdefault("24h", {})["volume_usd"] = v24_usd
     # Change
     ch = out.get("change") or {}
     for k in ("1h", "24h"):
         try:
-            ch_val = float(ch.get(k) or 0)
+            ch_val = float(ch.get(k))
+            unknown_key = f"change_{k}_unknown"
+            out[unknown_key] = False
         except Exception:
-            ch_val = 0.0
+            ch_val = float("nan")
+            unknown_key = f"change_{k}_unknown"
+            out[unknown_key] = True
         out.setdefault("change", {})[k] = ch_val
     # Containers
     for k in ("security", "liquidity", "holders"):
@@ -409,7 +489,7 @@ def calculate_preliminary_score(tx_data: Dict[str, Any], smart_money_detected: b
     
     # Smart money bonus (highest priority)
     if smart_money_detected:
-        score += 4  # Higher bonus for preliminary scoring
+        score += 3  # Baseline bonus
     
     # USD value indicates serious activity (more sensitive thresholds)
     usd_value = tx_data.get('usd_value', 0) or 0
@@ -440,8 +520,8 @@ def score_token(stats: Dict[str, Any], smart_money_detected: bool = False, token
 
     # Smart money bonus is part of raw scoring signal
     if smart_money_detected:
-        score += 3
-        scoring_details.append("Smart Money: +3 (top wallets active!)")
+        score += 2
+        scoring_details.append("Smart Money: +2 (top wallets active!)")
 
     # Market cap analysis (lower market cap = higher potential)
     market_cap = stats.get('market_cap_usd', 0)
@@ -475,12 +555,14 @@ def score_token(stats: Dict[str, Any], smart_money_detected: bool = False, token
     unique_buyers_24h = stats.get('volume', {}).get('24h', {}).get('unique_buyers', 0)
     unique_sellers_24h = stats.get('volume', {}).get('24h', {}).get('unique_sellers', 0)
     total_unique_traders = (unique_buyers_24h or 0) + (unique_sellers_24h or 0)
+    community_bonus = 0
     if total_unique_traders > 500:
-        score += 2
-        scoring_details.append(f"Community: +2 ({total_unique_traders} traders - very active)")
+        community_bonus = 2
     elif total_unique_traders > 200:
-        score += 1
-        scoring_details.append(f"Community: +1 ({total_unique_traders} traders - active)")
+        community_bonus = 1
+    if community_bonus > 0:
+        score += community_bonus
+        scoring_details.append(f"Community: +{community_bonus} ({total_unique_traders} traders)")
 
     # Price momentum analysis (positive short-term trend)
     change_1h = stats.get('change', {}).get('1h', 0)
@@ -492,10 +574,38 @@ def score_token(stats: Dict[str, Any], smart_money_detected: bool = False, token
         score += 1
         scoring_details.append(f"Momentum: +1 ({(change_1h or 0):.1f}% - positive)")
 
-    # Penalize if 24h is extremely negative (might be dump)
+    # Penalize if 24h is extremely negative (might be dump) and add security/composition penalties
     if (change_24h or 0) < DRAW_24H_MAJOR:
         score -= 1
         scoring_details.append(f"Risk: -1 ({(change_24h or 0):.1f}% - major dump risk)")
+
+    # Diminishing returns: if smart money but community is low, cap total bonus
+    if smart_money_detected and community_bonus == 0:
+        score = min(score, 8)
+
+    # Rug/honeypot resilience: if LP unlock < 24h, require stricter thresholds
+    liq_obj = stats.get('liquidity') or {}
+    lock_status = liq_obj.get('lock_status')
+    lock_hours = liq_obj.get('lock_hours') or liq_obj.get('lock_duration_hours')
+    try:
+        lock_hours = float(lock_hours) if lock_hours is not None else None
+    except Exception:
+        lock_hours = None
+    if lock_status in ("unlocked",) or (lock_hours is not None and lock_hours < 24):
+        score -= 1
+        scoring_details.append("Risk: -1 (LP lock <24h)")
+
+    # Weighted penalty combining concentration and mint status
+    holders = stats.get('holders') or {}
+    top10 = holders.get('top_10_concentration_percent') or holders.get('top10_percent') or 0
+    mint_revoked = (stats.get('security') or {}).get('is_mint_revoked')
+    try:
+        top10 = float(top10)
+    except Exception:
+        top10 = 0
+    if top10 > 60 and mint_revoked is not True:
+        score -= 2
+        scoring_details.append("Risk: -2 (High concentration + mint active)")
 
     final_score = max(0, min(score, 10))
     return final_score, scoring_details

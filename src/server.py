@@ -5,10 +5,14 @@ from typing import Dict, Any, List
 import sqlite3
 
 from flask import Flask, jsonify, render_template, request
+from app.logger_utils import write_jsonl
+from app.secrets import hmac_sign
+from hashlib import sha256
 from src.risk.treasury import get_snapshot as get_treasury_snapshot
 from flask import Response
 import time
 from app.toggles import get_toggles, set_toggles
+import socket
 
 
 def _read_jsonl(path: str, limit: int = 500) -> List[Dict[str, Any]]:
@@ -173,15 +177,21 @@ def _paper_metrics(db_path: str, *, window: str, stop_pct: float, trail_retentio
 
 def create_app() -> Flask:
     app = Flask(__name__, template_folder="templates", static_folder="static")
+    # Security: enforce secure cookies and SameSite
+    try:
+        app.config['SESSION_COOKIE_SECURE'] = True
+        app.config['SESSION_COOKIE_SAMESITE'] = 'Strict'
+    except Exception:
+        pass
     
     def _no_cache(resp):  # type: ignore
         try:
             resp.headers["Cache-Control"] = "no-store, max-age=0"
-    except Exception as e:
-        try:
-            print(f"_no_cache: failed to set headers: {e}")
-        except Exception:
-            pass
+        except Exception as e:
+            try:
+                print(f"_no_cache: failed to set headers: {e}")
+            except Exception:
+                pass
         return resp
 
     log_dir = os.getenv("CALLSBOT_LOG_DIR", os.path.join("data", "logs"))
@@ -266,8 +276,55 @@ def create_app() -> Flask:
             "signals_summary": signals_summary,
             "trading_summary": trading_summary,
             "gates_summary": gates_summary,
+            "kill_switch": bool(os.getenv("KILL_SWITCH", "false").strip().lower() == "true"),
         }
         return _no_cache(jsonify(data))
+
+    @app.get("/healthz")
+    def healthz():
+        ok = True
+        checks: Dict[str, Any] = {}
+        # DB check (signals DB read-only)
+        try:
+            signals_db = _pick_signals_db_path(default_db)
+            ro_uri = f"file:{signals_db}?mode=ro"
+            con = sqlite3.connect(ro_uri, timeout=2, uri=True)
+            cur = con.cursor()
+            cur.execute("SELECT 1")
+            cur.fetchone()
+            cur.close(); con.close()
+            checks["db"] = {"ok": True, "path": signals_db}
+        except Exception as e:
+            ok = False
+            checks["db"] = {"ok": False, "error": str(e)}
+        # Redis check (optional)
+        try:
+            redis_url = os.getenv("REDIS_URL") or os.getenv("CALLSBOT_REDIS_URL")
+            if redis_url:
+                try:
+                    import redis  # type: ignore
+                    r = redis.from_url(redis_url, decode_responses=False)
+                    r.ping()
+                    checks["redis"] = {"ok": True}
+                except Exception as e:
+                    ok = False
+                    checks["redis"] = {"ok": False, "error": str(e)}
+            else:
+                checks["redis"] = {"ok": True, "skipped": True}
+        except Exception:
+            checks["redis"] = {"ok": True, "skipped": True}
+        # Last heartbeat recency
+        try:
+            process = _read_jsonl(process_path, limit=200)
+            last_hb = None
+            for rec in reversed(process):
+                if rec.get("type") == "heartbeat":
+                    last_hb = rec; break
+            checks["heartbeat"] = {"ok": bool(last_hb), "last": last_hb}
+        except Exception:
+            checks["heartbeat"] = {"ok": False}
+        status = 200 if ok else 503
+        return jsonify({"ok": ok, "hostname": socket.gethostname(), "checks": checks}), status
 
     @app.get("/api/stream")
     def api_stream():
@@ -645,70 +702,221 @@ def create_app() -> Flask:
 
         return _no_cache(jsonify({"ok": True, "rows": rows, "source": source}))
 
+    def _client_ip() -> str:
+        try:
+            fwd = (request.headers.get("X-Forwarded-For") or "").split(",")[0].strip()
+            return fwd or (request.remote_addr or "")
+        except Exception:
+            return ""
+
+    def _admin_ip_allowed() -> bool:
+        try:
+            allow = (os.getenv("CALLSBOT_ADMIN_IP_ALLOWLIST") or "").strip()
+            if not allow:
+                return True  # If unset, do not block by IP; rely on key
+            client = _client_ip()
+            allowed = [x.strip() for x in allow.split(",") if x.strip()]
+            return client in allowed
+        except Exception:
+            return False
+
+    def _key_fingerprint(key: str) -> str:
+        try:
+            if not key:
+                return ""
+            return sha256(key.encode("utf-8")).hexdigest()[:12]
+        except Exception:
+            return ""
+
+    def _admin_audit(endpoint: str, ok: bool, payload: dict | None = None) -> None:
+        try:
+            req_key = (request.headers.get("X-Callsbot-Admin-Key") or "").strip()
+            rec = {
+                "endpoint": endpoint,
+                "ok": bool(ok),
+                "ip": _client_ip(),
+                "key_fp": _key_fingerprint(req_key),
+                "payload": payload or {},
+            }
+            try:
+                rec_signature = hmac_sign(json.dumps(rec, ensure_ascii=False, sort_keys=True))
+                rec["sig"] = rec_signature
+            except Exception:
+                pass
+            # JSONL audit trail
+            try:
+                write_jsonl("admin_audit.jsonl", rec)
+            except Exception:
+                pass
+            # SQLite audit trail (separate admin db)
+            try:
+                admin_db = os.getenv("CALLSBOT_ADMIN_DB_FILE", os.path.join("var", "admin.db"))
+                os.makedirs(os.path.dirname(admin_db) or ".", exist_ok=True)
+                con = sqlite3.connect(admin_db, timeout=5)
+                cur = con.cursor()
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS admin_actions (
+                      id INTEGER PRIMARY KEY AUTOINCREMENT,
+                      ts TEXT DEFAULT (datetime('now')),
+                      endpoint TEXT,
+                      ip TEXT,
+                      key_fp TEXT,
+                      ok INTEGER,
+                      payload TEXT,
+                      sig TEXT
+                    )
+                    """
+                )
+                cur.execute(
+                    "INSERT INTO admin_actions(endpoint, ip, key_fp, ok, payload, sig) VALUES (?,?,?,?,?,?)",
+                    (rec.get("endpoint"), rec.get("ip"), rec.get("key_fp"), 1 if rec.get("ok") else 0, json.dumps(rec.get("payload") or {}), rec.get("sig")),
+                )
+                con.commit(); cur.close(); con.close()
+            except Exception:
+                try:
+                    con.close()  # type: ignore
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    def _cors_ok() -> bool:
+        # CORS is disabled by default; allow only configured origins
+        allow = (os.getenv("CALLSBOT_CORS_ORIGINS") or "").strip()
+        if not allow:
+            return False
+        origin = (request.headers.get("Origin") or "").strip()
+        if not origin:
+            return False
+        allowed = [o.strip() for o in allow.split(",") if o.strip()]
+        return origin in allowed
+
+    @app.after_request
+    def _set_security_headers(resp):  # type: ignore
+        try:
+            resp.headers.setdefault("X-Content-Type-Options", "nosniff")
+            resp.headers.setdefault("X-Frame-Options", "DENY")
+            resp.headers.setdefault("Referrer-Policy", "no-referrer")
+            # HSTS (assumes TLS termination at proxy)
+            resp.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains; preload")
+            # CORS: only when explicitly allowed
+            if _cors_ok():
+                origin = request.headers.get("Origin")
+                resp.headers["Vary"] = ", ".join(sorted(set(filter(None, [resp.headers.get("Vary"), "Origin"])))))
+                resp.headers["Access-Control-Allow-Origin"] = origin
+                resp.headers["Access-Control-Allow-Credentials"] = "true"
+                resp.headers["Access-Control-Allow-Headers"] = "Content-Type, X-Callsbot-Admin-Key"
+                resp.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+        except Exception:
+            pass
+        return resp
+
+    @app.before_request
+    def _limit_request_size_and_https():  # type: ignore
+        try:
+            # Request size limit to 1MB
+            cl = request.content_length or 0
+            max_bytes = int(os.getenv("CALLSBOT_MAX_REQUEST_BYTES", "1048576"))
+            if cl and cl > max_bytes:
+                return jsonify({"ok": False, "error": "payload too large"}), 413
+            # Optionally enforce HTTPS by rejecting if X-Forwarded-Proto != https
+            if os.getenv("CALLSBOT_REQUIRE_HTTPS", "true").lower() == "true":
+                xf = (request.headers.get("X-Forwarded-Proto") or request.scheme or "").lower()
+                if xf != "https":
+                    return jsonify({"ok": False, "error": "https required"}), 400
+        except Exception:
+            pass
+
     @app.post("/api/toggles")
     def api_set_toggles():
+        # Require admin key (same pattern as /api/sql)
+        admin_key = os.getenv("CALLSBOT_SQL_KEY", "").strip()
+        req_key = (request.headers.get("X-Callsbot-Admin-Key") or "").strip()
+        if (not admin_key) or (req_key != admin_key) or (not _admin_ip_allowed()):
+            _admin_audit("/api/toggles", False, {"reason": "forbidden"})
+            return jsonify({"ok": False, "error": "forbidden"}), 403
         try:
             body = request.get_json(force=True, silent=True) or {}
         except Exception as e:
-            try:
-                print(f"api_set_toggles: bad body: {e}")
-            except Exception:
-                pass
-            body = {}
+            _admin_audit("/api/toggles", False, {"reason": "bad_json", "error": str(e)})
+            return jsonify({"ok": False, "error": "invalid json"}), 400
+        # Validate types if provided
+        for key in ("signals_enabled", "trading_enabled"):
+            if key in body and not isinstance(body.get(key), bool):
+                _admin_audit("/api/toggles", False, {"reason": "bad_type", "key": key})
+                return jsonify({"ok": False, "error": f"{key} must be a boolean"}), 400
         updated = set_toggles({
             "signals_enabled": body.get("signals_enabled"),
             "trading_enabled": body.get("trading_enabled"),
         })
+        _admin_audit("/api/toggles", True, {"toggles": updated})
         return jsonify({"ok": True, "toggles": updated})
+
+    # Optional SQL allowlist for safer admin queries
+    _SQL_ALLOWLIST = {
+        "alerts_24h": "SELECT COUNT(1) AS alerts_24h FROM alerted_tokens WHERE alerted_at >= datetime('now','-1 day')",
+        "recent_open_positions": "SELECT id, token_address, open_at FROM positions WHERE status='open' ORDER BY datetime(open_at) DESC LIMIT 50",
+    }
 
     @app.post("/api/sql")
     def api_sql():
-        # Require admin key header if configured; default deny when not set
+        # Require admin key header (default deny when not set)
         admin_key = os.getenv("CALLSBOT_SQL_KEY", "").strip()
-        req_key = request.headers.get("X-Callsbot-Admin-Key", "").strip()
-        if not admin_key or req_key != admin_key:
+        req_key = (request.headers.get("X-Callsbot-Admin-Key") or "").strip()
+        if (not admin_key) or (req_key != admin_key) or (not _admin_ip_allowed()):
+            _admin_audit("/api/sql", False, {"reason": "forbidden"})
             return jsonify({"ok": False, "error": "forbidden"}), 403
         body = request.get_json(force=True, silent=True) or {}
-        query = str(body.get("query") or "").strip()
-        target = str(body.get("target") or "signals")  # signals | trading | custom
-        allow_writes = bool(body.get("allow_writes"))
+        query_val = body.get("query")
+        query = (str(query_val) if isinstance(query_val, (str, bytes)) else "").strip()
+        preset = (body.get("preset") or "").strip()
+        if preset:
+            query = _SQL_ALLOWLIST.get(preset) or ""
+        target = str(body.get("target") or "signals").strip().lower()  # signals | trading | custom
         custom_path = body.get("path")
 
         if not query:
             return jsonify({"ok": False, "error": "empty query"}), 400
 
-        # Very basic safety: block writes unless allowed
+        # Enforce read-only: allow only SELECT/PRAGMA/EXPLAIN (and WITH ... SELECT) and reject known write ops
         q_upper = query.lstrip().upper()
-        is_write = q_upper.startswith(("INSERT", "UPDATE", "DELETE", "ALTER", "DROP", "CREATE", "REPLACE", "VACUUM", "ATTACH", "PRAGMA"))
-        if is_write and not allow_writes:
-            return jsonify({"ok": False, "error": "write queries require allow_writes=true"}), 403
+        forbidden_tokens = ("INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "ATTACH", "DETACH", "VACUUM", "REPLACE", "CREATE", "TRUNCATE")
+        if any(tok in q_upper for tok in forbidden_tokens):
+            _admin_audit("/api/sql", False, {"reason": "write_op_detected", "query": query[:200]})
+            return jsonify({"ok": False, "error": "write queries are not allowed"}), 403
+        allowed_starts = ("SELECT", "PRAGMA", "EXPLAIN", "WITH")
+        if not q_upper.startswith(allowed_starts):
+            _admin_audit("/api/sql", False, {"reason": "disallowed_statement", "query": query[:200]})
+            return jsonify({"ok": False, "error": "only SELECT/PRAGMA/EXPLAIN are allowed"}), 403
+        # If WITH, ensure it is used for a SELECT query
+        if q_upper.startswith("WITH") and (" SELECT " not in f" {q_upper} "):
+            _admin_audit("/api/sql", False, {"reason": "with_without_select", "query": query[:200]})
+            return jsonify({"ok": False, "error": "WITH must be used with SELECT"}), 403
 
-        path = default_db if target == "signals" else trading_db if target == "trading" else str(custom_path or default_db)
+        path = default_db if target == "signals" else trading_db if target == "trading" else (str(custom_path) if custom_path else default_db)
+        # Open read-only connection via URI
         try:
-            con = sqlite3.connect(path, timeout=10)
+            ro_uri = f"file:{path}?mode=ro"
+            con = sqlite3.connect(ro_uri, timeout=10, uri=True)
             cur = con.cursor()
-            cur.execute("PRAGMA journal_mode=WAL")
             cur.execute("PRAGMA busy_timeout=5000")
             cur.execute(query)
-            if is_write:
-                con.commit()
-                rows = [{"rows_affected": cur.rowcount}]
-                cols: List[str] = ["rows_affected"]
-            else:
-                cols = [d[0] for d in (cur.description or [])]
-                fetched = cur.fetchall()
-                rows = [
-                    {cols[i]: val for i, val in enumerate(r)}
-                    for r in fetched
-                ]
-            cur.close()
-            con.close()
+            cols = [d[0] for d in (cur.description or [])]
+            fetched = cur.fetchall() or []
+            rows = [
+                {cols[i]: val for i, val in enumerate(r)} if cols else {}
+                for r in fetched
+            ]
+            cur.close(); con.close()
+            _admin_audit("/api/sql", True, {"query": query[:200], "target": target, "db": path})
             return jsonify({"ok": True, "columns": cols, "rows": rows, "db": path})
         except Exception as e:
             try:
                 con.close()  # type: ignore
             except Exception:
                 pass
+            _admin_audit("/api/sql", False, {"reason": "db_error", "error": str(e)[:200]})
             return jsonify({"ok": False, "error": str(e)}), 400
 
     @app.post("/api/paper")

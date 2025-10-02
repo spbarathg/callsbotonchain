@@ -168,6 +168,26 @@ def fetch_solana_feed(cursor=None, smart_money_only: bool = False) -> Dict[str, 
         return {"items": [], "next_cursor": None}
 
     empty_200_seen = False
+    def _valid_item(item: Dict[str, Any]) -> bool:
+        try:
+            tok = item.get("token0_address") or item.get("token1_address") or item.get("token")
+            usd = item.get("usd_value")
+            ts = item.get("ts") or item.get("timestamp") or item.get("time")
+            if not tok:
+                return False
+            try:
+                usd_val = float(usd if usd is not None else 0)
+            except Exception:
+                return False
+            if usd_val <= 0:
+                return False
+            # timestamp must be present
+            if ts is None:
+                return False
+            return True
+        except Exception:
+            return False
+
     for attempt in range(max_retries):
         # Try both header and parameter variants within the attempt
         made_progress = False
@@ -184,7 +204,17 @@ def fetch_solana_feed(cursor=None, smart_money_only: bool = False) -> Dict[str, 
                     api_response = result.get("json") or {}
                     parsed = _parse_items(api_response)
                     if parsed["items"]:
-                        return {"transactions": parsed["items"], "next_cursor": parsed.get("next_cursor"), "error": None}
+                        # Strict validation of items
+                        valid = []
+                        for it in parsed["items"]:
+                            if _valid_item(it):
+                                valid.append(it)
+                            else:
+                                try:
+                                    log_process({"type": "feed_item_invalid", "reason": "missing_required_fields"})
+                                except Exception:
+                                    pass
+                        return {"transactions": valid, "next_cursor": parsed.get("next_cursor"), "error": None}
                     # If 200 but empty, continue trying next param variant (could be filter mismatch)
                     try:
                         log_process({
@@ -211,6 +241,13 @@ def fetch_solana_feed(cursor=None, smart_money_only: bool = False) -> Dict[str, 
                     retry_after = _parse_retry_after_seconds(_R(result.get("headers") or {}))
                     if retry_after is not None:
                         last_retry_after = max(last_retry_after or 0, retry_after)
+                    # Add small jitter to reduce thundering herd
+                    try:
+                        import random as _rand
+                        if last_retry_after is not None:
+                            last_retry_after = int(last_retry_after + _rand.uniform(0, 0.5))
+                    except Exception:
+                        pass
                     try:
                         log_process({
                             "type": "rate_limited",

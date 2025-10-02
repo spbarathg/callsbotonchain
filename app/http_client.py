@@ -7,6 +7,7 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 from config import HTTP_MAX_RETRIES, HTTP_BACKOFF_FACTOR
+from app.metrics import inc_api_call
 
 
 _session: Optional[requests.Session] = None
@@ -43,6 +44,15 @@ def get_session(max_retries: int = HTTP_MAX_RETRIES, backoff_factor: float = HTT
 
 def request_json(method: str, url: str, *, params: Optional[Dict[str, Any]] = None, headers: Optional[Dict[str, str]] = None,
                  json: Optional[Dict[str, Any]] = None, timeout: float = 10.0) -> Dict[str, Any]:
+    # Domain allowlist to reduce SSRF / misconfig risks
+    try:
+        from urllib.parse import urlparse
+        host = urlparse(url).hostname or ""
+        allow_hosts = {"api.dexscreener.com", "dexscreener.com", "feed-api.cielo.finance", "api.cielo.finance", "api.geckoterminal.com"}
+        if host and host not in allow_hosts:
+            return {"status_code": None, "error": f"host_not_allowed:{host}"}
+    except Exception:
+        pass
     sess = get_session()
     # Apply conservative default headers to avoid upstream blocks (CF/proxies)
     default_headers = {
@@ -80,8 +90,20 @@ def request_json(method: str, url: str, *, params: Optional[Dict[str, Any]] = No
             result["json"] = None
             result["text"] = resp.text
         result["headers"] = dict(resp.headers)
+        try:
+            provider = "dexscreener" if "dexscreener" in url else ("cielo" if "cielo" in url else None)
+            if provider:
+                inc_api_call(provider, resp.status_code)
+        except Exception:
+            pass
         return result
     except requests.RequestException as e:
+        try:
+            provider = "dexscreener" if "dexscreener" in url else ("cielo" if "cielo" in url else None)
+            if provider:
+                inc_api_call(provider, None)
+        except Exception:
+            pass
         return {"status_code": None, "error": str(e)}
 
 

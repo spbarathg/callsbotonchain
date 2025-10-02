@@ -29,6 +29,7 @@ except Exception:
 from app.logger_utils import log_alert, log_tracking, log_process, log_heartbeat, mirror_stdout_line
 import html
 from app.toggles import signals_enabled
+from app.logger_utils import log_process
 
 # Optional Prometheus metrics (enable with CALLSBOT_METRICS_ENABLED=true)
 METRICS_ENABLED = (os.getenv("CALLSBOT_METRICS_ENABLED", "false").strip().lower() == "true")
@@ -43,7 +44,7 @@ if METRICS_ENABLED or METRICS_PORT_ENV:
                 _port = int(METRICS_PORT_ENV)
         except Exception:
             _port = 9108
-        _addr = os.getenv("CALLSBOT_METRICS_ADDR", "0.0.0.0")
+        _addr = os.getenv("CALLSBOT_METRICS_ADDR", "127.0.0.1")
         start_http_server(port=_port, addr=_addr)
         _metrics["processed_total"] = Counter("callsbot_processed_total", "Total processed transactions")
         _metrics["alerts_total"] = Counter("callsbot_alerts_total", "Total alerts sent")
@@ -121,6 +122,13 @@ def acquire_singleton_lock() -> bool:
             try:
                 fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError:
+                try:
+                    # Read owner PID for diagnostics
+                    f.seek(0)
+                    owner = f.read(64).decode("utf-8", errors="ignore").strip()
+                    mirror_stdout_line(f"Lock held by PID: {owner}")
+                except Exception:
+                    pass
                 f.close()
                 return False
         except ImportError:
@@ -130,12 +138,19 @@ def acquire_singleton_lock() -> bool:
                 f.seek(0)
                 msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
             except OSError:
+                try:
+                    f.seek(0)
+                    owner = f.read(64).decode("utf-8", errors="ignore").strip()
+                    mirror_stdout_line(f"Lock held by PID: {owner}")
+                except Exception:
+                    pass
                 f.close()
                 return False
-        # Write PID for debugging purposes
+        # Write PID and hostname for debugging purposes (fixed-length header)
         try:
             f.seek(0)
-            pid_bytes = str(os.getpid()).encode("utf-8")
+            ident = f"{os.getpid()}@{os.uname().nodename if hasattr(os, 'uname') else 'host'}"
+            pid_bytes = ident.encode("utf-8")
             f.write(pid_bytes[:64].ljust(64, b" "))
             f.flush()
         except Exception:
@@ -158,6 +173,10 @@ def signal_handler(sig, frame):
 
 def run_bot():
     global shutdown_flag
+    # Emergency kill switch check
+    if os.getenv("KILL_SWITCH", "false").strip().lower() == "true":
+        _out("KILL_SWITCH active. Exiting bot run loop.")
+        return
     # Lazy import all config-dependent modules to avoid requiring secrets in web-only mode
     from app.fetch_feed import fetch_solana_feed
     try:
@@ -258,6 +277,8 @@ def run_bot():
             "pid": os.getpid(),
             "fetch_interval": FETCH_INTERVAL,
             "gates": CURRENT_GATES or {},
+            "dry_run": bool(os.getenv('DRY_RUN', 'false').strip().lower() == 'true'),
+            "kill_switch": bool(os.getenv('KILL_SWITCH', 'false').strip().lower() == 'true'),
         })
     except Exception:
         pass
@@ -266,6 +287,13 @@ def run_bot():
     while not shutdown_flag:
         try:
             # Respect signals toggle: if disabled, idle-loop while keeping heartbeats
+            if os.getenv("KILL_SWITCH", "false").strip().lower() == "true":
+                _out("KILL_SWITCH active. Sleeping...")
+                for _ in range(max(5, FETCH_INTERVAL // 2)):
+                    if shutdown_flag:
+                        break
+                    time.sleep(1)
+                continue
             if not signals_enabled():
                 _out("Signals disabled via toggle. Sleeping...")
                 for _ in range(max(5, FETCH_INTERVAL // 2)):
@@ -318,6 +346,11 @@ def run_bot():
             # Log the number of items returned this cycle for visibility
             items_count = len(feed.get("transactions", []))
             _out(f"FEED ITEMS: {items_count}")
+            try:
+                from app.metrics import set_queue_len
+                set_queue_len(items_count)
+            except Exception:
+                pass
             try:
                 log_heartbeat(os.getpid(), extra={
                     "cycle": ("smart" if is_smart_cycle else "general"),
@@ -647,7 +680,8 @@ def run_bot():
 
                         telegram_ok = False
                         try:
-                            telegram_ok = send_telegram_alert(message)
+                            if os.getenv('DRY_RUN', 'false').strip().lower() != 'true':
+                                telegram_ok = send_telegram_alert(message)
                         except Exception:
                             telegram_ok = False
 

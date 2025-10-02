@@ -7,6 +7,13 @@
     <link rel="stylesheet" href="/static/styles.css?v=3">
   </head>
   <body>
+    <div id="statusbar" style="font-family:monospace;font-size:12px;padding:6px 8px;background:#111;color:#eee;display:flex;gap:16px;align-items:center">
+      <span>Signals: <b id="status_signals">?</b></span>
+      <span>Trading: <b id="status_trading">?</b></span>
+      <span>Kill Switch: <b id="status_kill">?</b></span>
+      <span>Cache Hit%: <b id="status_cache">?</b></span>
+      <span>API Errors%: <b id="status_api_err">?</b></span>
+    </div>
     <header class="topbar">
       <div class="brand">CALLSBOTONCHAIN</div>
       <nav class="navbar horizontal">
@@ -258,6 +265,12 @@
           const r = await fetch('/api/stats');
           const data = await r.json();
           applyStats(data);
+          // Update simple status indicators
+          try {
+            document.getElementById('status_signals').textContent = String((data.toggles||{}).signals_enabled);
+            document.getElementById('status_trading').textContent = String((data.toggles||{}).trading_enabled);
+            document.getElementById('status_kill').textContent = String(!!data.kill_switch);
+          } catch (e) {}
         } catch (e) {
           console.error('Failed to fetch stats', e);
         }
@@ -277,7 +290,7 @@
         const signals_enabled = document.getElementById('signals_toggle').checked;
         const trading_enabled = document.getElementById('trading_toggle').checked;
         try {
-          await fetch('/api/toggles', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ signals_enabled, trading_enabled }) });
+          await fetch('/api/toggles', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Callsbot-Admin-Key': (window.CALLSBOT_ADMIN_KEY || '') }, body: JSON.stringify({ signals_enabled, trading_enabled }) });
         } catch (e) {
           console.error('Failed to update toggles', e);
         }

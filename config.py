@@ -125,7 +125,7 @@ VELOCITY_REQUIRED = _get_int("VELOCITY_REQUIRED", 5)
 # ==============================================
 # Keep DB local; if env not set, put under var/ (ignored)
 DB_FILE = os.getenv("CALLSBOT_DB_FILE", os.path.join(os.path.dirname(__file__), "var", "alerted_tokens.db"))
-DB_RETENTION_HOURS = _get_int("DB_RETENTION_HOURS", 72)
+DB_RETENTION_HOURS = _get_int("DB_RETENTION_HOURS", 2160)  # default ~90 days
 
 # ==============================================
 # FEATURE FLAGS

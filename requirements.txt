@@ -11,3 +11,4 @@ gunicorn>=21.2.0
 solana>=0.30.2
 solders>=0.21.0
 base58>=2.1.1
+redis>=5.0.0

@@ -1,0 +1,27 @@
+groups:
+  - name: callsbot.rules
+    rules:
+      - alert: ApiErrorRateHigh
+        expr: (sum(rate(cielo_api_calls_total{status!~"2.."}[5m])) + sum(rate(dexscreener_api_calls_total{status!~"2.."}[5m])))
+              /
+              (sum(rate(cielo_api_calls_total[5m])) + sum(rate(dexscreener_api_calls_total[5m]))) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "API error rate > 5%"
+      - alert: CacheMissRatioHigh
+        expr: (rate(cache_misses_total[5m])) / (rate(cache_hits_total[5m]) + rate(cache_misses_total[5m])) > 0.5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Cache miss ratio > 50%"
+      - alert: StatsDenyFrequent
+        expr: increase(deny_count[1h]) > 10
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Stats deny triggered frequently (>10 in 1h)"
+
