@@ -263,6 +263,29 @@ def create_app() -> Flask:
         signals_summary = _signals_metrics(signals_db)
         trading_summary = _trading_metrics(trading_db)
         gates_summary = _gates_summary(alerts_path)
+        # Lightweight API error-rate from recent process logs
+        def _api_error_pct(proc_rows: List[Dict[str, Any]]) -> float | None:
+            try:
+                window = proc_rows[-500:] if len(proc_rows) > 500 else proc_rows
+                err_types = {
+                    "token_stats_error",
+                    "token_stats_unavailable",
+                    "token_stats_rate_limited",
+                    "token_stats_denied_variants",
+                }
+                count_err = sum(1 for r in window if (r.get("type") in err_types))
+                # Treat not_found as a non-error attempt
+                count_total = sum(1 for r in window if str(r.get("type", "")).startswith("token_stats_"))
+                if count_total <= 0:
+                    return None
+                return round((100.0 * float(count_err) / float(count_total)), 1)
+            except Exception:
+                return None
+
+        metrics = {
+            "api_error_pct": _api_error_pct(process),
+        }
+
         data = {
             "total_alerts": (signals_summary.get("total_alerts") if isinstance(signals_summary, dict) and signals_summary.get("total_alerts") is not None else total_alerts),
             "log_alerts_count": total_alerts,
@@ -277,6 +300,7 @@ def create_app() -> Flask:
             "trading_summary": trading_summary,
             "gates_summary": gates_summary,
             "kill_switch": bool(os.getenv("KILL_SWITCH", "false").strip().lower() == "true"),
+            "metrics": metrics,
         }
         return _no_cache(jsonify(data))
 
@@ -373,6 +397,24 @@ def create_app() -> Flask:
                     signals_summary = _signals_metrics(signals_db)
                     trading_summary = _trading_metrics(trading_db)
                     gates_summary = _gates_summary(alerts_path)
+                    # Rolling API error-rate as part of stream payload
+                    def _api_error_pct_stream(proc_rows: List[Dict[str, Any]]) -> float | None:
+                        try:
+                            window = proc_rows[-500:] if len(proc_rows) > 500 else proc_rows
+                            err_types = {
+                                "token_stats_error",
+                                "token_stats_unavailable",
+                                "token_stats_rate_limited",
+                                "token_stats_denied_variants",
+                            }
+                            count_err = sum(1 for r in window if (r.get("type") in err_types))
+                            count_total = sum(1 for r in window if str(r.get("type", "")).startswith("token_stats_"))
+                            if count_total <= 0:
+                                return None
+                            return round((100.0 * float(count_err) / float(count_total)), 1)
+                        except Exception:
+                            return None
+
                     payload = {
                         "total_alerts": total_alerts,
                         "cooldowns": cooldowns,
@@ -384,6 +426,7 @@ def create_app() -> Flask:
                         "signals_summary": signals_summary,
                         "trading_summary": trading_summary,
                         "gates_summary": gates_summary,
+                        "metrics": {"api_error_pct": _api_error_pct_stream(process)},
                     }
                     yield f"data: {json.dumps(payload)}\n\n"
                 except Exception as e:
@@ -413,7 +456,7 @@ def create_app() -> Flask:
         except Exception as e:
             try:
                 print(f"api_logs: bad request args: {e}")
-            except Exception:
+        except Exception:
                 pass
             log_type = "combined"; limit = 300
 
@@ -576,7 +619,7 @@ def create_app() -> Flask:
         except Exception as e:
             try:
                 print(f"api_tracked: db error: {e}")
-            except Exception:
+        except Exception:
                 pass
             rows = []
 
@@ -907,12 +950,12 @@ def create_app() -> Flask:
             cur = con.cursor()
             cur.execute("PRAGMA busy_timeout=5000")
             cur.execute(query)
-            cols = [d[0] for d in (cur.description or [])]
+                cols = [d[0] for d in (cur.description or [])]
             fetched = cur.fetchall() or []
-            rows = [
+                rows = [
                 {cols[i]: val for i, val in enumerate(r)} if cols else {}
-                for r in fetched
-            ]
+                    for r in fetched
+                ]
             cur.close(); con.close()
             _admin_audit("/api/sql", True, {"query": query[:200], "target": target, "db": path})
             return jsonify({"ok": True, "columns": cols, "rows": rows, "db": path})
@@ -938,7 +981,7 @@ def create_app() -> Flask:
         except Exception as e:
             try:
                 print(f"api_paper: bad max_mcap: {e}")
-            except Exception:
+        except Exception:
                 pass
             max_mcap_val = None
 
@@ -1057,8 +1100,8 @@ def _signals_metrics(db_path: str) -> Dict[str, Any]:
     except Exception as e:
         try:
             print(f"_signals_metrics: metrics error: {e}")
-        except Exception:
-            pass
+    except Exception:
+        pass
     return out
 
 
@@ -1135,8 +1178,8 @@ def _trading_metrics(db_path: str) -> Dict[str, Any]:
     except Exception as e:
         try:
             print(f"_trading_metrics: metrics error: {e}")
-        except Exception:
-            pass
+    except Exception:
+        pass
     return out
 
 
@@ -1163,8 +1206,8 @@ def _gates_summary(alerts_path: str) -> Dict[str, Any]:
     except Exception as e:
         try:
             print(f"_gates_summary: error: {e}")
-        except Exception:
-            pass
+    except Exception:
+        pass
     return data
 
 
