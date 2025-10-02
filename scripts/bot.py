@@ -26,7 +26,7 @@ except Exception:
         return False
     def relay_contract_address_sync(*_args, **_kwargs) -> bool:
         return False
-from app.logger_utils import log_alert, log_tracking, log_process, log_heartbeat
+from app.logger_utils import log_alert, log_tracking, log_process, log_heartbeat, mirror_stdout_line
 import html
 from app.toggles import signals_enabled
 
@@ -146,7 +146,7 @@ def acquire_singleton_lock() -> bool:
 
 def signal_handler(sig, frame):
     global shutdown_flag
-    print("\nShutdown signal received. Gracefully stopping bot...")
+    _out("\nShutdown signal received. Gracefully stopping bot...")
     shutdown_flag = True
 
 def run_bot():
@@ -206,15 +206,15 @@ def run_bot():
     
     # Enforce single-instance execution
     if not acquire_singleton_lock():
-        print("Another bot instance is already running. Exiting.")
+        _out("Another bot instance is already running. Exiting.")
         return
 
     try:
         init_db()  # ensure database is initialized
         ensure_indices()
-        print("Database initialized successfully")
+        _out("Database initialized successfully")
     except Exception as e:
-        print(f"Failed to initialize database: {e}")
+        _out(f"Failed to initialize database: {e}")
         return
     
     cursor_general = None
@@ -226,14 +226,14 @@ def run_bot():
     session_alerted_tokens = set()
     last_track_time = 0
     
-    print("SMART MONEY ENHANCED SOLANA MEMECOIN BOT STARTED")
-    print(f"Configuration: Score threshold = {HIGH_CONFIDENCE_SCORE}, Fetch interval = {FETCH_INTERVAL}s")
+    _out("SMART MONEY ENHANCED SOLANA MEMECOIN BOT STARTED")
+    _out(f"Configuration: Score threshold = {HIGH_CONFIDENCE_SCORE}, Fetch interval = {FETCH_INTERVAL}s")
     if 'CURRENT_GATES' in globals() and CURRENT_GATES:
         gm = CURRENT_GATES.get('GATE_MODE')
-        print(f"Gate Mode: {gm} | Gates: score>={CURRENT_GATES.get('HIGH_CONFIDENCE_SCORE')}, liq>={CURRENT_GATES.get('MIN_LIQUIDITY_USD')}, vol24>={CURRENT_GATES.get('VOL_24H_MIN_FOR_ALERT')}, mcap<={CURRENT_GATES.get('MAX_MARKET_CAP_FOR_DEFAULT_ALERT')}, vol/mcap>={CURRENT_GATES.get('VOL_TO_MCAP_RATIO_MIN')}")
-    print("Features: Smart Money Detection + Enhanced Scoring + Detailed Analysis")
-    print("Smart-money cycle enabled (top_wallets=true, min_wallet_pnl=1000)")
-    print("Adaptive cooldown on Cielo rate limits is enabled")
+        _out(f"Gate Mode: {gm} | Gates: score>={CURRENT_GATES.get('HIGH_CONFIDENCE_SCORE')}, liq>={CURRENT_GATES.get('MIN_LIQUIDITY_USD')}, vol24>={CURRENT_GATES.get('VOL_24H_MIN_FOR_ALERT')}, mcap<={CURRENT_GATES.get('MAX_MARKET_CAP_FOR_DEFAULT_ALERT')}, vol/mcap>={CURRENT_GATES.get('VOL_TO_MCAP_RATIO_MIN')}")
+    _out("Features: Smart Money Detection + Enhanced Scoring + Detailed Analysis")
+    _out("Smart-money cycle enabled (top_wallets=true, min_wallet_pnl=1000)")
+    _out("Adaptive cooldown on Cielo rate limits is enabled")
     
     # Send startup notification
     startup_message = (
@@ -260,7 +260,7 @@ def run_bot():
         try:
             # Respect signals toggle: if disabled, idle-loop while keeping heartbeats
             if not signals_enabled():
-                print("Signals disabled via toggle. Sleeping...")
+                _out("Signals disabled via toggle. Sleeping...")
                 for _ in range(max(5, FETCH_INTERVAL // 2)):
                     if shutdown_flag:
                         break
@@ -284,7 +284,7 @@ def run_bot():
                     retry_after_sec = max(300, FETCH_INTERVAL)  # at least 5 minutes
                 elif retry_after_sec <= 0:
                     retry_after_sec = max(60, FETCH_INTERVAL)
-                print(f"Cielo {('quota' if feed_error=='quota_exceeded' else 'rate limit')} hit. Cooling down for {retry_after_sec}s")
+                _out(f"Cielo {('quota' if feed_error=='quota_exceeded' else 'rate limit')} hit. Cooling down for {retry_after_sec}s")
                 try:
                     log_process({
                         "type": "cooldown",
@@ -310,7 +310,7 @@ def run_bot():
 
             # Log the number of items returned this cycle for visibility
             items_count = len(feed.get("transactions", []))
-            print(f"FEED ITEMS: {items_count}")
+            _out(f"FEED ITEMS: {items_count}")
             try:
                 log_heartbeat(os.getpid(), extra={
                     "cycle": ("smart" if is_smart_cycle else "general"),
@@ -331,7 +331,7 @@ def run_bot():
             
             # If upstream feed is empty, attempt local fallbacks to keep signals flowing
             if not feed.get("transactions"):
-                print(f"No new transactions found")
+                _out(f"No new transactions found")
                 fallback_items = []
                 try:
                     if _fallback_feed_from_geckoterminal:
@@ -345,13 +345,13 @@ def run_bot():
                     except Exception:
                         fallback_items = []
                 try:
-                    print(f"Fallback items count: {len(fallback_items) if fallback_items else 0}")
+                    _out(f"Fallback items count: {len(fallback_items) if fallback_items else 0}")
                 except Exception:
                     pass
                 if fallback_items:
                     feed["transactions"] = fallback_items
                     items_count = len(fallback_items)
-                    print(f"Using fallback feed items: {items_count}")
+                    _out(f"Using fallback feed items: {items_count}")
                     try:
                         log_process({
                             "type": "feed_fallback_injected",
@@ -440,13 +440,13 @@ def run_bot():
                     # STEP 1: Calculate preliminary score (NO API CALLS)
                     preliminary_score = calculate_preliminary_score(tx, smart_money_detected=smart_involved)
                     if DEBUG_PRELIM:
-                        print("    ⤷ prelim_debug:", {
+                        _out("    ⤷ prelim_debug: " + str({
                             'usd_value': round(tx.get('usd_value', 0) or 0, 2),
                             'token0_usd': round(tx.get('token0_amount_usd', 0) or 0, 2),
                             'token1_usd': round(tx.get('token1_amount_usd', 0) or 0, 2),
                             'tx_type': tx.get('tx_type'),
                             'dex': tx.get('dex')
-                        })
+                        }))
                     
                     # STEP 2: Record activity for velocity tracking
                     # Attempt to capture trader address for community velocity
@@ -463,7 +463,7 @@ def run_bot():
                     # STEP 3: CREDIT-EFFICIENT DECISION - Only fetch detailed stats if warranted
                     is_fallback_tx = tx.get('tx_type', '').endswith('_fallback')
                     if (not is_fallback_tx) and (not should_fetch_detailed_stats(token_address, preliminary_score)):
-                        print(f"Token {token_address} prelim: {preliminary_score}/10 (skipped detailed analysis)")
+                        _out(f"Token {token_address} prelim: {preliminary_score}/10 (skipped detailed analysis)")
                         api_calls_saved += 1  # Track credits saved
                         if _metrics.get("enabled"):
                             try:
@@ -473,7 +473,7 @@ def run_bot():
                         continue
                     
                     # STEP 4: EXPENSIVE API CALL - Only for high-potential tokens
-                    print(f"FETCHING DETAILED STATS for {token_address[:8]} (prelim: {preliminary_score}/10)")
+                    _out(f"FETCHING DETAILED STATS for {token_address[:8]} (prelim: {preliminary_score}/10)")
                     stats = get_token_stats(token_address)
                     if not stats:
                         continue
@@ -497,7 +497,7 @@ def run_bot():
                             score = min(score + 1, 10)
                             scoring_details.append(f"Community: +1 ({ut} unique traders in window)")
                     
-                    print(f"Token {token_address} FINAL: {score}/10 (prelim: {preliminary_score}, velocity: +{velocity_bonus//2})")
+                    _out(f"Token {token_address} FINAL: {score}/10 (prelim: {preliminary_score}, velocity: +{velocity_bonus//2})")
                     
                     # Optional post-score meta gates (smart-money/velocity)
                     if REQUIRE_SMART_MONEY_FOR_ALERT and not smart_involved:
@@ -508,7 +508,7 @@ def run_bot():
 
                     # --- PRIMARY EVALUATION (safety first)
                     if not check_senior_strict(stats, token_address):
-                        print(f"REJECTED (Senior Strict): {token_address}")
+                        _out(f"REJECTED (Senior Strict): {token_address}")
                         continue
 
                     jr_strict_ok = check_junior_strict(stats, score)
@@ -519,26 +519,26 @@ def run_bot():
 
                     if smart_involved:
                         if jr_strict_ok:
-                            print(f"PASSED (Strict + Smart Money): {token_address}")
+                            _out(f"PASSED (Strict + Smart Money): {token_address}")
                             alert_token = True
                             conviction_type = "High Confidence (Smart Money)"
                         else:
-                            print(f"REJECTED (Junior Strict): {token_address}")
+                            _out(f"REJECTED (Junior Strict): {token_address}")
                             continue
                     else:
                         if jr_strict_ok:
-                            print(f"PASSED (Strict Rules): {token_address}")
+                            _out(f"PASSED (Strict Rules): {token_address}")
                             alert_token = True
                             conviction_type = "High Confidence (Strict)"
                         else:
                             # Fallback: keep strict safety, allow nuanced junior metrics
-                            print(f"ENTERING DEBATE (No Smart Money; Strict-Junior failed): {token_address}")
+                            _out(f"ENTERING DEBATE (No Smart Money; Strict-Junior failed): {token_address}")
                             if check_junior_nuanced(stats, score):
-                                print(f"PASSED (Nuanced Junior): {token_address}")
+                                _out(f"PASSED (Nuanced Junior): {token_address}")
                                 alert_token = True
                                 conviction_type = "Nuanced Conviction"
                             else:
-                                print(f"REJECTED (Nuanced Debate): {token_address}")
+                                _out(f"REJECTED (Nuanced Debate): {token_address}")
                                 continue
 
                     if alert_token:
@@ -631,7 +631,7 @@ def run_bot():
                             delta = now - last_alert_time
                             if last_alert_time > 0 and delta < TELEGRAM_ALERT_MIN_INTERVAL:
                                 wait_s = int(TELEGRAM_ALERT_MIN_INTERVAL - delta)
-                                print(f"Throttling alerts; waiting {wait_s}s before sending")
+                                _out(f"Throttling alerts; waiting {wait_s}s before sending")
                                 for _ in range(wait_s):
                                     if shutdown_flag:
                                         break
@@ -671,7 +671,7 @@ def run_bot():
                                 _metrics["alerts_total"].inc()
                             except Exception:
                                 pass
-                        print(
+                        _out(
                             f"Alert #{alert_count} for token {token_address} (Final: {score}/10, Prelim: {preliminary_score}/10, telegram_ok={telegram_ok})"
                         )
                         try:
@@ -786,7 +786,7 @@ def run_bot():
                             pass
                             
                 except Exception as e:
-                    print(f"Error processing token {token_address}: {e}")
+                    _out(f"Error processing token {token_address}: {e}")
                     continue
 
             # Cursors are handled per cycle type above
@@ -795,7 +795,7 @@ def run_bot():
             try:
                 deleted = prune_old_activity()
                 if deleted:
-                    print(f"Pruned {deleted} old activity rows")
+                    _out(f"Pruned {deleted} old activity rows")
             except Exception:
                 pass
 
@@ -805,7 +805,7 @@ def run_bot():
                 if now - last_track_time > TRACK_INTERVAL_MIN * 60:
                     to_check = get_alerted_tokens_batch(limit=TRACK_BATCH_SIZE, older_than_minutes=TRACK_INTERVAL_MIN)
                     if to_check:
-                        print(f"Tracking {len(to_check)} alerted tokens for price updates")
+                        _out(f"Tracking {len(to_check)} alerted tokens for price updates")
                     for ca in to_check:
                         try:
                             stats = get_token_stats(ca)
@@ -845,7 +845,7 @@ def run_bot():
                 pass
 
             if not shutdown_flag:
-                print(f"Sleeping for {FETCH_INTERVAL} seconds...")
+                _out(f"Sleeping for {FETCH_INTERVAL} seconds...")
                 for _ in range(FETCH_INTERVAL):
                     if shutdown_flag:
                         break
@@ -854,11 +854,11 @@ def run_bot():
             is_smart_cycle = not is_smart_cycle
                 
         except KeyboardInterrupt:
-            print("\nKeyboard interrupt received")
+            _out("\nKeyboard interrupt received")
             break
         except Exception as e:
-            print(f"Unexpected error in main loop: {e}")
-            print("Continuing after error...")
+            _out(f"Unexpected error in main loop: {e}")
+            _out("Continuing after error...")
             time.sleep(30)  # Wait before retrying
     
     # Send shutdown notification
@@ -870,7 +870,7 @@ def run_bot():
         f"<b>Status:</b> Bot shutdown complete"
     )
     send_telegram_alert(shutdown_message)
-    print(f"Bot stopped gracefully. Processed {processed_count} tokens, sent {alert_count} alerts.")
+    _out(f"Bot stopped gracefully. Processed {processed_count} tokens, sent {alert_count} alerts.")
 
 if __name__ == "__main__":
     import argparse
@@ -894,5 +894,5 @@ if __name__ == "__main__":
         else:
             run_bot()
     except Exception as e:
-        print(f"Fatal error: {e}")
+        _out(f"Fatal error: {e}")
         sys.exit(1)

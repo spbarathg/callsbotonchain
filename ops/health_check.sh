@@ -32,3 +32,4 @@ jq -n --arg ts "$TS" \
   tee /opt/callsbotonchain/ops/last_health.json
 
 
+

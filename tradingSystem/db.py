@@ -94,3 +94,33 @@ def close_position(position_id: int) -> None:
 	conn.close()
 
 
+def get_open_qty(position_id: int) -> float:
+	"""Return current open quantity for a position as sum(buys) - sum(sells)."""
+	conn = _conn()
+	c = conn.cursor()
+	c.execute(
+		"""
+		WITH sums AS (
+			SELECT
+				SUM(CASE WHEN side='buy' THEN COALESCE(qty,0) ELSE 0 END) AS buy_qty,
+				SUM(CASE WHEN side='sell' THEN COALESCE(qty,0) ELSE 0 END) AS sell_qty
+			FROM fills WHERE position_id=?
+		)
+		SELECT COALESCE(buy_qty,0) - COALESCE(sell_qty,0) FROM sums
+		""",
+		(position_id,),
+	)
+	row = c.fetchone()
+	conn.close()
+	return float(row[0] or 0.0) if row else 0.0
+
+
+def get_open_position_id_by_token(token: str) -> Optional[int]:
+	"""Return open position id for a token address if any."""
+	conn = _conn()
+	c = conn.cursor()
+	c.execute("SELECT id FROM positions WHERE token_address=? AND status='open' ORDER BY id DESC LIMIT 1", (token,))
+	row = c.fetchone()
+	conn.close()
+	return int(row[0]) if row and row[0] is not None else None
+

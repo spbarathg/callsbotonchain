@@ -5,6 +5,7 @@ from typing import Dict, Any, List
 import sqlite3
 
 from flask import Flask, jsonify, render_template, request
+from src.risk.treasury import get_snapshot as get_treasury_snapshot
 from flask import Response
 import time
 from app.toggles import get_toggles, set_toggles
@@ -184,6 +185,13 @@ def create_app() -> Flask:
             if rec.get("type") == "cooldown":
                 cooldowns += 1
 
+        # Treasury snapshot
+        try:
+            treas = get_treasury_snapshot()
+            treasury = {"bankroll_usd": treas.bankroll_usd, "reserve_usd": treas.reserve_usd, "total_usd": treas.total()}
+        except Exception:
+            treasury = {"bankroll_usd": 0.0, "reserve_usd": 0.0, "total_usd": 0.0}
+
         # Last N alerts short view
         recent_alerts = [
             {
@@ -223,6 +231,7 @@ def create_app() -> Flask:
             "cooldowns": cooldowns,
             "last_alert": last_alert,
             "last_heartbeat": last_heartbeat,
+            "treasury": treasury,
             "recent_alerts": recent_alerts,
             "tracking_count": len(last_tracking),
             "toggles": toggles,

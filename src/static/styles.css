@@ -24,6 +24,11 @@ thead th { color: var(--muted); background: #141821; font-weight: 600; }
 tbody tr:hover { background: #141821; }
 code { background: #0e121a; padding: 2px 6px; border-radius: 6px; color: #a8b3cf; }
 
+/* Small external link badges next to token */
+.link-badges { gap: 6px; display: inline-flex; align-items: center; margin-left: 6px; }
+.ext-link { font-size: 10px; padding: 2px 6px; border: 1px solid #2a3242; border-radius: 6px; color: #9aa4b2; text-decoration: none; background: #0e121a; }
+.ext-link:hover { border-color: #3a4356; color: #c6d2e3; }
+
 .logs-pre { height: 420px; overflow: auto; background: #0d1117; color: #c9d1d9; padding: 12px; border-radius: 6px; white-space: pre-wrap; word-break: break-word; }
 
 .tab { display: none; }

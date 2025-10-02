@@ -69,3 +69,17 @@ def log_heartbeat(pid: int, msg: str = "ok", extra: Optional[Dict[str, Any]] = N
     write_jsonl("process.jsonl", evt)
 
 
+def mirror_stdout_line(line: str) -> None:
+    """Append a single line to stdout.log for watcher compatibility.
+
+    This mirrors human-readable console lines into data/logs/stdout.log while keeping
+    JSONL files for structured processing. Safe no-op on errors.
+    """
+    try:
+        path = _log_path("stdout.log")
+        with open(path, "a", encoding="utf-8") as f:
+            f.write((line or "").rstrip("\n") + "\n")
+    except Exception:
+        pass
+
+

@@ -94,9 +94,21 @@ def fetch_solana_feed(cursor=None, smart_money_only: bool = False) -> Dict[str, 
             "min_wallet_pnl": "1000",  # Only profitable wallets
             "top_wallets": "true"
         })
-        print("🧠 Fetching SMART MONEY activity...")
+        try:
+            log_process({
+                "type": "feed_mode",
+                "mode": "smart_money",
+            })
+        except Exception:
+            pass
     else:
-        print("📡 Fetching general feed...")
+        try:
+            log_process({
+                "type": "feed_mode",
+                "mode": "general",
+            })
+        except Exception:
+            pass
 
     # Respect configured MIN_USD_VALUE as-is to maximize visibility
     # Header name should be case-insensitive, keep canonical spelling
@@ -199,7 +211,14 @@ def fetch_solana_feed(cursor=None, smart_money_only: bool = False) -> Dict[str, 
                     retry_after = _parse_retry_after_seconds(_R(result.get("headers") or {}))
                     if retry_after is not None:
                         last_retry_after = max(last_retry_after or 0, retry_after)
-                    print(f"Rate limited, waiting before retry... (attempt {attempt + 1})")
+                    try:
+                        log_process({
+                            "type": "rate_limited",
+                            "attempt": int(attempt + 1),
+                            "retry_after_sec": int(retry_after or 0),
+                        })
+                    except Exception:
+                        pass
                     time.sleep(retry_after if retry_after is not None else (2 ** attempt))
                     # Move to next attempt after backoff
                     made_progress = True
@@ -209,7 +228,14 @@ def fetch_solana_feed(cursor=None, smart_money_only: bool = False) -> Dict[str, 
                     # try next header variant within the same attempt
                     continue
                 elif status is None:
-                    print(f"Network exception on attempt {attempt + 1}: {result.get('error')}")
+                    try:
+                        log_process({
+                            "type": "network_exception",
+                            "attempt": int(attempt + 1),
+                            "error": str(result.get("error") or "")[:200],
+                        })
+                    except Exception:
+                        pass
                     # try next param/header variant
                     continue
                 else:
@@ -240,7 +266,15 @@ def fetch_solana_feed(cursor=None, smart_money_only: bool = False) -> Dict[str, 
         break
     
     # All retries failed
-    print(f"Failed to fetch feed after {max_retries} attempts")
+    try:
+        log_process({
+            "type": "feed_failed",
+            "max_retries": int(max_retries),
+            "quota_exceeded": bool(quota_exceeded),
+            "retry_after_sec": int(last_retry_after or 0),
+        })
+    except Exception:
+        pass
     if last_retry_after is not None or quota_exceeded:
         # Provide a hint to caller for adaptive cooldown
         return {
@@ -256,10 +290,6 @@ def fetch_solana_feed(cursor=None, smart_money_only: bool = False) -> Dict[str, 
         if not fallback:
             fallback = _fallback_feed_from_geckoterminal(limit=30)
         if fallback and len(fallback) > 0:
-            try:
-                print(f"Fallback feed used: {len(fallback)} items")
-            except Exception:
-                pass
             try:
                 log_process({
                     "type": "feed_fallback",

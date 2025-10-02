@@ -4,8 +4,6 @@ from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
 from config import DB_FILE, DB_RETENTION_HOURS
 
-DB_FILE = DB_FILE
-
 def _get_conn() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_FILE, timeout=10)
     try:

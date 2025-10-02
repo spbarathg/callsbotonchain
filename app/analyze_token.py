@@ -50,6 +50,7 @@ from config import (
 from config import HTTP_TIMEOUT_STATS
 from app.http_client import request_json
 from app.budget import get_budget
+from app.logger_utils import log_process
 
 def _dexscreener_best_pair(pairs: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     if not pairs:
@@ -67,7 +68,6 @@ def _dexscreener_best_pair(pairs: List[Dict[str, Any]]) -> Optional[Dict[str, An
 def _get_token_stats_dexscreener(token_address: str) -> Dict[str, Any]:
     url = f"https://api.dexscreener.com/latest/dex/tokens/{token_address}"
     max_retries = 3
-    timeout = 20
     for attempt in range(max_retries):
         result = request_json("GET", url, timeout=HTTP_TIMEOUT_STATS)
         status = result.get("status_code")
@@ -177,7 +177,6 @@ def get_token_stats(token_address: str) -> Dict[str, Any]:
     
     # Add timeout and retry logic
     max_retries = 3
-    timeout = 20
     
     # Skip Cielo if user disabled or we detected denial previously
     if CIELO_DISABLE_STATS or _deny_cache.get("stats_denied"):
@@ -257,11 +256,17 @@ def get_token_stats(token_address: str) -> Dict[str, Any]:
             except Exception:
                 return {}
         elif last_status == 429:
-            print(f"Rate limited on token stats, waiting... (variant {idx + 1})")
+            try:
+                log_process({"type": "token_stats_rate_limited", "variant": int(idx + 1)})
+            except Exception:
+                pass
             time.sleep(1)
             continue
         elif last_status == 404:
-            print(f"Token {token_address} not found")
+            try:
+                log_process({"type": "token_stats_not_found", "token": token_address})
+            except Exception:
+                pass
             return {}
         elif last_status in (401, 403):
             # Try next variant
@@ -270,14 +275,23 @@ def get_token_stats(token_address: str) -> Dict[str, Any]:
             txt = None
             if result.get("json") is None:
                 txt = result.get("text")
-            print(f"Error fetching token stats: {last_status}, {txt}")
+            try:
+                log_process({"type": "token_stats_error", "status": last_status, "text": (txt or "")[:200]})
+            except Exception:
+                pass
             continue
 
     if last_status in (401, 403):
         _deny_cache["stats_denied"] = True
-        print("Cielo token stats denied across variants – using DexScreener fallback")
+        try:
+            log_process({"type": "token_stats_denied_variants", "provider": "cielo", "fallback": "dexscreener"})
+        except Exception:
+            pass
     else:
-        print(f"Cielo token stats unavailable (last status={last_status}); using DexScreener fallback")
+        try:
+            log_process({"type": "token_stats_unavailable", "last_status": last_status, "fallback": "dexscreener"})
+        except Exception:
+            pass
     return _normalize_stats_schema(_get_token_stats_dexscreener(token_address) or {})
 
 def _normalize_stats_schema(d: Dict[str, Any]) -> Dict[str, Any]:

@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>CALLSBOTONCHAIN Dashboard</title>
-    <link rel="stylesheet" href="/static/styles.css">
+    <link rel="stylesheet" href="/static/styles.css?v=3">
   </head>
   <body>
     <header class="topbar">
@@ -170,6 +170,30 @@
       showTab('dashboard');
 
       let sseConnected = false;
+      async function resolveAxiomUrl(token){
+        const t = token || '';
+        try{
+          const r = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${encodeURIComponent(t)}`);
+          const j = await r.json();
+          const pair = (j.pairs||[]).find(p=>p.chainId==='solana') || (j.pairs||[])[0];
+          if (pair && pair.pairAddress){
+            return `https://axiom.trade/meme/${encodeURIComponent(pair.pairAddress)}`;
+          }
+        }catch(e){/* ignore and fallback */}
+        return `https://axiom.trade/?search=${encodeURIComponent(t)}`;
+      }
+      function onAxiomClick(ev){
+        ev.preventDefault();
+        const a = ev.currentTarget;
+        const tok = a?.dataset?.token || '';
+        resolveAxiomUrl(tok).then(url=>{ try{ window.open(url, '_blank', 'noopener'); }catch(e){ location.href = url; }});
+      }
+      function tokenLinks(addr){
+        const t = addr || '';
+        const short = (t||'').slice(0,8) + '...';
+        // Render clickable CA that resolves to the correct Axiom link at click time
+        return `<a href="https://axiom.trade/?search=${encodeURIComponent(t)}" data-token="${encodeURIComponent(t)}" onclick="onAxiomClick(event)" rel="noopener noreferrer"><code>${short}</code></a>`;
+      }
       function applyStats(data){
         const sig = data.signals_summary || {};
         document.getElementById('total_alerts').textContent = (sig.total_alerts ?? data.total_alerts) ?? '-';
@@ -200,7 +224,7 @@
           const t = a.ts || '';
           tr.innerHTML = `
             <td>${t}</td>
-            <td><code>${(a.token || '').slice(0,8)}...</code></td>
+            <td>${tokenLinks(a.token)}</td>
               <td>${a.symbol && a.symbol !== '?' ? a.symbol : (a.token ? (a.token || '').slice(0,4)+'…' : '')}</td>
             <td>${a.score != null ? a.score : ''}</td>
             <td>${a.conviction || ''}</td>
@@ -349,7 +373,7 @@
             const fmt = (v, d=8)=> (v!=null && v!==0 ? Number(v).toFixed(d) : '-')
             const fmtMoney = (v)=> (v!=null && v!==0 ? ('$'+Number(v).toLocaleString()) : '-')
             tr.innerHTML = `
-              <td><code>${(row.token||'').slice(0,8)}...</code></td>
+              <td>${tokenLinks(row.token)}</td>
               <td>${row.alerted_at||'-'}</td>
               <td>${row.final_score??'-'}</td>
               <td>${row.conviction||'-'}</td>
