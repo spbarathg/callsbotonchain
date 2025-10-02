@@ -157,12 +157,18 @@ def get_token_stats(token_address: str) -> Dict[str, Any]:
     cached = _cache_get(token_address)
     if cached:
         return cached
-    # Enforce budget before hitting APIs
+    # Enforce budget before hitting paid APIs; fall back to DexScreener if blocked
     try:
         b = get_budget()
-        if not b.can_spend("stats"):
-            return {}
+        if b and (not b.can_spend("stats")):
+            try:
+                log_process({"type": "token_stats_budget_block", "provider": "cielo", "fallback": "dexscreener"})
+            except Exception:
+                pass
+            ds = _get_token_stats_dexscreener(token_address)
+            return _normalize_stats_schema(ds) if ds else {}
     except Exception:
+        # If budget subsystem errors, proceed normally (will try Cielo then DexScreener)
         pass
         
     base_urls = [
