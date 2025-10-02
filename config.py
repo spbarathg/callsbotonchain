@@ -272,16 +272,30 @@ GATE_PRESETS = {
 }
 
 def _apply_gate_mode_overrides() -> None:
+    """Apply gate preset only when a value was NOT explicitly provided via env.
+
+    Rule: ENV > PRESET. This prevents unwanted overriding of tuned .env values
+    on every startup when GATE_MODE is set.
+    """
     global HIGH_CONFIDENCE_SCORE, MIN_LIQUIDITY_USD, VOL_24H_MIN_FOR_ALERT
     global MAX_MARKET_CAP_FOR_DEFAULT_ALERT, VOL_TO_MCAP_RATIO_MIN
     preset = GATE_PRESETS.get(GATE_MODE)
     if not preset:
         return
-    HIGH_CONFIDENCE_SCORE = preset["HIGH_CONFIDENCE_SCORE"]
-    MIN_LIQUIDITY_USD = preset["MIN_LIQUIDITY_USD"]
-    VOL_24H_MIN_FOR_ALERT = preset["VOL_24H_MIN_FOR_ALERT"]
-    MAX_MARKET_CAP_FOR_DEFAULT_ALERT = preset["MAX_MARKET_CAP_FOR_DEFAULT_ALERT"]
-    VOL_TO_MCAP_RATIO_MIN = preset["VOL_TO_MCAP_RATIO_MIN"]
+    # Helper to detect whether user explicitly set a key
+    def _has_env(name: str) -> bool:
+        return os.getenv(name) is not None and os.getenv(name) != ""
+
+    if not _has_env("HIGH_CONFIDENCE_SCORE"):
+        HIGH_CONFIDENCE_SCORE = preset["HIGH_CONFIDENCE_SCORE"]
+    if not _has_env("MIN_LIQUIDITY_USD"):
+        MIN_LIQUIDITY_USD = preset["MIN_LIQUIDITY_USD"]
+    if not _has_env("VOL_24H_MIN_FOR_ALERT"):
+        VOL_24H_MIN_FOR_ALERT = preset["VOL_24H_MIN_FOR_ALERT"]
+    if not _has_env("MAX_MARKET_CAP_FOR_DEFAULT_ALERT"):
+        MAX_MARKET_CAP_FOR_DEFAULT_ALERT = preset["MAX_MARKET_CAP_FOR_DEFAULT_ALERT"]
+    if not _has_env("VOL_TO_MCAP_RATIO_MIN"):
+        VOL_TO_MCAP_RATIO_MIN = preset["VOL_TO_MCAP_RATIO_MIN"]
 
 _apply_gate_mode_overrides()
 
