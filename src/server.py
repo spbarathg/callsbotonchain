@@ -803,7 +803,12 @@ def create_app() -> Flask:
             # CORS: only when explicitly allowed
             if _cors_ok():
                 origin = request.headers.get("Origin")
-                resp.headers["Vary"] = ", ".join(sorted(set(filter(None, [resp.headers.get("Vary"), "Origin"])))))
+                # Ensure Vary includes Origin without breaking existing values
+                try:
+                    vary_parts = list(filter(None, [resp.headers.get("Vary"), "Origin"]))
+                    resp.headers["Vary"] = ", ".join(sorted(set(vary_parts)))
+                except Exception:
+                    resp.headers["Vary"] = "Origin"
                 resp.headers["Access-Control-Allow-Origin"] = origin
                 resp.headers["Access-Control-Allow-Credentials"] = "true"
                 resp.headers["Access-Control-Allow-Headers"] = "Content-Type, X-Callsbot-Admin-Key"
