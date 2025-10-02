@@ -547,6 +547,14 @@ def create_app() -> Flask:
                             except Exception:
                                 peak_price = None
 
+                    # If first price is missing/zero, fall back to last/peak so UI shows numbers
+                    try:
+                        if float(first_price or 0) <= 0:
+                            first_price = last_price or peak_price
+                    except Exception:
+                        if not first_price:
+                            first_price = last_price or peak_price
+
                     first_mcap = _val(first_rec, "market_cap")
                     last_mcap = _val(last_rec, "market_cap")
                     peak_mcap = None
