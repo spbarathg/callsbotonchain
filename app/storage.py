@@ -7,8 +7,11 @@ from config import DB_FILE, DB_RETENTION_HOURS
 def _get_conn() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_FILE, timeout=10)
     try:
-        conn.execute("PRAGMA journal_mode=WAL")
+        # Use rollback journal to avoid cross-container/WAL file issues on some hosts
+        conn.execute("PRAGMA journal_mode=DELETE")
         conn.execute("PRAGMA busy_timeout=5000")
+        conn.execute("PRAGMA synchronous=NORMAL")
+        conn.execute("PRAGMA temp_store=MEMORY")
     except Exception:
         pass
     return conn
