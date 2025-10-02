@@ -75,7 +75,11 @@ sns.boxplot(data=df, x='final_score', y='peak_x_price', palette='viridis')
 plt.title('Peak Price Multiplier by Final Score')
 plt.xlabel('Final Score')
 plt.ylabel('Peak X Price')
-plt.yscale('log')
+try:
+    if (pd.to_numeric(df['peak_x_price'], errors='coerce').fillna(0) > 0).all():
+        plt.yscale('log')
+except Exception:
+    pass
 
 # Subplot 2: Performance categories by score
 plt.subplot(2, 2, 2)
@@ -116,8 +120,13 @@ plt.figure(figsize=(15, 10))
 plt.subplot(2, 3, 1)
 sns.scatterplot(data=df, x='last_liquidity_usd', y='last_volume_24h_usd', 
                 hue='outcome', size='peak_x_price', sizes=(20, 200))
-plt.xscale('log')
-plt.yscale('log')
+try:
+    if (pd.to_numeric(df['last_liquidity_usd'], errors='coerce').fillna(0) > 0).all():
+        plt.xscale('log')
+    if (pd.to_numeric(df['last_volume_24h_usd'], errors='coerce').fillna(0) > 0).all():
+        plt.yscale('log')
+except Exception:
+    pass
 plt.title('Liquidity vs Volume (colored by outcome)')
 plt.xlabel('Last Liquidity (USD)')
 plt.ylabel('Last 24h Volume (USD)')
@@ -126,8 +135,13 @@ plt.ylabel('Last 24h Volume (USD)')
 plt.subplot(2, 3, 2)
 sns.scatterplot(data=df, x='first_market_cap_usd', y='peak_market_cap_usd', 
                 hue='final_score', size='smart_money_detected', sizes=(50, 150))
-plt.xscale('log')
-plt.yscale('log')
+try:
+    if (pd.to_numeric(df['first_market_cap_usd'], errors='coerce').fillna(0) > 0).all():
+        plt.xscale('log')
+    if (pd.to_numeric(df['peak_market_cap_usd'], errors='coerce').fillna(0) > 0).all():
+        plt.yscale('log')
+except Exception:
+    pass
 plt.title('Market Cap: First vs Peak')
 plt.xlabel('First Market Cap (USD)')
 plt.ylabel('Peak Market Cap (USD)')
@@ -136,8 +150,13 @@ plt.ylabel('Peak Market Cap (USD)')
 plt.subplot(2, 3, 3)
 sns.scatterplot(data=df, x='first_price_usd', y='peak_price_usd', 
                 hue='performance_category', alpha=0.7)
-plt.xscale('log')
-plt.yscale('log')
+try:
+    if (pd.to_numeric(df['first_price_usd'], errors='coerce').fillna(0) > 0).all():
+        plt.xscale('log')
+    if (pd.to_numeric(df['peak_price_usd'], errors='coerce').fillna(0) > 0).all():
+        plt.yscale('log')
+except Exception:
+    pass
 plt.title('Price: First vs Peak')
 plt.xlabel('First Price (USD)')
 plt.ylabel('Peak Price (USD)')
@@ -186,7 +205,11 @@ sns.scatterplot(data=df, x='peak_drawdown_pct', y='peak_x_price',
 plt.title('Risk vs Reward Analysis')
 plt.xlabel('Peak Drawdown (%)')
 plt.ylabel('Peak X Price')
-plt.yscale('log')
+try:
+    if (pd.to_numeric(df['peak_x_price'], errors='coerce').fillna(0) > 0).all():
+        plt.yscale('log')
+except Exception:
+    pass
 
 # Subplot 2: Liquidity risk
 plt.subplot(2, 2, 2)
@@ -216,7 +239,11 @@ plt.title('Distribution of Peak Performance')
 plt.xlabel('Peak X Price')
 plt.ylabel('Frequency')
 plt.legend()
-plt.yscale('log')
+try:
+    if (pd.to_numeric(df['peak_x_price'], errors='coerce').fillna(0) > 0).all():
+        plt.yscale('log')
+except Exception:
+    pass
 
 plt.tight_layout()
 plt.savefig(os.path.join(output_dir, "risk_analysis.png"), dpi=300, bbox_inches="tight")
@@ -346,6 +373,10 @@ print(f"   Best performing hour: {df.groupby('hour')['peak_x_price'].mean().idxm
 
 print(f"\n✅ All charts saved in: {output_dir}")
 
-# Open the folder
+# Open the folder optionally
 folder_path = os.path.abspath(output_dir)
-webbrowser.open(folder_path)
+if os.getenv("OPEN_BROWSER", "false").strip().lower() == "true":
+    try:
+        webbrowser.open(folder_path)
+    except Exception:
+        pass

@@ -177,6 +177,9 @@ def create_app() -> Flask:
     def _no_cache(resp):  # type: ignore
         try:
             resp.headers["Cache-Control"] = "no-store, max-age=0"
+    except Exception as e:
+        try:
+            print(f"_no_cache: failed to set headers: {e}")
         except Exception:
             pass
         return resp
@@ -210,7 +213,11 @@ def create_app() -> Flask:
         try:
             treas = get_treasury_snapshot()
             treasury = {"bankroll_usd": treas.bankroll_usd, "reserve_usd": treas.reserve_usd, "total_usd": treas.total()}
-        except Exception:
+        except Exception as e:
+            try:
+                print(f"api_stats: treasury snapshot error: {e}")
+            except Exception:
+                pass
             treasury = {"bankroll_usd": 0.0, "reserve_usd": 0.0, "total_usd": 0.0}
 
         # Last N alerts short view
@@ -322,16 +329,23 @@ def create_app() -> Flask:
                         "gates_summary": gates_summary,
                     }
                     yield f"data: {json.dumps(payload)}\n\n"
-                except Exception:
+                except Exception as e:
                     # keep the stream alive even if an iteration fails
+                    try:
+                        print(f"api_stream: iteration error: {e}")
+                    except Exception:
+                        pass
                     yield "event: ping\ndata: {}\n\n"
                 time.sleep(2)
 
         resp = Response(_gen(), mimetype="text/event-stream")
         try:
             resp.headers["Cache-Control"] = "no-store"
-        except Exception:
-            pass
+        except Exception as e:
+            try:
+                print(f"api_stream: failed to set headers: {e}")
+            except Exception:
+                pass
         return resp
 
     @app.get("/api/logs")
@@ -339,7 +353,11 @@ def create_app() -> Flask:
         try:
             log_type = (request.args.get("type") or "combined").lower()
             limit = int(request.args.get("limit") or 300)
-        except Exception:
+        except Exception as e:
+            try:
+                print(f"api_logs: bad request args: {e}")
+            except Exception:
+                pass
             log_type = "combined"; limit = 300
 
         alerts = _read_jsonl(alerts_path, limit=max(500, limit))
@@ -379,7 +397,11 @@ def create_app() -> Flask:
             try:
                 cur.execute("SELECT COUNT(1) FROM sqlite_master WHERE type='table' AND name='alerted_token_stats'")
                 has_stats = int((cur.fetchone() or [0])[0]) == 1
-            except Exception:
+            except Exception as e:
+                try:
+                    print(f"api_tracked: has_stats detect error: {e}")
+                except Exception:
+                    pass
                 has_stats = False
             if not has_stats:
                 cur.execute(
@@ -440,8 +462,12 @@ def create_app() -> Flask:
                     """,
                     (limit,)
                 )
-            except Exception:
+            except Exception as e:
                 # Fallback for older schemas missing some columns; select a compatible subset
+                try:
+                    print(f"api_tracked: main select failed, using fallback: {e}")
+                except Exception:
+                    pass
                 cur.execute(
                     """
                     SELECT t.token_address,
@@ -490,7 +516,11 @@ def create_app() -> Flask:
                     "last_multiple": last_multiple,
                 })
             cur.close(); con.close()
-        except Exception:
+        except Exception as e:
+            try:
+                print(f"api_tracked: db error: {e}")
+            except Exception:
+                pass
             rows = []
 
         # Logs-based fallback if DB returns empty or errored
@@ -605,7 +635,11 @@ def create_app() -> Flask:
                         "last_multiple": last_multiple,
                     })
                 source = "logs_enriched"
-            except Exception:
+            except Exception as e:
+                try:
+                    print(f"api_tracked: logs fallback error: {e}")
+                except Exception:
+                    pass
                 rows = []
                 source = "unknown"
 
@@ -615,7 +649,11 @@ def create_app() -> Flask:
     def api_set_toggles():
         try:
             body = request.get_json(force=True, silent=True) or {}
-        except Exception:
+        except Exception as e:
+            try:
+                print(f"api_set_toggles: bad body: {e}")
+            except Exception:
+                pass
             body = {}
         updated = set_toggles({
             "signals_enabled": body.get("signals_enabled"),
@@ -684,7 +722,11 @@ def create_app() -> Flask:
         max_mcap = body.get("max_mcap_usd")
         try:
             max_mcap_val = float(max_mcap) if (max_mcap is not None and max_mcap != "") else None
-        except Exception:
+        except Exception as e:
+            try:
+                print(f"api_paper: bad max_mcap: {e}")
+            except Exception:
+                pass
             max_mcap_val = None
 
         signals_db = _pick_signals_db_path(default_db)
@@ -799,8 +841,11 @@ def _signals_metrics(db_path: str) -> Dict[str, Any]:
         )
         out["daily"] = [{"date": d, "count": int(c)} for d, c in (cur.fetchall() or [])]
         cur.close(); con.close()
-    except Exception:
-        pass
+    except Exception as e:
+        try:
+            print(f"_signals_metrics: metrics error: {e}")
+        except Exception:
+            pass
     return out
 
 
@@ -874,8 +919,11 @@ def _trading_metrics(db_path: str) -> Dict[str, Any]:
             for r in (cur.fetchall() or [])
         ]
         cur.close(); con.close()
-    except Exception:
-        pass
+    except Exception as e:
+        try:
+            print(f"_trading_metrics: metrics error: {e}")
+        except Exception:
+            pass
     return out
 
 
@@ -899,8 +947,11 @@ def _gates_summary(alerts_path: str) -> Dict[str, Any]:
                     data["nuanced_pass"] += 1
             else:
                 data["fails"] += 1
-    except Exception:
-        pass
+    except Exception as e:
+        try:
+            print(f"_gates_summary: error: {e}")
+        except Exception:
+            pass
     return data
 
 

@@ -56,7 +56,11 @@ axes[0,0].legend()
 sns.boxplot(data=df, x='final_score', y='peak_x_price', ax=axes[0,1])
 axes[0,1].set_title('Performance by Final Score')
 axes[0,1].set_ylabel('Peak X Price')
-axes[0,1].set_yscale('log')
+try:
+    if (pd.to_numeric(df['peak_x_price'], errors='coerce').fillna(0) > 0).all():
+        axes[0,1].set_yscale('log')
+except Exception:
+    pass
 
 # Smart money impact
 smart_money_perf = df.groupby('smart_money_detected')['peak_x_price'].mean()
@@ -87,13 +91,22 @@ sns.scatterplot(data=df, x='peak_drawdown_pct', y='peak_x_price',
 axes[0,0].set_title('Risk vs Reward Analysis')
 axes[0,0].set_xlabel('Peak Drawdown (%)')
 axes[0,0].set_ylabel('Peak X Price')
-axes[0,0].set_yscale('log')
+try:
+    if (pd.to_numeric(df['peak_x_price'], errors='coerce').fillna(0) > 0).all():
+        axes[0,0].set_yscale('log')
+except Exception:
+    pass
 
 # Liquidity vs Performance
 sns.scatterplot(data=df, x='first_liquidity_usd', y='peak_x_price', 
                 hue='outcome', alpha=0.7, ax=axes[0,1])
-axes[0,1].set_xscale('log')
-axes[0,1].set_yscale('log')
+try:
+    if (pd.to_numeric(df['first_liquidity_usd'], errors='coerce').fillna(0) > 0).all():
+        axes[0,1].set_xscale('log')
+    if (pd.to_numeric(df['peak_x_price'], errors='coerce').fillna(0) > 0).all():
+        axes[0,1].set_yscale('log')
+except Exception:
+    pass
 axes[0,1].set_title('Liquidity vs Performance')
 axes[0,1].set_xlabel('First Liquidity (USD)')
 axes[0,1].set_ylabel('Peak X Price')
@@ -101,8 +114,13 @@ axes[0,1].set_ylabel('Peak X Price')
 # Market cap progression
 sns.scatterplot(data=df, x='first_market_cap_usd', y='peak_market_cap_usd', 
                 hue='final_score', size='peak_x_price', sizes=(20, 200), ax=axes[1,0])
-axes[1,0].set_xscale('log')
-axes[1,0].set_yscale('log')
+try:
+    if (pd.to_numeric(df['first_market_cap_usd'], errors='coerce').fillna(0) > 0).all():
+        axes[1,0].set_xscale('log')
+    if (pd.to_numeric(df['peak_market_cap_usd'], errors='coerce').fillna(0) > 0).all():
+        axes[1,0].set_yscale('log')
+except Exception:
+    pass
 axes[1,0].set_title('Market Cap: First vs Peak')
 axes[1,0].set_xlabel('First Market Cap (USD)')
 axes[1,0].set_ylabel('Peak Market Cap (USD)')
@@ -110,8 +128,13 @@ axes[1,0].set_ylabel('Peak Market Cap (USD)')
 # Volume vs Performance
 sns.scatterplot(data=df, x='last_volume_24h_usd', y='peak_x_price', 
                 hue='outcome', alpha=0.7, ax=axes[1,1])
-axes[1,1].set_xscale('log')
-axes[1,1].set_yscale('log')
+try:
+    if (pd.to_numeric(df['last_volume_24h_usd'], errors='coerce').fillna(0) > 0).all():
+        axes[1,1].set_xscale('log')
+    if (pd.to_numeric(df['peak_x_price'], errors='coerce').fillna(0) > 0).all():
+        axes[1,1].set_yscale('log')
+except Exception:
+    pass
 axes[1,1].set_title('Volume vs Performance')
 axes[1,1].set_xlabel('Last 24h Volume (USD)')
 axes[1,1].set_ylabel('Peak X Price')
@@ -223,6 +246,10 @@ print(f"   • Risk management is crucial (high drawdowns)")
 
 print(f"\n✅ Charts saved in: {output_dir}")
 
-# Open the folder
+# Open the folder optionally
 folder_path = os.path.abspath(output_dir)
-webbrowser.open(folder_path)
+if os.getenv("OPEN_BROWSER", "false").strip().lower() == "true":
+    try:
+        webbrowser.open(folder_path)
+    except Exception:
+        pass

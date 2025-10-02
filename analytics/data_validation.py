@@ -122,14 +122,21 @@ if len(rug_pulls) > 0:
 print("\n💰 MARKET CAP CONSISTENCY:")
 
 # Check if market cap calculations are consistent
-df['calculated_first_mcap'] = df['first_price_usd'] * 1000000000  # Assuming 1B supply
-df['calculated_peak_mcap'] = df['peak_price_usd'] * 1000000000
-
-first_mcap_diff = abs(df['first_market_cap_usd'] - df['calculated_first_mcap']) / df['first_market_cap_usd']
-peak_mcap_diff = abs(df['peak_market_cap_usd'] - df['calculated_peak_mcap']) / df['peak_market_cap_usd']
-
-print(f"Average first market cap difference: {first_mcap_diff.mean():.1%}")
-print(f"Average peak market cap difference: {peak_mcap_diff.mean():.1%}")
+# NOTE: This assumes an arbitrary total supply of 1B tokens when an explicit supply is not provided.
+# To avoid misleading conclusions, we gate the computation behind an env flag and clarify the label.
+assume_supply = os.getenv("ASSUME_SUPPLY_1B", "false").strip().lower() == "true"
+if assume_supply:
+    df['calculated_first_mcap'] = pd.to_numeric(df['first_price_usd'], errors='coerce').fillna(0) * 1_000_000_000
+    df['calculated_peak_mcap'] = pd.to_numeric(df['peak_price_usd'], errors='coerce').fillna(0) * 1_000_000_000
+    first_mcap_diff = (abs(pd.to_numeric(df['first_market_cap_usd'], errors='coerce') - df['calculated_first_mcap']) \
+                       / pd.to_numeric(df['first_market_cap_usd'], errors='coerce').replace(0, np.nan))
+    peak_mcap_diff = (abs(pd.to_numeric(df['peak_market_cap_usd'], errors='coerce') - df['calculated_peak_mcap']) \
+                      / pd.to_numeric(df['peak_market_cap_usd'], errors='coerce').replace(0, np.nan))
+    print("Using assumed 1B supply for derived market caps (set ASSUME_SUPPLY_1B=false to skip)")
+    print(f"Average first market cap difference (assumed supply): {first_mcap_diff.mean():.1%}")
+    print(f"Average peak market cap difference (assumed supply): {peak_mcap_diff.mean():.1%}")
+else:
+    print("Skipped derived market cap checks (no explicit supply provided; set ASSUME_SUPPLY_1B=true to enable assumption)")
 
 # ========================
 # 8. Data Completeness

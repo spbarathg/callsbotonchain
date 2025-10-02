@@ -1,5 +1,8 @@
 # analyze_token.py
 import time
+import os
+import json
+import threading
 from typing import Dict, Tuple, List, Any, Optional
 from config import (
     CIELO_API_KEY,
@@ -131,25 +134,73 @@ def _get_token_stats_dexscreener(token_address: str) -> Dict[str, Any]:
     return {}
 
 
+_DENY_STATE_FILE = os.getenv("CALLSBOT_DENY_FILE", os.path.join("var", "stats_deny.json"))
 _deny_cache = {"stats_denied": False}
+_deny_lock = threading.Lock()
+
+def _deny_load_unlocked() -> None:
+    try:
+        if not _DENY_STATE_FILE:
+            return
+        if not os.path.exists(os.path.dirname(_DENY_STATE_FILE) or "."):
+            os.makedirs(os.path.dirname(_DENY_STATE_FILE) or ".", exist_ok=True)
+        if os.path.exists(_DENY_STATE_FILE):
+            with open(_DENY_STATE_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, dict) and isinstance(data.get("stats_denied"), bool):
+                    _deny_cache["stats_denied"] = bool(data["stats_denied"]) 
+    except Exception:
+        # best-effort; do not raise
+        pass
+
+def _deny_save_unlocked() -> None:
+    try:
+        if not _DENY_STATE_FILE:
+            return
+        os.makedirs(os.path.dirname(_DENY_STATE_FILE) or ".", exist_ok=True)
+        tmp = _DENY_STATE_FILE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(_deny_cache, f, ensure_ascii=False)
+        os.replace(tmp, _DENY_STATE_FILE)
+    except Exception:
+        # best-effort; do not raise
+        pass
+
+def deny_is_denied() -> bool:
+    with _deny_lock:
+        _deny_load_unlocked()
+        return bool(_deny_cache.get("stats_denied"))
+
+def deny_mark_denied(value: bool = True) -> None:
+    with _deny_lock:
+        _deny_cache["stats_denied"] = bool(value)
+        _deny_save_unlocked()
 
 
 _stats_cache: Dict[str, Tuple[float, Dict[str, Any]]] = {}
-_STATS_TTL_SEC = 120  # increase TTL to reduce API churn
+_stats_lock = threading.Lock()
+_STATS_TTL_SEC = int(os.getenv("STATS_TTL_SEC", "600"))  # default 10 minutes; reduce churn
 
 def _cache_get(token_address: str) -> Optional[Dict[str, Any]]:
     import time as _t
-    item = _stats_cache.get(token_address)
-    if not item:
+    with _stats_lock:
+        item = _stats_cache.get(token_address)
+        if not item:
+            return None
+        ts, data = item
+        if (_t.time() - ts) <= _STATS_TTL_SEC:
+            return data
+        # expired entry; remove to keep cache tight
+        try:
+            _stats_cache.pop(token_address, None)
+        except Exception:
+            pass
         return None
-    ts, data = item
-    if (_t.time() - ts) <= _STATS_TTL_SEC:
-        return data
-    return None
 
 def _cache_set(token_address: str, data: Dict[str, Any]) -> None:
     import time as _t
-    _stats_cache[token_address] = (_t.time(), data)
+    with _stats_lock:
+        _stats_cache[token_address] = (_t.time(), data)
 
 def get_token_stats(token_address: str) -> Dict[str, Any]:
     if not token_address:
@@ -185,7 +236,7 @@ def get_token_stats(token_address: str) -> Dict[str, Any]:
     max_retries = 3
     
     # Skip Cielo if user disabled or we detected denial previously
-    if CIELO_DISABLE_STATS or _deny_cache.get("stats_denied"):
+    if CIELO_DISABLE_STATS or deny_is_denied():
         return _get_token_stats_dexscreener(token_address)
 
     combos = [(b, h) for b in base_urls for h in header_variants]
@@ -288,7 +339,7 @@ def get_token_stats(token_address: str) -> Dict[str, Any]:
             continue
 
     if last_status in (401, 403):
-        _deny_cache["stats_denied"] = True
+        deny_mark_denied(True)
         try:
             log_process({"type": "token_stats_denied_variants", "provider": "cielo", "fallback": "dexscreener"})
         except Exception:
