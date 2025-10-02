@@ -496,31 +496,107 @@ def create_app() -> Flask:
         # Logs-based fallback if DB returns empty or errored
         if not rows:
             try:
-                alerts = _read_jsonl(alerts_path, limit=max(500, limit))
-                # newest first, limit
-                recent = list(reversed(alerts))[:limit]
-                rows = [
-                    {
-                        "token": a.get("token"),
+                alerts = _read_jsonl(alerts_path, limit=max(1000, limit * 5))
+                tracking = _read_jsonl(tracking_path, limit=max(2000, limit * 50))
+                # Group tracking by token for quick lookups
+                by_token: Dict[str, List[Dict[str, Any]]] = {}
+                for t in tracking:
+                    tok = t.get("token")
+                    if not tok:
+                        continue
+                    by_token.setdefault(tok, []).append(t)
+                # Sort per-token by ts ascending
+                for tok, lst in by_token.items():
+                    lst.sort(key=lambda r: _coerce_ts(r.get("ts")))
+
+                # Take most recent alerts first
+                recent_alerts = [a for a in reversed(alerts) if a.get("token")][:limit]
+                rows = []
+                for a in recent_alerts:
+                    tok = a.get("token")
+                    if not tok:
+                        continue
+                    alerted_ts = _coerce_ts(a.get("ts"))
+                    tlist = by_token.get(tok) or []
+                    # First/last snapshots around alert time
+                    first_rec = None
+                    last_rec = tlist[-1] if tlist else None
+                    for rec in tlist:
+                        if _coerce_ts(rec.get("ts")) >= alerted_ts:
+                            first_rec = rec
+                            break
+                    # Compute metrics
+                    def _val(rec: Dict[str, Any], key: str) -> Any:
+                        return None if not rec else rec.get(key)
+
+                    first_price = _val(first_rec, "price")
+                    last_price = _val(last_rec, "price")
+                    peak_price = None
+                    if tlist:
+                        # Prefer provided peak_price else max price
+                        peaks = [r.get("peak_price") for r in tlist if r.get("peak_price")]
+                        if peaks:
+                            try:
+                                peak_price = max(float(x) for x in peaks if x is not None)
+                            except Exception:
+                                peak_price = None
+                        if peak_price is None:
+                            try:
+                                prices = [float(r.get("price") or 0) for r in tlist]
+                                peak_price = max(prices) if prices else None
+                            except Exception:
+                                peak_price = None
+
+                    first_mcap = _val(first_rec, "market_cap")
+                    last_mcap = _val(last_rec, "market_cap")
+                    peak_mcap = None
+                    if tlist:
+                        try:
+                            # prefer provided peak_mcap else max mcap
+                            peaks_m = [r.get("peak_mcap") for r in tlist if r.get("peak_mcap")]
+                            if peaks_m:
+                                peak_mcap = max(float(x) for x in peaks_m if x is not None)
+                            else:
+                                mcaps = [float(r.get("market_cap") or 0) for r in tlist]
+                                peak_mcap = max(mcaps) if mcaps else None
+                        except Exception:
+                            peak_mcap = None
+
+                    last_liq = _val(last_rec, "liquidity")
+                    last_vol24 = _val(last_rec, "vol24")
+
+                    peak_multiple = None
+                    last_multiple = None
+                    try:
+                        fp = float(first_price or 0)
+                        lp = float(last_price or 0)
+                        pp = float(peak_price or 0)
+                        if fp > 0 and pp > 0:
+                            peak_multiple = pp / fp
+                        if fp > 0 and lp > 0:
+                            last_multiple = lp / fp
+                    except Exception:
+                        pass
+
+                    rows.append({
+                        "token": tok,
                         "alerted_at": a.get("ts"),
                         "final_score": a.get("final_score"),
                         "conviction": a.get("conviction_type"),
-                        "first_price": None,
-                        "last_price": None,
-                        "peak_price": None,
-                        "first_mcap": None,
-                        "last_mcap": None,
-                        "peak_mcap": None,
-                        "last_liq": None,
-                        "last_vol24": None,
+                        "first_price": first_price,
+                        "last_price": last_price,
+                        "peak_price": peak_price,
+                        "first_mcap": first_mcap,
+                        "last_mcap": last_mcap,
+                        "peak_mcap": peak_mcap,
+                        "last_liq": last_liq,
+                        "last_vol24": last_vol24,
                         "peak_drawdown_pct": None,
                         "outcome": None,
-                        "peak_multiple": None,
-                        "last_multiple": None,
-                    }
-                    for a in recent if a.get("token")
-                ]
-                source = "logs"
+                        "peak_multiple": peak_multiple,
+                        "last_multiple": last_multiple,
+                    })
+                source = "logs_enriched"
             except Exception:
                 rows = []
                 source = "unknown"
