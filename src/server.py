@@ -43,8 +43,12 @@ def _coerce_ts(s: Any) -> float:
 
 
 def _pick_signals_db_path(preferred_path: str) -> str:
-    """Return the best available signals DB path by checking several candidates
-    and picking the one with the highest alerted_tokens row count.
+    """Return a good signals DB path by checking candidates.
+
+    Heuristic:
+    - Prefer the database with the HIGHEST alerted_tokens row count
+    - Break ties by most recent mtime
+    - Always include the env-provided preferred_path first
     """
     candidates = [
         preferred_path,
@@ -53,18 +57,28 @@ def _pick_signals_db_path(preferred_path: str) -> str:
         os.path.join("var", "alerted_tokens.db"),
     ]
     best_path = preferred_path
+    best_mtime = -1.0
     best_count = -1
     for p in candidates:
         try:
-            con = sqlite3.connect(p, timeout=3)
+            st = os.stat(p)
+            mtime = float(getattr(st, "st_mtime", 0.0) or 0.0)
+        except Exception:
+            mtime = -1.0
+        count = -1
+        try:
+            con = sqlite3.connect(p, timeout=2)
             cur = con.cursor()
             cur.execute("SELECT COUNT(1) FROM alerted_tokens")
-            n = int(cur.fetchone()[0])
+            count = int(cur.fetchone()[0])
             cur.close(); con.close()
-            if n > best_count:
-                best_count = n; best_path = p
         except Exception:
-            continue
+            pass
+        # Prefer highest row count; break ties by newer mtime
+        more_rows = count > best_count
+        newer_tie = (count == best_count) and (mtime > best_mtime)
+        if more_rows or newer_tie:
+            best_path = p; best_mtime = mtime; best_count = count
     return best_path
 
 
@@ -159,6 +173,13 @@ def _paper_metrics(db_path: str, *, window: str, stop_pct: float, trail_retentio
 
 def create_app() -> Flask:
     app = Flask(__name__, template_folder="templates", static_folder="static")
+    
+    def _no_cache(resp):  # type: ignore
+        try:
+            resp.headers["Cache-Control"] = "no-store, max-age=0"
+        except Exception:
+            pass
+        return resp
 
     log_dir = os.getenv("CALLSBOT_LOG_DIR", os.path.join("data", "logs"))
     alerts_path = os.path.join(log_dir, "alerts.jsonl")
@@ -239,7 +260,7 @@ def create_app() -> Flask:
             "trading_summary": trading_summary,
             "gates_summary": gates_summary,
         }
-        return jsonify(data)
+        return _no_cache(jsonify(data))
 
     @app.get("/api/stream")
     def api_stream():
@@ -306,7 +327,12 @@ def create_app() -> Flask:
                     yield "event: ping\ndata: {}\n\n"
                 time.sleep(2)
 
-        return Response(_gen(), mimetype="text/event-stream")
+        resp = Response(_gen(), mimetype="text/event-stream")
+        try:
+            resp.headers["Cache-Control"] = "no-store"
+        except Exception:
+            pass
+        return resp
 
     @app.get("/api/logs")
     def api_logs():
@@ -321,11 +347,11 @@ def create_app() -> Flask:
         tracking = _read_jsonl(tracking_path, limit=max(500, limit))
 
         if log_type == "alerts":
-            return jsonify({"ok": True, "rows": alerts[-limit:]})
+            return _no_cache(jsonify({"ok": True, "rows": alerts[-limit:]}))
         if log_type == "process":
-            return jsonify({"ok": True, "rows": process[-limit:]})
+            return _no_cache(jsonify({"ok": True, "rows": process[-limit:]}))
         if log_type == "tracking":
-            return jsonify({"ok": True, "rows": tracking[-limit:]})
+            return _no_cache(jsonify({"ok": True, "rows": tracking[-limit:]}))
 
         # combined view
         def _tag(rows, tag):
@@ -335,7 +361,7 @@ def create_app() -> Flask:
             return out
         combined = _tag(alerts, "alerts") + _tag(process, "process") + _tag(tracking, "tracking")
         combined.sort(key=lambda r: _coerce_ts(r.get("ts")), reverse=True)
-        return jsonify({"ok": True, "rows": combined[:limit]})
+        return _no_cache(jsonify({"ok": True, "rows": combined[:limit]}))
 
     @app.get("/api/tracked")
     def api_tracked():
@@ -344,10 +370,52 @@ def create_app() -> Flask:
         except Exception:
             limit = 200
         rows: List[Dict[str, Any]] = []
+        source: str = "db"
         try:
             signals_db = _pick_signals_db_path(default_db)
             con = sqlite3.connect(signals_db, timeout=5)
             cur = con.cursor()
+            # If stats table doesn't exist yet, return alerts-only rows
+            try:
+                cur.execute("SELECT COUNT(1) FROM sqlite_master WHERE type='table' AND name='alerted_token_stats'")
+                has_stats = int((cur.fetchone() or [0])[0]) == 1
+            except Exception:
+                has_stats = False
+            if not has_stats:
+                cur.execute(
+                    """
+                    SELECT t.token_address,
+                           t.alerted_at,
+                           t.final_score,
+                           t.conviction_type
+                    FROM alerted_tokens t
+                    ORDER BY datetime(t.alerted_at) DESC
+                    LIMIT ?
+                    """,
+                    (limit,)
+                )
+                for r in cur.fetchall() or []:
+                    rows.append({
+                        "token": r[0],
+                        "alerted_at": r[1],
+                        "final_score": r[2],
+                        "conviction": r[3],
+                        "first_price": None,
+                        "last_price": None,
+                        "peak_price": None,
+                        "first_mcap": None,
+                        "last_mcap": None,
+                        "peak_mcap": None,
+                        "last_liq": None,
+                        "last_vol24": None,
+                        "peak_drawdown_pct": None,
+                        "outcome": None,
+                        "peak_multiple": None,
+                        "last_multiple": None,
+                    })
+                # Do not early-return; let unified return append source
+                cur.close(); con.close()
+                return _no_cache(jsonify({"ok": True, "rows": rows, "source": "db_alerts_only"}))
             try:
                 cur.execute(
                     """
@@ -424,7 +492,40 @@ def create_app() -> Flask:
             cur.close(); con.close()
         except Exception:
             rows = []
-        return jsonify({"ok": True, "rows": rows})
+
+        # Logs-based fallback if DB returns empty or errored
+        if not rows:
+            try:
+                alerts = _read_jsonl(alerts_path, limit=max(500, limit))
+                # newest first, limit
+                recent = list(reversed(alerts))[:limit]
+                rows = [
+                    {
+                        "token": a.get("token"),
+                        "alerted_at": a.get("ts"),
+                        "final_score": a.get("final_score"),
+                        "conviction": a.get("conviction_type"),
+                        "first_price": None,
+                        "last_price": None,
+                        "peak_price": None,
+                        "first_mcap": None,
+                        "last_mcap": None,
+                        "peak_mcap": None,
+                        "last_liq": None,
+                        "last_vol24": None,
+                        "peak_drawdown_pct": None,
+                        "outcome": None,
+                        "peak_multiple": None,
+                        "last_multiple": None,
+                    }
+                    for a in recent if a.get("token")
+                ]
+                source = "logs"
+            except Exception:
+                rows = []
+                source = "unknown"
+
+        return _no_cache(jsonify({"ok": True, "rows": rows, "source": source}))
 
     @app.post("/api/toggles")
     def api_set_toggles():
