@@ -60,6 +60,13 @@ shutdown_flag = False
 
 # Global lock handle to keep singleton lock alive for process lifetime
 _singleton_lock_file = None
+def _out(msg: str) -> None:
+	try:
+		print(msg)
+		mirror_stdout_line(str(msg))
+	except Exception:
+		pass
+
 
 def _release_singleton_lock(lock_path: str) -> None:
     global _singleton_lock_file
