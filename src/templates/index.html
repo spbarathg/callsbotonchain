@@ -270,6 +270,10 @@
             document.getElementById('status_signals').textContent = String((data.toggles||{}).signals_enabled);
             document.getElementById('status_trading').textContent = String((data.toggles||{}).trading_enabled);
             document.getElementById('status_kill').textContent = String(!!data.kill_switch);
+            const m = (data.metrics||{});
+            const apiErr = (m.api_error_pct!=null)? (m.api_error_pct.toFixed? m.api_error_pct.toFixed(1): m.api_error_pct): null;
+            document.getElementById('status_api_err').textContent = apiErr!=null ? String(apiErr)+'%' : '-';
+            document.getElementById('status_cache').textContent = (m.cache_hit_pct!=null) ? String(m.cache_hit_pct)+'%' : '-';
           } catch (e) {}
         } catch (e) {
           console.error('Failed to fetch stats', e);
@@ -391,10 +395,10 @@
               <td>${row.final_score??'-'}</td>
               <td>${row.conviction||'-'}</td>
               <td>${[fmt(row.first_price),fmt(row.last_price),fmt(row.peak_price)].join(' → ')}</td>
+              <td>${row.peak_multiple!=null?('×'+Number(row.peak_multiple).toFixed(2)):'-'}</td>
               <td>${[fmtMoney(row.first_mcap),fmtMoney(row.last_mcap),fmtMoney(row.peak_mcap)].join(' → ')}</td>
               <td>${fmtMoney(row.last_liq)}</td>
               <td>${fmtMoney(row.last_vol24)}</td>
-              <td>${row.peak_multiple!=null?('×'+Number(row.peak_multiple).toFixed(2)):'-'}</td>
               <td>${row.outcome||'-'}${row.peak_drawdown_pct!=null?(' ('+Number(row.peak_drawdown_pct).toFixed(1)+'%)'):''}</td>
             `;
             tbody.appendChild(tr);
