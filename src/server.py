@@ -8,7 +8,16 @@ from flask import Flask, jsonify, render_template, request
 from app.logger_utils import write_jsonl
 from app.secrets import hmac_sign
 from hashlib import sha256
-from src.risk.treasury import get_snapshot as get_treasury_snapshot
+try:
+    from src.risk.treasury import get_snapshot as get_treasury_snapshot
+except Exception:
+    class _TreasuryDummy:
+        bankroll_usd = 0.0
+        reserve_usd = 0.0
+        def total(self) -> float:
+            return 0.0
+    def get_treasury_snapshot() -> _TreasuryDummy:  # type: ignore
+        return _TreasuryDummy()
 from flask import Response
 import time
 from app.toggles import get_toggles, set_toggles
