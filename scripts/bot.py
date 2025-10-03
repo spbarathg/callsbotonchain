@@ -324,7 +324,7 @@ def _select_token_and_usd(tx: dict) -> Tuple[Optional[str], float]:
 def process_feed_item(tx: dict, is_smart_cycle: bool, session_alerted_tokens: set, last_alert_time: float) -> Tuple[str, Optional[float], int, Optional[str]]:
 	"""Process one feed item. Returns (status, new_last_alert_time, api_saved_delta, alerted_token)."""
 	from config import DEBUG_PRELIM, TELEGRAM_ALERT_MIN_INTERVAL, REQUIRE_SMART_MONEY_FOR_ALERT, REQUIRE_VELOCITY_MIN_SCORE_FOR_ALERT
-	from tools.relay import relay_contract_address_sync, relay_enabled  # type: ignore
+	# relay functions are already imported at module level with fallbacks
 
 	token_address, usd_value = _select_token_and_usd(tx)
 	tx["usd_value"] = usd_value
