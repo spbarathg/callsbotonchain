@@ -169,21 +169,39 @@ def fetch_solana_feed(cursor=None, smart_money_only: bool = False) -> Dict[str, 
 
     empty_200_seen = False
     def _valid_item(item: Dict[str, Any]) -> bool:
+        """Lenient validation to keep the pipeline flowing even when upstream schema varies.
+        Accept any item that has a token address and a positive USD estimate derived from common fields.
+        If timestamp is missing, synthesize a current timestamp.
+        """
         try:
             tok = item.get("token0_address") or item.get("token1_address") or item.get("token")
-            usd = item.get("usd_value")
-            ts = item.get("ts") or item.get("timestamp") or item.get("time")
             if not tok:
                 return False
-            try:
-                usd_val = float(usd if usd is not None else 0)
-            except Exception:
-                return False
+            # Try multiple fields for USD value
+            candidates = [
+                item.get("usd_value"),
+                item.get("token1_amount_usd"),
+                item.get("token0_amount_usd"),
+                item.get("amount_usd"),
+                item.get("value_usd"),
+            ]
+            usd_val: float = 0.0
+            for c in candidates:
+                try:
+                    v = float(c if c is not None else 0)
+                    if v > usd_val:
+                        usd_val = v
+                except Exception:
+                    continue
             if usd_val <= 0:
                 return False
-            # timestamp must be present
+            # Ensure timestamp exists; synthesize if missing
+            ts = item.get("ts") or item.get("timestamp") or item.get("time")
             if ts is None:
-                return False
+                try:
+                    item["ts"] = int(time.time())
+                except Exception:
+                    pass
             return True
         except Exception:
             return False
@@ -204,12 +222,30 @@ def fetch_solana_feed(cursor=None, smart_money_only: bool = False) -> Dict[str, 
                     api_response = result.get("json") or {}
                     parsed = _parse_items(api_response)
                     if parsed["items"]:
-                        # Strict validation of items
+                        # Lenient validation with coercion: keep valid items; coerce partials when possible
                         valid = []
                         for it in parsed["items"]:
                             if _valid_item(it):
                                 valid.append(it)
                             else:
+                                # Attempt to coerce partials by inferring usd_value from available fields
+                                try:
+                                    if isinstance(it, dict):
+                                        if it.get("token0_address") or it.get("token1_address") or it.get("token"):
+                                            # try derive usd from amounts
+                                            for k in ("token1_amount_usd","token0_amount_usd","amount_usd","value_usd"):
+                                                try:
+                                                    v = float(it.get(k) or 0)
+                                                    if v > 0:
+                                                        it.setdefault("usd_value", v)
+                                                        break
+                                                except Exception:
+                                                    continue
+                                            if _valid_item(it):
+                                                valid.append(it)
+                                                continue
+                                except Exception:
+                                    pass
                                 try:
                                     log_process({"type": "feed_item_invalid", "reason": "missing_required_fields"})
                                 except Exception:
