@@ -5,19 +5,31 @@ from typing import Dict, Any, List
 import sqlite3
 
 from flask import Flask, jsonify, render_template, request
+try:
+    from flask_limiter import Limiter  # type: ignore
+    from flask_limiter.util import get_remote_address  # type: ignore
+except Exception:
+    Limiter = None  # type: ignore
+
+    def get_remote_address():  # type: ignore
+        return ""
 from app.logger_utils import write_jsonl
 from app.secrets import hmac_sign
 from hashlib import sha256
+
 try:
     from src.risk.treasury import get_snapshot as get_treasury_snapshot
 except Exception:
     class _TreasuryDummy:
         bankroll_usd = 0.0
         reserve_usd = 0.0
+        
         def total(self) -> float:
             return 0.0
-    def get_treasury_snapshot() -> _TreasuryDummy:  # type: ignore
+
+    def get_treasury_snapshot() -> '_TreasuryDummy':  # type: ignore
         return _TreasuryDummy()
+
 from flask import Response
 import time
 from app.toggles import get_toggles, set_toggles
@@ -121,15 +133,7 @@ def _safe_json_dumps(obj: Any) -> str:
         for bad in ("NaN", "Infinity", "-Infinity"):
             s = s.replace(bad, "null")
         return s
-    try:
-        # Copy and sanitize key numeric fields
-        row = dict(alert)
-        for k in ("market_cap", "liquidity", "volume_24h", "price", "change_1h", "change_24h"):
-            if k in row:
-                row[k] = _finite(row.get(k))
-        return row
-    except Exception:
-        return alert  # type: ignore
+
 
 def _pick_signals_db_path(preferred_path: str) -> str:
     """Return a good signals DB path by checking candidates.
@@ -262,6 +266,13 @@ def _paper_metrics(db_path: str, *, window: str, stop_pct: float, trail_retentio
 
 def create_app() -> Flask:
     app = Flask(__name__, template_folder="templates", static_folder="static")
+    # Optional rate limiting for admin endpoints
+    limiter = None
+    try:
+        if os.getenv("CALLSBOT_RATE_LIMIT_ENABLED", "true").strip().lower() == "true" and Limiter is not None:
+            limiter = Limiter(get_remote_address, app=app, default_limits=[])
+    except Exception:
+        limiter = None
     # Security: enforce secure cookies and SameSite
     try:
         app.config['SESSION_COOKIE_SECURE'] = True
@@ -349,6 +360,7 @@ def create_app() -> Flask:
         trading_summary = _trading_metrics(trading_db)
         gates_summary = _gates_summary(alerts_path)
         # Lightweight API error-rate from recent process logs
+        
         def _api_error_pct(proc_rows: List[Dict[str, Any]]) -> float | None:
             try:
                 window = proc_rows[-500:] if len(proc_rows) > 500 else proc_rows
@@ -497,6 +509,7 @@ def create_app() -> Flask:
                     trading_summary = _trading_metrics(trading_db)
                     gates_summary = _gates_summary(alerts_path)
                     # Rolling API error-rate as part of stream payload
+                    
                     def _api_error_pct_stream(proc_rows: List[Dict[str, Any]]) -> float | None:
                         try:
                             window = proc_rows[-500:] if len(proc_rows) > 500 else proc_rows
@@ -812,6 +825,7 @@ def create_app() -> Flask:
                             first_rec = rec
                             break
                     # Compute metrics
+                    
                     def _val(rec: Dict[str, Any], key: str) -> Any:
                         return None if not rec else rec.get(key)
 
@@ -1064,6 +1078,18 @@ def create_app() -> Flask:
         "recent_open_positions": "SELECT id, token_address, open_at FROM positions WHERE status='open' ORDER BY datetime(open_at) DESC LIMIT 50",
     }
 
+    if 'limiter' in locals() and limiter is not None:
+        _sql_decorator = limiter.limit(os.getenv("CALLSBOT_SQL_RATELIMIT", "20/minute"))
+        _toggles_decorator = limiter.limit(os.getenv("CALLSBOT_TOGGLES_RATELIMIT", "10/minute"))
+    else:
+        
+        def _sql_decorator(f):
+            return f
+
+        def _toggles_decorator(f):
+            return f
+
+    @_sql_decorator
     @app.post("/api/sql")
     def api_sql():
         # Require admin key header (default deny when not set)

@@ -38,7 +38,7 @@ class TradeEngine:
 		except Exception:
 			pass
 		try:
-			line = f"[{payload['ts']}] {event} " + " ".join(f"{k}={v}" for k,v in fields.items())
+			line = f"[{payload['ts']}] {event} " + " ".join(f"{k}={v}" for k, v in fields.items())
 			with open(LOG_TEXT_PATH, "a", encoding="utf-8") as f:
 				f.write(line + "\n")
 		except Exception:
@@ -49,8 +49,8 @@ class TradeEngine:
 		if len(self.live) >= int(MAX_CONCURRENT):
 			self._log("open_skipped_max_concurrent", token=token, max_concurrent=int(MAX_CONCURRENT))
 			return None
-		usd = float(plan["usd_size"]) 
-		trail_pct = float(plan["trail_pct"]) 
+		usd = float(plan["usd_size"])
+		trail_pct = float(plan["trail_pct"])
 		fill = self.broker.market_buy(token, usd)
 		pid = create_position(token, plan["strategy"], fill.price, fill.qty, usd, trail_pct)
 		add_fill(pid, "buy", fill.price, fill.qty, fill.usd)

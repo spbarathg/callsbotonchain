@@ -153,5 +153,3 @@ def mirror_stdout_line(line: str) -> None:
             f.write((line or "").rstrip("\n") + "\n")
     except Exception:
         pass
-
-

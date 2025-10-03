@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
 from config import DB_FILE, DB_RETENTION_HOURS
 
+
 def _get_conn() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_FILE, timeout=10)
     try:
@@ -16,10 +17,11 @@ def _get_conn() -> sqlite3.Connection:
         pass
     return conn
 
+
 def init_db():
     conn = _get_conn()
     c = conn.cursor()
-    
+
     # Tokens that have been alerted
     c.execute("""
         CREATE TABLE IF NOT EXISTS alerted_tokens (
@@ -51,7 +53,7 @@ def init_db():
             peak_volume_24h_usd REAL
         )
     """)
-    
+
     # Token activity tracking for velocity detection
     c.execute("""
         CREATE TABLE IF NOT EXISTS token_activity (
@@ -99,7 +101,7 @@ def init_db():
             c.execute("ALTER TABLE token_activity ADD COLUMN trader_address TEXT")
     except Exception:
         pass
-    
+
     # Migration: add missing columns to alerted_token_stats
     try:
         cols = c.execute("PRAGMA table_info(alerted_token_stats)").fetchall()
@@ -148,6 +150,7 @@ def init_db():
     conn.commit()
     conn.close()
 
+
 def has_been_alerted(token_address: str) -> bool:
     conn = _get_conn()
     c = conn.cursor()
@@ -156,6 +159,7 @@ def has_been_alerted(token_address: str) -> bool:
     conn.close()
     return result is not None
 
+
 def mark_as_alerted(token_address: str, score: int = 0, smart_money_detected: bool = False,
                     baseline_price_usd: float = None, baseline_market_cap_usd: float = None,
                     baseline_liquidity_usd: float = None, baseline_volume_24h_usd: float = None,
@@ -163,8 +167,8 @@ def mark_as_alerted(token_address: str, score: int = 0, smart_money_detected: bo
     conn = _get_conn()
     c = conn.cursor()
     c.execute("""
-        INSERT OR IGNORE INTO alerted_tokens 
-        (token_address, final_score, smart_money_detected, conviction_type) 
+        INSERT OR IGNORE INTO alerted_tokens
+        (token_address, final_score, smart_money_detected, conviction_type)
         VALUES (?, ?, ?, ?)
     """, (token_address, score, smart_money_detected, conviction_type))
     # initialize tracking row
@@ -187,13 +191,14 @@ def mark_as_alerted(token_address: str, score: int = 0, smart_money_detected: bo
     conn.commit()
     conn.close()
 
+
 def record_token_activity(token_address: str, usd_value: float, tx_count: int, smart_money_involved: bool, prelim_score: int, trader_address: Optional[str] = None) -> None:
     """Record token activity for velocity tracking"""
     conn = _get_conn()
     c = conn.cursor()
     try:
         c.execute("""
-            INSERT INTO token_activity 
+            INSERT INTO token_activity
             (token_address, usd_value, transaction_count, smart_money_involved, preliminary_score, trader_address)
             VALUES (?, ?, ?, ?, ?, ?)
         """, (token_address, usd_value, tx_count, smart_money_involved, prelim_score, trader_address))
@@ -203,25 +208,26 @@ def record_token_activity(token_address: str, usd_value: float, tx_count: int, s
         pass
     conn.close()
 
+
 def get_token_velocity(token_address: str, minutes_back: int = 30) -> Optional[Dict[str, Any]]:
     """Calculate token velocity - activity increase over time"""
     conn = _get_conn()
     c = conn.cursor()
-    
+
     cutoff_time = datetime.now() - timedelta(minutes=minutes_back)
     # Format cutoff to ISO string for consistent SQLite comparison
     cutoff_iso = cutoff_time.strftime('%Y-%m-%d %H:%M:%S')
     c.execute("""
-        SELECT COUNT(*), AVG(usd_value), MAX(transaction_count), 
+        SELECT COUNT(*), AVG(usd_value), MAX(transaction_count),
                COUNT(CASE WHEN smart_money_involved = 1 THEN 1 END),
                COUNT(DISTINCT COALESCE(trader_address, ''))
-        FROM token_activity 
+        FROM token_activity
         WHERE token_address = ? AND observed_at > ?
     """, (token_address, cutoff_iso))
-    
+
     result = c.fetchone()
     conn.close()
-    
+
     if result and result[0] > 0:
         observations, avg_usd, max_tx_count, smart_money_count, unique_traders = result
         velocity_score = min(observations * 2 + smart_money_count, 10)  # Cap at 10
@@ -235,19 +241,23 @@ def get_token_velocity(token_address: str, minutes_back: int = 30) -> Optional[D
         }
     return None
 
-def should_fetch_detailed_stats(token_address: str, current_prelim_score: int) -> bool:
+
+def should_fetch_detailed_stats(token_address: str, current_prelim_score: int, *, is_synthetic: bool = False) -> bool:
     """Determine if we should make expensive API call for detailed stats"""
     # Always fetch for high preliminary scores
     from config import PRELIM_DETAILED_MIN, PRELIM_VELOCITY_MIN_SCORE, VELOCITY_REQUIRED
-    if current_prelim_score >= PRELIM_DETAILED_MIN:
+    # Synthetic items require a higher barrier to spend credits
+    threshold = int(PRELIM_DETAILED_MIN + (1 if is_synthetic else 0))
+    if current_prelim_score >= threshold:
         return True
-    
+
     # Check velocity for medium scores
-    if current_prelim_score >= PRELIM_VELOCITY_MIN_SCORE:
+    vel_gate = int(PRELIM_VELOCITY_MIN_SCORE + (1 if is_synthetic else 0))
+    if current_prelim_score >= vel_gate:
         velocity = get_token_velocity(token_address, minutes_back=15)
         if velocity and velocity['velocity_score'] >= VELOCITY_REQUIRED:
             return True
-    
+
     return False
 
 

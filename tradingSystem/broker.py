@@ -1,8 +1,6 @@
 from dataclasses import dataclass
 import base64
 import json
-import os
-import time
 from typing import Dict, Optional
 
 import requests
@@ -19,7 +17,6 @@ from .config import (
 	WALLET_SECRET,
 	SLIPPAGE_BPS,
 	PRIORITY_FEE_MICROLAMPORTS,
-	JITO_TIP_SOL,
 	BASE_MINT,
 )
 

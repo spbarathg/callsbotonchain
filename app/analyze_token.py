@@ -18,7 +18,6 @@ from config import (
     VOL_MED,
     MOMENTUM_1H_STRONG,
     DRAW_24H_MAJOR,
-    TOP10_CONCERN,
     STABLE_MINTS,
     BLOCKLIST_SYMBOLS,
     MAX_MARKET_CAP_FOR_DEFAULT_ALERT,
@@ -55,12 +54,14 @@ from app.http_client import request_json
 from app.budget import get_budget
 from app.logger_utils import log_process
 
+
 def _dexscreener_best_pair(pairs: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     if not pairs:
         return None
     # Prefer Solana pairs with highest 24h volume, then liquidity
     sol_pairs = [p for p in pairs if (p.get("chainId") == "solana")]
     candidates = sol_pairs or pairs
+
     def score(p: Dict[str, Any]) -> float:
         vol = (p.get("volume") or {}).get("h24") or 0
         liq = (p.get("liquidity") or {}).get("usd") or 0
@@ -85,14 +86,14 @@ def _get_token_stats_dexscreener(token_address: str) -> Dict[str, Any]:
                 price_change = best.get("priceChange") or {}
                 volume = best.get("volume") or {}
                 liquidity = best.get("liquidity") or {}
-                # Prefer marketCap; fall back to fdv; coerce to float
+                # Prefer marketCap; do NOT substitute FDV to avoid misclassification
                 mc_val = best.get("marketCap")
-                if mc_val is None:
-                    mc_val = best.get("fdv")
+                market_cap: Any = None
                 try:
-                    market_cap = float(mc_val or 0)
+                    if mc_val is not None:
+                        market_cap = float(mc_val)
                 except Exception:
-                    market_cap = 0.0
+                    market_cap = None
                 price_usd = best.get("priceUsd")
                 try:
                     price_usd = float(price_usd) if price_usd is not None else 0.0
@@ -138,6 +139,7 @@ _DENY_STATE_FILE = os.getenv("CALLSBOT_DENY_FILE", os.path.join("var", "stats_de
 _deny_cache = {"stats_denied": False}
 _deny_lock = threading.Lock()
 
+
 def _deny_load_unlocked() -> None:
     try:
         if not _DENY_STATE_FILE:
@@ -148,10 +150,13 @@ def _deny_load_unlocked() -> None:
             with open(_DENY_STATE_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 if isinstance(data, dict) and isinstance(data.get("stats_denied"), bool):
-                    _deny_cache["stats_denied"] = bool(data["stats_denied"]) 
-    except Exception:
-        # best-effort; do not raise
-        pass
+                    _deny_cache["stats_denied"] = bool(data["stats_denied"])
+    except Exception as e:
+        try:
+            log_process({"type": "deny_state_load_error", "error": str(e)})
+        except Exception:
+            pass
+
 
 def _deny_save_unlocked() -> None:
     try:
@@ -162,14 +167,18 @@ def _deny_save_unlocked() -> None:
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(_deny_cache, f, ensure_ascii=False)
         os.replace(tmp, _DENY_STATE_FILE)
-    except Exception:
-        # best-effort; do not raise
-        pass
+    except Exception as e:
+        try:
+            log_process({"type": "deny_state_save_error", "error": str(e)})
+        except Exception:
+            pass
+
 
 def deny_is_denied() -> bool:
     with _deny_lock:
         _deny_load_unlocked()
         return bool(_deny_cache.get("stats_denied"))
+
 
 def deny_mark_denied(value: bool = True) -> None:
     with _deny_lock:
@@ -190,6 +199,7 @@ if _REDIS_URL:
     except Exception:
         _redis_client = None
 
+
 def _cache_get(token_address: str) -> Optional[Dict[str, Any]]:
     import time as _t
     key = f"stats:{token_address}"
@@ -199,8 +209,11 @@ def _cache_get(token_address: str) -> Optional[Dict[str, Any]]:
             raw = _redis_client.get(key)
             if raw:
                 return json.loads(raw.decode("utf-8"))
-        except Exception:
-            pass
+        except Exception as e:
+            try:
+                log_process({"type": "stats_cache_redis_get_error", "error": str(e)})
+            except Exception:
+                pass
     # Fallback in-memory
     with _stats_lock:
         item = _stats_cache.get(token_address)
@@ -211,9 +224,13 @@ def _cache_get(token_address: str) -> Optional[Dict[str, Any]]:
             return data
         try:
             _stats_cache.pop(token_address, None)
-        except Exception:
-            pass
+        except Exception as e:
+            try:
+                log_process({"type": "stats_cache_pop_error", "error": str(e)})
+            except Exception:
+                pass
         return None
+
 
 def _cache_set(token_address: str, data: Dict[str, Any]) -> None:
     import time as _t
@@ -223,10 +240,14 @@ def _cache_set(token_address: str, data: Dict[str, Any]) -> None:
         try:
             _redis_client.setex(key, _STATS_TTL_SEC, payload)
             return
-        except Exception:
-            pass
+        except Exception as e:
+            try:
+                log_process({"type": "stats_cache_redis_set_error", "error": str(e)})
+            except Exception:
+                pass
     with _stats_lock:
         _stats_cache[token_address] = (_t.time(), data)
+
 
 def get_token_stats(token_address: str) -> Dict[str, Any]:
     if not token_address:
@@ -267,23 +288,31 @@ def get_token_stats(token_address: str) -> Dict[str, Any]:
     except Exception:
         # If budget subsystem errors, proceed normally (will try Cielo then DexScreener)
         pass
-        
+
     base_urls = [
         "https://feed-api.cielo.finance/api/v1",
         "https://api.cielo.finance/api/v1",
     ]
-    header_variants = [
-        {"X-API-Key": CIELO_API_KEY},
-        {"Authorization": f"Bearer {CIELO_API_KEY}"},
-    ]
+    # Guard headers so we don't send None/"Bearer None"; if no key, prefer DexScreener
+    header_variants = []
+    if CIELO_API_KEY:
+        header_variants.append({"X-API-Key": CIELO_API_KEY})
+        header_variants.append({"Authorization": f"Bearer {CIELO_API_KEY}"})
     params = {"token_address": token_address, "chain": "solana"}
-    
-    # Add timeout and retry logic
-    max_retries = 4
-    
+
+    # Add timeout and retry logic (handled in http_client)
+
     # Skip Cielo if user disabled or we detected denial previously
     if CIELO_DISABLE_STATS or deny_is_denied():
         return _get_token_stats_dexscreener(token_address)
+
+    # If no API key configured, avoid calling Cielo with invalid headers
+    if not (CIELO_API_KEY and str(CIELO_API_KEY).strip()):
+        try:
+            log_process({"type": "token_stats_no_api_key", "provider": "cielo", "fallback": "dexscreener"})
+        except Exception:
+            pass
+        return _normalize_stats_schema(_get_token_stats_dexscreener(token_address) or {})
 
     combos = [(b, h) for b in base_urls for h in header_variants]
     last_status = None
@@ -311,6 +340,7 @@ def get_token_stats(token_address: str) -> Dict[str, Any]:
                         data = api_response["data"]
                         # Normalize schema keys for downstream consumers
                         data = _normalize_stats_schema(data)
+
                         def _missing_liq(d: Dict[str, Any]) -> bool:
                             liq_obj = d.get('liquidity') or {}
                             return not bool(d.get('liquidity_usd') or liq_obj.get('usd'))
@@ -336,7 +366,8 @@ def get_token_stats(token_address: str) -> Dict[str, Any]:
                                 # Volume (24h)
                                 if _missing_vol(data) and (((ds.get('volume') or {}).get('24h') or {}).get('volume_usd') is not None):
                                     vol24 = ((ds.get('volume') or {}).get('24h') or {})
-                                    data.setdefault('volume', {}).setdefault('24h', {})['volume_usd'] = vol24.get('volume_usd')
+                                    data.setdefault('volume', {}).setdefault('24h', {})[
+                                        'volume_usd'] = vol24.get('volume_usd')
                                 # Market cap
                                 if _missing_mcap(data) and (ds.get('market_cap_usd') is not None):
                                     data['market_cap_usd'] = ds.get('market_cap_usd')
@@ -354,7 +385,8 @@ def get_token_stats(token_address: str) -> Dict[str, Any]:
                         return data
                     except Exception:
                         # If augmentation fails for any reason, still return Cielo data
-                        norm = _normalize_stats_schema(api_response["data"]) if isinstance(api_response.get("data"), dict) else api_response.get("data")
+                        norm = _normalize_stats_schema(api_response["data"]) if isinstance(
+                            api_response.get("data"), dict) else api_response.get("data")
                         _cache_set(token_address, norm)
                         return norm
                 if isinstance(api_response, dict):
@@ -424,6 +456,7 @@ def get_token_stats(token_address: str) -> Dict[str, Any]:
             pass
     return _normalize_stats_schema(_get_token_stats_dexscreener(token_address) or {})
 
+
 def _normalize_stats_schema(d: Dict[str, Any]) -> Dict[str, Any]:
     """Ensure consistent keys and types across Cielo and DexScreener shapes.
     - Guarantees numeric normalization and unknown flags.
@@ -489,31 +522,37 @@ def _normalize_stats_schema(d: Dict[str, Any]) -> Dict[str, Any]:
             out[k] = {}
     return out
 
+
 def calculate_preliminary_score(tx_data: Dict[str, Any], smart_money_detected: bool = False) -> int:
     """
     CREDIT-EFFICIENT: Calculate preliminary score from feed data without API calls
     Uses only data available in the transaction feed
     """
     score = 0
-    
+
     # Smart money bonus (highest priority)
     if smart_money_detected:
         score += 3  # Baseline bonus
-    
-    # USD value indicates serious activity (more sensitive thresholds)
+
+    # USD value indicates serious activity; downweight synthetic fallback items
     usd_value = tx_data.get('usd_value', 0) or 0
-    if usd_value > PRELIM_USD_HIGH:
+    is_synthetic = bool(tx_data.get('is_synthetic')) or str(tx_data.get('tx_type') or '').endswith('_fallback')
+    high = PRELIM_USD_HIGH * (1.5 if is_synthetic else 1.0)
+    mid = PRELIM_USD_MID * (1.5 if is_synthetic else 1.0)
+    low = PRELIM_USD_LOW * (1.5 if is_synthetic else 1.0)
+    if usd_value > high:
         score += 3
-    elif usd_value > PRELIM_USD_MID:
+    elif usd_value > mid:
         score += 2
-    elif usd_value > PRELIM_USD_LOW:
+    elif usd_value > low:
         score += 1
-    
+
     # Transaction frequency/urgency
     # Note: This would need to be tracked over time
     # For now, we use USD value as a proxy
-    
+
     return min(score, 10)
+
 
 def score_token(stats: Dict[str, Any], smart_money_detected: bool = False, token_address: Optional[str] = None) -> Tuple[int, List[str]]:
     """
@@ -640,6 +679,7 @@ def _extract_top10_concentration(stats: Dict[str, Any]) -> Optional[float]:
 
 def _extract_holder_risk(stats: Dict[str, Any]) -> Dict[str, Optional[float]]:
     holders = stats.get('holders') or {}
+
     def to_float(x):
         try:
             return float(x) if x is not None else None
@@ -714,6 +754,7 @@ def _check_senior_common(stats: Dict[str, Any], token_address: Optional[str], *,
         return False
 
     return True
+
 
 def check_senior_strict(stats: Dict[str, Any], token_address: Optional[str] = None) -> bool:
     return _check_senior_common(stats, token_address,

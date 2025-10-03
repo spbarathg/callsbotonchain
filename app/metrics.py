@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from typing import Optional
 
 try:
@@ -100,6 +99,3 @@ def inc_deny() -> None:
 def set_queue_len(n: int) -> None:
     if _enabled and _gauge_queue is not None:
         _gauge_queue.set(n)  # type: ignore
-
-
-

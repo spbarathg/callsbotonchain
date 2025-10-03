@@ -1,7 +1,6 @@
 import argparse
 import threading
 import time
-from typing import Dict
 
 import requests
 
@@ -46,7 +45,7 @@ def _exit_loop(engine: TradeEngine, stop_event: threading.Event) -> None:
 def run() -> None:
 	parser = argparse.ArgumentParser(description="Minimal tradingSystem runner")
 	parser.add_argument("--dry", action="store_true", help="Dry run (no real trades)")
-	args = parser.parse_args()
+	parser.parse_args()
 
 	engine = TradeEngine()
 	# Start exit loop thread

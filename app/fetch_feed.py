@@ -1,4 +1,5 @@
 # fetch_feed.py
+from typing import Dict, Any
 import requests
 import time
 from datetime import datetime, timezone
@@ -13,6 +14,7 @@ try:
     from config import CIELO_LIST_IDS  # optional multi-list support
 except Exception:
     CIELO_LIST_IDS = []
+
 
 def _parse_retry_after_seconds(resp: requests.Response) -> Optional[int]:
     """
@@ -49,9 +51,6 @@ def _parse_retry_after_seconds(resp: requests.Response) -> Optional[int]:
     return None
 
 
-from typing import Dict, Any
-
-
 def fetch_solana_feed(cursor=None, smart_money_only: bool = False) -> Dict[str, Any]:
     # Emergency switch: force fallback feed for resilience/testing
     if os.getenv("CALLSBOT_FORCE_FALLBACK", "false").strip().lower() == "true":
@@ -86,7 +85,7 @@ def fetch_solana_feed(cursor=None, smart_money_only: bool = False) -> Dict[str, 
         base_params["list_id"] = CIELO_LIST_ID
     if CIELO_NEW_TRADE_ONLY:
         base_params["new_trade"] = "true"
-    
+
     # Add smart money filters for enhanced detection
     if smart_money_only:
         base_params.update({
@@ -117,7 +116,7 @@ def fetch_solana_feed(cursor=None, smart_money_only: bool = False) -> Dict[str, 
         {"X-API-Key": CIELO_API_KEY},
         {"Authorization": f"Bearer {CIELO_API_KEY}"},
     ]
-    
+
     last_retry_after: Optional[int] = None
     quota_exceeded = False
     max_retries = 3
@@ -130,6 +129,7 @@ def fetch_solana_feed(cursor=None, smart_money_only: bool = False) -> Dict[str, 
         pass
     # Build a small set of parameter variants to maximize compatibility
     # with upstream API quirks.
+
     def _param_variants() -> list:
         variants = []
         # Preferred modern form
@@ -167,7 +167,7 @@ def fetch_solana_feed(cursor=None, smart_money_only: bool = False) -> Dict[str, 
             pass
         return {"items": [], "next_cursor": None}
 
-    empty_200_seen = False
+    # track if we saw 200 with no items (for debug/logging only)
     def _valid_item(item: Dict[str, Any]) -> bool:
         """Lenient validation to keep the pipeline flowing even when upstream schema varies.
         Accept any item that has a token address and a positive USD estimate derived from common fields.
@@ -233,7 +233,7 @@ def fetch_solana_feed(cursor=None, smart_money_only: bool = False) -> Dict[str, 
                                     if isinstance(it, dict):
                                         if it.get("token0_address") or it.get("token1_address") or it.get("token"):
                                             # try derive usd from amounts
-                                            for k in ("token1_amount_usd","token0_amount_usd","amount_usd","value_usd"):
+                                            for k in ("token1_amount_usd", "token0_amount_usd", "amount_usd", "value_usd"):
                                                 try:
                                                     v = float(it.get(k) or 0)
                                                     if v > 0:
@@ -256,14 +256,13 @@ def fetch_solana_feed(cursor=None, smart_money_only: bool = False) -> Dict[str, 
                         log_process({
                             "type": "feed_debug",
                             "status": int(status),
-                            "params": {k: v for k, v in (params or {}).items() if k in ("limit","chains","chain","new_trade","smart_money")},
+                            "params": {k: v for k, v in (params or {}).items() if k in ("limit", "chains", "chain", "new_trade", "smart_money")},
                             "message": (api_response.get("message") or "")[:160],
                             "shape_keys": list(api_response.keys())[:8],
                             "items_len": 0,
                         })
                     except Exception:
                         pass
-                    empty_200_seen = True
                     made_progress = True
                     continue
                 elif status == 429:
@@ -271,6 +270,7 @@ def fetch_solana_feed(cursor=None, smart_money_only: bool = False) -> Dict[str, 
                     msg = (body.get("message") or "").lower()
                     if "maximum api credit" in msg or "quota" in msg:
                         quota_exceeded = True
+
                     class _R:
                         def __init__(self, headers):
                             self.headers = headers
@@ -337,7 +337,7 @@ def fetch_solana_feed(cursor=None, smart_money_only: bool = False) -> Dict[str, 
             continue
         # Allow fallback logic below to engage (avoid returning http_200 on empty)
         break
-    
+
     # All retries failed
     try:
         log_process({
@@ -436,6 +436,7 @@ def _fallback_feed_from_dexscreener(limit: int = 30, smart_money_only: bool = Fa
             "dex": (p.get("dexId") or "dexscreener"),
             "tx_type": "trending_fallback",
         }
+        tx["is_synthetic"] = True
         txs.append(tx)
         if len(txs) >= int(limit or 30):
             break
@@ -463,6 +464,7 @@ def _fallback_feed_from_geckoterminal(limit: int = 30) -> list:
             rel = item.get("relationships") or {}
             base_rel = ((rel.get("base_token") or {}).get("data") or {}).get("id")
             q_rel = ((rel.get("quote_token") or {}).get("data") or {}).get("id")
+
             def _addr_from_rel(rel_id: str) -> str:
                 if not rel_id or not isinstance(rel_id, str):
                     return ""
@@ -499,6 +501,7 @@ def _fallback_feed_from_geckoterminal(limit: int = 30) -> list:
                 "token1_amount_usd": usd_val,
                 "tx_type": "gecko_trending_fallback",
                 "dex": "geckoterminal",
+                "is_synthetic": True,
             })
             if len(txs) >= int(limit or 30):
                 break

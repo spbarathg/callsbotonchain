@@ -22,6 +22,3 @@ def hmac_sign(message: str, *, key_env: str = "CALLSBOT_HMAC_KEY") -> str:
     key = get_env_secret(key_env) or ""
     digest = hmac.new(key.encode("utf-8"), message.encode("utf-8"), hashlib.sha256).hexdigest()
     return digest
-
-
-

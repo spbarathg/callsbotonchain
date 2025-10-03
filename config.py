@@ -76,22 +76,27 @@ BUDGET_PER_DAY_MAX = int(os.getenv("BUDGET_PER_DAY_MAX", "5000"))      # daily c
 BUDGET_FEED_COST = int(os.getenv("BUDGET_FEED_COST", "1"))
 BUDGET_STATS_COST = int(os.getenv("BUDGET_STATS_COST", "1"))
 BUDGET_HARD_BLOCK = os.getenv("BUDGET_HARD_BLOCK", "true").lower() == "true"
-CALLSBOT_BUDGET_FILE = os.getenv("CALLSBOT_BUDGET_FILE", os.path.join(os.path.dirname(__file__), "var", "credits_budget.json"))
+CALLSBOT_BUDGET_FILE = os.getenv("CALLSBOT_BUDGET_FILE", os.path.join(
+    os.path.dirname(__file__), "var", "credits_budget.json"))
 
 # ==============================================
 # SCORING THRESHOLDS (override via .env)
 # ==============================================
+
+
 def _get_int(name: str, default: int) -> int:
     try:
         return int(os.getenv(name, str(default)))
     except ValueError:
         return default
 
+
 def _get_float(name: str, default: float) -> float:
     try:
         return float(os.getenv(name, str(default)))
     except ValueError:
         return default
+
 
 # Preliminary USD thresholds
 PRELIM_USD_HIGH = _get_int("PRELIM_USD_HIGH", 2000)
@@ -158,7 +163,7 @@ STABLE_MINTS = [m.strip() for m in _stable_mints_env.split(",") if m.strip()]
 
 _block_syms_env = os.getenv(
     "BLOCKLIST_SYMBOLS",
-    ",".join(["USDC","USDT","SOL","WSOL","WBTC","BTC","ETH","WETH"])
+    ",".join(["USDC", "USDT", "SOL", "WSOL", "WBTC", "BTC", "ETH", "WETH"])
 )
 BLOCKLIST_SYMBOLS = [s.strip().upper() for s in _block_syms_env.split(",") if s.strip()]
 
@@ -271,6 +276,7 @@ GATE_PRESETS = {
     },
 }
 
+
 def _apply_gate_mode_overrides() -> None:
     """Apply gate preset only when a value was NOT explicitly provided via env.
 
@@ -283,6 +289,7 @@ def _apply_gate_mode_overrides() -> None:
     if not preset:
         return
     # Helper to detect whether user explicitly set a key
+
     def _has_env(name: str) -> bool:
         return os.getenv(name) is not None and os.getenv(name) != ""
 
@@ -296,6 +303,7 @@ def _apply_gate_mode_overrides() -> None:
         MAX_MARKET_CAP_FOR_DEFAULT_ALERT = preset["MAX_MARKET_CAP_FOR_DEFAULT_ALERT"]
     if not _has_env("VOL_TO_MCAP_RATIO_MIN"):
         VOL_TO_MCAP_RATIO_MIN = preset["VOL_TO_MCAP_RATIO_MIN"]
+
 
 _apply_gate_mode_overrides()
 

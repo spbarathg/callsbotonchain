@@ -1,69 +1,38 @@
-﻿# Ignore runtime data and logs
-/var/
-/data/logs/
-
-# Editor and OS files
-.DS_Store
-Thumbs.db
-
-# Python
+﻿# Python
 __pycache__/
 *.py[cod]
-*$py.class
-
-# Virtual envs
-.env
-.venv
+*.pyo
+*.pyd
+*.pyc
+*.egg-info/
+.eggs/
+.venv/
 venv/
-ENV/
 
-# OS files
-.DS_Store
-Thumbs.db
-
-# Editor
+# IDE
 .vscode/
 .idea/
-*.code-workspace
 
-# Logs and runtime artifacts
-logs/
-*.log
-*.jsonl
-data/logs/
+# Logs and runtime data
 var/
-*.pid
-*.lock
+data/logs/
+data/backups/
+
+# Exports and artifacts
+exports/
 
 # Databases and sessions
 *.db
-*.sqlite
-*.sqlite3
-**/relay_user.session
+*.db-*
+*.session
+*.lock
 
-# Exports, backups, analytics outputs
-exports/
-**/exports/
-**/backups/
-**/analysis_*/
-**/analysis_charts/
-**/simple_analysis_charts/
-**/analytics/*.png
-**/analytics/*.csv
-**/analytics/*.json
+# Test output
+pytest_output.txt
 
-# Notebooks and reports
-*.ipynb
-
-# Build artifacts
-build/
-dist/
-*.egg-info/
-
-# Environment files
-*.env
-.env.*
-
-# Coverage/test (no tests yet, but ignore if appear)
+# Coverage
 .coverage
 htmlcov/
+
+# Node (if any)
+node_modules/

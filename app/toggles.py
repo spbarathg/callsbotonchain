@@ -106,12 +106,3 @@ def _lock_file(path: str):
             f.close()
         except Exception:
             pass
-
-
-
-
-
-
-
-
-

@@ -172,8 +172,10 @@ class BudgetManager:
         with self._lock_file(self.storage_path):
             self._load_unlocked()
             self._roll_windows()
-            min_left = self.per_minute_max if self.per_minute_max <= 0 else max(0, self.per_minute_max - self._state["minute_count"])
-            day_left = self.per_day_max if self.per_day_max <= 0 else max(0, self.per_day_max - self._state["day_count"])
+            min_left = self.per_minute_max if self.per_minute_max <= 0 else max(
+                0, self.per_minute_max - self._state["minute_count"])
+            day_left = self.per_day_max if self.per_day_max <= 0 else max(
+                0, self.per_day_max - self._state["day_count"])
             return (min_left >= c) and (day_left >= c)
 
     def spend(self, kind: str = "stats", cost: Optional[int] = None) -> None:
@@ -223,5 +225,3 @@ def get_budget() -> BudgetManager:
         hard_block=BUDGET_HARD_BLOCK,
     )
     return _budget_singleton
-
-

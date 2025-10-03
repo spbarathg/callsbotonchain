@@ -1,6 +1,3 @@
-import os
-import random
-import time
 from typing import Any, Dict, Optional
 
 import requests
@@ -48,7 +45,8 @@ def request_json(method: str, url: str, *, params: Optional[Dict[str, Any]] = No
     try:
         from urllib.parse import urlparse
         host = urlparse(url).hostname or ""
-        allow_hosts = {"api.dexscreener.com", "dexscreener.com", "feed-api.cielo.finance", "api.cielo.finance", "api.geckoterminal.com"}
+        allow_hosts = {"api.dexscreener.com", "dexscreener.com",
+                       "feed-api.cielo.finance", "api.cielo.finance", "api.geckoterminal.com"}
         if host and host not in allow_hosts:
             return {"status_code": None, "error": f"host_not_allowed:{host}"}
     except Exception:
@@ -81,6 +79,14 @@ def request_json(method: str, url: str, *, params: Optional[Dict[str, Any]] = No
             merged_headers.update(headers)
         except Exception:
             pass
+    # Drop headers with None or obviously invalid values to avoid sending bad auth
+    try:
+        merged_headers = {
+            k: v for k, v in merged_headers.items()
+            if (v is not None) and (str(v).strip() != "") and (str(v).strip().lower() != "none") and (str(v).strip() != "Bearer None")
+        }
+    except Exception:
+        pass
     try:
         resp = sess.request(method.upper(), url, params=params, headers=merged_headers, json=json, timeout=timeout)
         result: Dict[str, Any] = {"status_code": resp.status_code}
@@ -105,5 +111,3 @@ def request_json(method: str, url: str, *, params: Optional[Dict[str, Any]] = No
         except Exception:
             pass
         return {"status_code": None, "error": str(e)}
-
-

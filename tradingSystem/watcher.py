@@ -1,6 +1,6 @@
 import re
 import time
-from typing import Iterator, Optional, Dict
+from typing import Iterator, Dict
 from .config import BOT_STDOUT_LOG
 
 
@@ -9,6 +9,7 @@ _PASS_RE = re.compile(r"PASSED \(Strict \+ Smart Money\):\s+([A-Za-z0-9]{20,64})
 _REJECT_RE = re.compile(r"REJECTED \(Junior Strict\):\s+([A-Za-z0-9]{20,64})")
 
 _BASE58_RE = re.compile(r"^[1-9A-HJ-NP-Za-km-z]{20,64}$")
+
 
 def _valid_ca(ca: str) -> bool:
 	# Basic base58/length filter (Solana typically 32-44, but allow 20-64 for safety)

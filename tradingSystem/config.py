@@ -27,6 +27,9 @@ RPC_URL = os.getenv("TS_RPC_URL", "https://api.mainnet-beta.solana.com")
 JITO_URL = os.getenv("TS_JITO_URL", "")
 PRIORITY_FEE_MICROLAMPORTS = _get_int("TS_PRIORITY_FEE_MICROLAMPORTS", 8000)
 JITO_TIP_SOL = _get_float("TS_JITO_TIP_SOL", 0.0006)
+# SECURITY WARNING: Do NOT store real private keys in plaintext environment variables in production.
+# Use a proper secrets manager (e.g., HashiCorp Vault, AWS Secrets Manager, Google Secret Manager)
+# and inject the secret securely at runtime. Local/dev only: base58 privkey or JSON array of bytes.
 WALLET_SECRET = os.getenv("TS_WALLET_SECRET", "")  # base58 privkey or JSON array of bytes
 SLIPPAGE_BPS = _get_int("TS_SLIPPAGE_BPS", 150)  # 1.50%
 
