@@ -1123,8 +1123,8 @@ def _signals_metrics(db_path: str) -> Dict[str, Any]:
     except Exception as e:
         try:
             print(f"_signals_metrics: metrics error: {e}")
-    except Exception:
-        pass
+        except Exception:
+            pass
     return out
 
 
@@ -1201,8 +1201,8 @@ def _trading_metrics(db_path: str) -> Dict[str, Any]:
     except Exception as e:
         try:
             print(f"_trading_metrics: metrics error: {e}")
-    except Exception:
-        pass
+        except Exception:
+            pass
     return out
 
 
@@ -1229,8 +1229,8 @@ def _gates_summary(alerts_path: str) -> Dict[str, Any]:
     except Exception as e:
         try:
             print(f"_gates_summary: error: {e}")
-    except Exception:
-        pass
+        except Exception:
+            pass
     return data
 
 
