@@ -1,10 +1,11 @@
 :80 {
-	encode zstd gzip
+    # Avoid compressing SSE; gzip/zstd can corrupt event-stream in some proxies
+    # encode zstd gzip
 
     @blocksql path /api/sql
     respond @blocksql 403
 
     # basicauth is intentionally disabled for public dashboard
 
-	reverse_proxy web:8080
+    reverse_proxy web:8080
 }
