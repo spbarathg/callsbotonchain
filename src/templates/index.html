@@ -207,7 +207,8 @@
       }
       function applyStats(data){
         const sig = data.signals_summary || {};
-        document.getElementById('total_alerts').textContent = (sig.total_alerts ?? data.total_alerts) ?? '-';
+        const totalAlertsVal = (sig.total_alerts ?? data.total_alerts ?? data.log_alerts_count ?? 0);
+        document.getElementById('total_alerts').textContent = String(totalAlertsVal);
         if (sig.alerts_24h != null) {
           document.getElementById('alerts_24h').textContent = sig.alerts_24h;
         }
