@@ -395,11 +395,29 @@
       // ---------- Tracked ----------
       async function fetchTracked(){
         try{
-          const r = await fetch('/api/tracked?limit=200');
-          const data = await r.json();
+          const ac = new AbortController();
+          const t = setTimeout(()=>ac.abort(), 4000);
+          let r = await fetch('/api/tracked?limit=200', { signal: ac.signal });
+          clearTimeout(t);
+          if (!r.ok) throw new Error('tracked http '+r.status);
+          let data = await r.json();
+          // Fallback: if rows missing, try smaller payload once
+          if (!Array.isArray(data.rows) || data.rows.length === 0){
+            try{
+              r = await fetch('/api/tracked?limit=50');
+              if (r.ok) data = await r.json();
+            }catch(e){/* ignore */}
+          }
           const tbody = document.querySelector('#tracked_table tbody');
           tbody.innerHTML = '';
-          (data.rows||[]).forEach(row=>{
+          const rows = Array.isArray(data.rows) ? data.rows : [];
+          if (rows.length === 0){
+            const tr = document.createElement('tr');
+            tr.innerHTML = `<td colspan="10" class="muted">No tracked data yet</td>`;
+            tbody.appendChild(tr);
+            return;
+          }
+          rows.forEach(row=>{
             const tr = document.createElement('tr');
             const isFiniteNum = (v)=> (typeof v === 'number' && isFinite(v));
             const fmt = (v, d=8)=> (isFiniteNum(v) && v!==0 ? Number(v).toFixed(d) : '-')
