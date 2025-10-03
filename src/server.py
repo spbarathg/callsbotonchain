@@ -282,8 +282,22 @@ def create_app() -> Flask:
             except Exception:
                 return None
 
+        # Simple cache hit% derived from process logs (hits / (hits+misses))
+        def _cache_hit_pct(proc_rows: List[Dict[str, Any]]) -> float | None:
+            try:
+                window = proc_rows[-1000:] if len(proc_rows) > 1000 else proc_rows
+                hits = sum(1 for r in window if r.get("type") == "stats_cache_hit")
+                misses = sum(1 for r in window if r.get("type") == "stats_cache_miss")
+                total = hits + misses
+                if total <= 0:
+                    return None
+                return round(100.0 * float(hits) / float(total), 1)
+            except Exception:
+                return None
+
         metrics = {
             "api_error_pct": _api_error_pct(process),
+            "cache_hit_pct": _cache_hit_pct(process),
         }
 
         data = {

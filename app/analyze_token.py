@@ -238,11 +238,20 @@ def get_token_stats(token_address: str) -> Dict[str, Any]:
             cache_hit()
         except Exception:
             pass
+        try:
+            # Emit lightweight process log so the web can compute cache hit% without Prometheus
+            log_process({"type": "stats_cache_hit", "token": token_address})
+        except Exception:
+            pass
         return cached
     else:
         try:
             from app.metrics import cache_miss
             cache_miss()
+        except Exception:
+            pass
+        try:
+            log_process({"type": "stats_cache_miss", "token": token_address})
         except Exception:
             pass
     # Enforce budget before hitting paid APIs; fall back to DexScreener if blocked
