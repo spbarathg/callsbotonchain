@@ -964,12 +964,12 @@ def create_app() -> Flask:
             cur = con.cursor()
             cur.execute("PRAGMA busy_timeout=5000")
             cur.execute(query)
-                cols = [d[0] for d in (cur.description or [])]
+            cols = [d[0] for d in (cur.description or [])]
             fetched = cur.fetchall() or []
-                rows = [
+            rows = [
                 {cols[i]: val for i, val in enumerate(r)} if cols else {}
-                    for r in fetched
-                ]
+                for r in fetched
+            ]
             cur.close(); con.close()
             _admin_audit("/api/sql", True, {"query": query[:200], "target": target, "db": path})
             return jsonify({"ok": True, "columns": cols, "rows": rows, "db": path})
