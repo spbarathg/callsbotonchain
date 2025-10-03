@@ -13,6 +13,7 @@
       <span>Kill Switch: <b id="status_kill">?</b></span>
       <span>Cache Hit%: <b id="status_cache">?</b></span>
       <span>API Errors%: <b id="status_api_err">?</b></span>
+      <span>Last: <b id="status_last">-</b></span>
     </div>
     <header class="topbar">
       <div class="brand">CALLSBOTONCHAIN</div>
@@ -282,6 +283,7 @@
             const apiErr = (m.api_error_pct!=null)? (m.api_error_pct.toFixed? m.api_error_pct.toFixed(1): m.api_error_pct): null;
             document.getElementById('status_api_err').textContent = apiErr!=null ? String(apiErr)+'%' : '-';
             document.getElementById('status_cache').textContent = (m.cache_hit_pct!=null) ? String(m.cache_hit_pct)+'%' : '-';
+            document.getElementById('status_last').textContent = new Date().toLocaleTimeString();
           } catch (e) {}
         } catch (e) {
           console.error('Failed to fetch stats', e);

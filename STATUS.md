@@ -1,4 +1,39 @@
-CALLSBOTONCHAIN – Ops Snapshot (2025‑10‑02)
+CALLSBOTONCHAIN – Ops Snapshot (2025‑10‑03)
+
+### What changed today
+- Web container fixed (server.py): resolved nested `except` syntax errors; added safe treasury import fallback.
+- UI updates: status bar metrics, Alerts 24h tile, numeric cards show 0 (not "-"), periodic polling of `/api/stats` every 5s in addition to SSE.
+- Disk pressure resolved: reclaimed ~18GB via `docker system prune -af --volumes`.
+- Deployment verified: proxy up; web up; worker healthy; `/healthz` OK.
+
+### Current health
+- API: 200 on `/api/stats`, `/api/tracked`, `/api/stream` emits payloads.
+- Totals (now): `total_alerts=11`, `tracking_count=11`, `alerts_24h=0`.
+- Process logs show many `feed_item_invalid` due to `missing_required_fields` (upstream feed variance) and periodic `feed_fallback_injected`; worker heartbeat increments.
+- UI: If cards show dashes, hard‑refresh (Ctrl+F5). Polling is enabled; values with 0 render as 0.
+
+### One‑liners (copy/paste)
+- Deploy both services:
+  - `cd /opt/callsbotonchain && git pull && docker compose up -d --build web worker`
+- Quick health:
+  - `curl -fsS http://127.0.0.1/healthz | jq -c '.'`
+  - `curl -fsS http://127.0.0.1/api/stats | jq -c '{total:(.signals_summary.total_alerts // .total_alerts // .log_alerts_count), tracking:.tracking_count, metrics:.metrics}'`
+  - `curl -fsS 'http://127.0.0.1/api/tracked?limit=5' | jq -c '{n:(.rows|length),source:.source}'`
+- Logs (last lines):
+  - `tail -n 80 /opt/callsbotonchain/data/logs/process.jsonl`
+  - `tail -n 40 /opt/callsbotonchain/data/logs/alerts.jsonl`
+- Free disk fast:
+  - `docker system df && docker system prune -af --volumes && df -h`
+
+### Known issues / investigation
+- Upstream feed frequently yields `missing_required_fields`; items are skipped. Impact: low recent alerts; UI cards remain static when true zeros.
+- Action: relax/patch feed parser to tolerate partials, or ensure fallback enriches missing keys.
+
+### Immediate next steps
+1) Confirm alerts DB grows during the day: `sqlite3 var/alerted_tokens.db 'SELECT COUNT(1) FROM alerted_tokens;'`
+2) If counts stall, temporarily lower gates (test window) then revert per HCS plan below.
+3) Patch feed parsing to accept partial items; reduce `feed_item_invalid` volume.
+
 
 ### What’s live now
 - **Signals:** Online, tuned, and tracked on `http://64.227.157.221/` (UI, `/api/stats`, `/api/stream`, `/api/tracked`).

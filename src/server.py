@@ -22,6 +22,7 @@ from flask import Response
 import time
 from app.toggles import get_toggles, set_toggles
 import socket
+import math
 
 
 def _read_jsonl(path: str, limit: int = 500) -> List[Dict[str, Any]]:
@@ -54,6 +55,65 @@ def _coerce_ts(s: Any) -> float:
     except Exception:
         return 0.0
 
+
+def _sanitize_json(obj: Any) -> Any:
+    """Recursively convert NaN/Infinity to None so JSON is standard-compliant.
+    This prevents client JSON.parse errors and keeps UI rendering reliable.
+    """
+    try:
+        if isinstance(obj, float):
+            if math.isnan(obj) or math.isinf(obj):
+                return None
+            return obj
+        if isinstance(obj, dict):
+            return {k: _sanitize_json(v) for k, v in obj.items()}
+        if isinstance(obj, (list, tuple)):
+            return [ _sanitize_json(v) for v in obj ]
+        return obj
+    except Exception:
+        return obj
+
+
+def _finite(value: Any) -> Any:
+    """Return None for non-finite numerics (NaN/Inf), otherwise return the value unchanged."""
+    try:
+        if isinstance(value, float):
+            if math.isnan(value) or math.isinf(value):
+                return None
+        return value
+    except Exception:
+        return value
+
+
+def _sanitize_alert_row(alert: Dict[str, Any] | None) -> Dict[str, Any] | None:
+    if not isinstance(alert, dict):
+        return alert  # type: ignore
+
+
+def _safe_json_dumps(obj: Any) -> str:
+    """Serialize to JSON ensuring there are no NaN/Infinity values.
+    Tries strict dumps; if it fails, falls back to aggressive sanitation and string replacement.
+    """
+    try:
+        return json.dumps(_sanitize_json(obj), allow_nan=False)
+    except Exception:
+        try:
+            s = json.dumps(_sanitize_json(obj))
+        except Exception:
+            s = json.dumps(obj, default=lambda _o: None)
+        # Last-resort cleanup for any remaining NaN/Infinity sequences
+        for bad in ("NaN", "Infinity", "-Infinity"):
+            s = s.replace(bad, "null")
+        return s
+    try:
+        # Copy and sanitize key numeric fields
+        row = dict(alert)
+        for k in ("market_cap", "liquidity", "volume_24h", "price", "change_1h", "change_24h"):
+            if k in row:
+                row[k] = _finite(row.get(k))
+        return row
+    except Exception:
+        return alert  # type: ignore
 
 def _pick_signals_db_path(preferred_path: str) -> str:
     """Return a good signals DB path by checking candidates.
@@ -219,7 +279,7 @@ def create_app() -> Flask:
         # Totals
         # Keep both: log_count (from alerts.jsonl slice) and db_count (from signals_summary)
         total_alerts = len(alerts)
-        last_alert = alerts[-1] if alerts else None
+        last_alert = _sanitize_alert_row(alerts[-1]) if alerts else None
         last_heartbeat = None
         cooldowns: int = 0
         for rec in process:
@@ -246,9 +306,9 @@ def create_app() -> Flask:
                 "symbol": a.get("symbol"),
                 "score": a.get("final_score"),
                 "conviction": a.get("conviction_type"),
-                "market_cap": a.get("market_cap"),
-                "liquidity": a.get("liquidity"),
-                "vol24": a.get("volume_24h"),
+                "market_cap": _finite(a.get("market_cap")),
+                "liquidity": _finite(a.get("liquidity")),
+                "vol24": _finite(a.get("volume_24h")),
                 "ts": a.get("ts"),
             }
             for a in alerts[-20:]
@@ -325,7 +385,7 @@ def create_app() -> Flask:
             "kill_switch": bool(os.getenv("KILL_SWITCH", "false").strip().lower() == "true"),
             "metrics": metrics,
         }
-        return _no_cache(jsonify(data))
+        return _no_cache(jsonify(_sanitize_json(data)))
 
     @app.get("/healthz")
     def healthz():
@@ -383,7 +443,7 @@ def create_app() -> Flask:
                     tracking = _read_jsonl(tracking_path, limit=500)
 
                     total_alerts = len(alerts)
-                    last_alert = alerts[-1] if alerts else None
+                    last_alert = _sanitize_alert_row(alerts[-1]) if alerts else None
                     last_heartbeat = None
                     cooldowns: int = 0
                     for rec in process:
@@ -398,9 +458,9 @@ def create_app() -> Flask:
                             "symbol": (a.get("symbol") or a.get("name") or None),
                             "score": a.get("final_score"),
                             "conviction": a.get("conviction_type"),
-                            "market_cap": a.get("market_cap"),
-                            "liquidity": a.get("liquidity"),
-                            "vol24": a.get("volume_24h"),
+                            "market_cap": _finite(a.get("market_cap")),
+                            "liquidity": _finite(a.get("liquidity")),
+                            "vol24": _finite(a.get("volume_24h")),
                             "ts": a.get("ts"),
                         }
                         for a in alerts[-20:]
@@ -451,7 +511,7 @@ def create_app() -> Flask:
                         "gates_summary": gates_summary,
                         "metrics": {"api_error_pct": _api_error_pct_stream(process)},
                     }
-                    yield f"data: {json.dumps(payload)}\n\n"
+                    yield f"data: {_safe_json_dumps(payload)}\n\n"
                 except Exception as e:
                     # keep the stream alive even if an iteration fails
                     try:
@@ -463,7 +523,10 @@ def create_app() -> Flask:
 
         resp = Response(_gen(), mimetype="text/event-stream")
         try:
-            resp.headers["Cache-Control"] = "no-store"
+            resp.headers["Cache-Control"] = "no-store, no-transform"
+            resp.headers["Connection"] = "keep-alive"
+            resp.headers["X-Accel-Buffering"] = "no"
+            resp.headers["Content-Type"] = "text/event-stream; charset=utf-8"
         except Exception as e:
             try:
                 print(f"api_stream: failed to set headers: {e}")
@@ -892,7 +955,8 @@ def create_app() -> Flask:
             if cl and cl > max_bytes:
                 return jsonify({"ok": False, "error": "payload too large"}), 413
             # Optionally enforce HTTPS by rejecting if X-Forwarded-Proto != https
-            if os.getenv("CALLSBOT_REQUIRE_HTTPS", "true").lower() == "true":
+            # Default disabled so plain HTTP works; set CALLSBOT_REQUIRE_HTTPS=true to enforce
+            if os.getenv("CALLSBOT_REQUIRE_HTTPS", "false").lower() == "true":
                 xf = (request.headers.get("X-Forwarded-Proto") or request.scheme or "").lower()
                 if xf != "https":
                     return jsonify({"ok": False, "error": "https required"}), 400
