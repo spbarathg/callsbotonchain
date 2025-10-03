@@ -205,9 +205,13 @@
       }
       function tokenLinks(addr){
         const t = addr || '';
-        const short = (t||'').slice(0,8) + '...';
+        if (!t || t.length < 20) {
+          // If token is missing or too short, show clear error
+          return `<span style="color:#ff6b6b;">INVALID</span>`;
+        }
+        const short = t.slice(0,8) + '...' + t.slice(-4);
         // Render clickable CA that resolves to the correct Axiom link at click time
-        return `<a href="https://axiom.trade/?search=${encodeURIComponent(t)}" data-token="${encodeURIComponent(t)}" onclick="onAxiomClick(event)" rel="noopener noreferrer"><code>${short}</code></a>`;
+        return `<a href="https://axiom.trade/?search=${encodeURIComponent(t)}" data-token="${encodeURIComponent(t)}" onclick="onAxiomClick(event)" rel="noopener noreferrer" title="${t}"><code>${short}</code></a>`;
       }
       function applyStats(data){
         const sig = data.signals_summary || {};
