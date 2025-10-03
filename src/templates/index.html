@@ -212,8 +212,8 @@
         if (sig.alerts_24h != null) {
           document.getElementById('alerts_24h').textContent = sig.alerts_24h;
         }
-        document.getElementById('cooldowns').textContent = data.cooldowns ?? '-';
-        document.getElementById('tracking_count').textContent = data.tracking_count ?? '-';
+        document.getElementById('cooldowns').textContent = (data.cooldowns != null) ? String(data.cooldowns) : '0';
+        document.getElementById('tracking_count').textContent = (data.tracking_count != null) ? String(data.tracking_count) : '0';
 
         const hb = data.last_heartbeat || {};
         const cycle = hb.cycle || '-';
