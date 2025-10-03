@@ -479,7 +479,7 @@ def create_app() -> Flask:
         except Exception as e:
             try:
                 print(f"api_logs: bad request args: {e}")
-        except Exception:
+            except Exception:
                 pass
             log_type = "combined"; limit = 300
 
