@@ -21,8 +21,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy source
 COPY . .
 
-# Create non-root user
-RUN useradd -m -u 10001 appuser \
+# Create non-root user (idempotent in case base image already contains it)
+RUN (id -u appuser >/dev/null 2>&1 || useradd -m -u 10001 appuser) \
  && mkdir -p /app/var /app/data/logs \
  && chown -R appuser:appuser /app
 
