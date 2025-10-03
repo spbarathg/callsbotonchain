@@ -177,6 +177,7 @@
         document.getElementById(`tab-${name}`)?.classList.add('visible');
         const title = name.charAt(0).toUpperCase()+name.slice(1);
         const el = document.getElementById('page_title'); if (el) el.textContent = title;
+        if (name === 'tracked') { try { fetchTracked(); } catch (e) {} }
       }
       document.querySelectorAll('.nav-link').forEach(a=>a.addEventListener('click', e=>{e.preventDefault();showTab(a.dataset.tab);}));
       showTab('dashboard');
@@ -398,8 +399,9 @@
           tbody.innerHTML = '';
           (data.rows||[]).forEach(row=>{
             const tr = document.createElement('tr');
-            const fmt = (v, d=8)=> (v!=null && v!==0 ? Number(v).toFixed(d) : '-')
-            const fmtMoney = (v)=> (v!=null && v!==0 ? ('$'+Number(v).toLocaleString()) : '-')
+            const isFiniteNum = (v)=> (typeof v === 'number' && isFinite(v));
+            const fmt = (v, d=8)=> (isFiniteNum(v) && v!==0 ? Number(v).toFixed(d) : '-')
+            const fmtMoney = (v)=> (isFiniteNum(v) && v!==0 ? ('$'+Number(v).toLocaleString()) : '-')
             tr.innerHTML = `
               <td>${tokenLinks(row.token)}</td>
               <td>${row.alerted_at||'-'}</td>

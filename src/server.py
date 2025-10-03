@@ -745,8 +745,8 @@ def create_app() -> Flask:
                     def _val(rec: Dict[str, Any], key: str) -> Any:
                         return None if not rec else rec.get(key)
 
-                    first_price = _val(first_rec, "price")
-                    last_price = _val(last_rec, "price")
+                    first_price = _finite(_val(first_rec, "price"))
+                    last_price = _finite(_val(last_rec, "price"))
                     peak_price = None
                     if tlist:
                         # Prefer provided peak_price else max price
@@ -771,8 +771,8 @@ def create_app() -> Flask:
                         if not first_price:
                             first_price = last_price or peak_price
 
-                    first_mcap = _val(first_rec, "market_cap")
-                    last_mcap = _val(last_rec, "market_cap")
+                    first_mcap = _finite(_val(first_rec, "market_cap"))
+                    last_mcap = _finite(_val(last_rec, "market_cap"))
                     peak_mcap = None
                     if tlist:
                         try:
@@ -786,8 +786,8 @@ def create_app() -> Flask:
                         except Exception:
                             peak_mcap = None
 
-                    last_liq = _val(last_rec, "liquidity")
-                    last_vol24 = _val(last_rec, "vol24")
+                    last_liq = _finite(_val(last_rec, "liquidity"))
+                    last_vol24 = _finite(_val(last_rec, "vol24"))
 
                     peak_multiple = None
                     last_multiple = None
