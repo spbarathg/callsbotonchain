@@ -31,6 +31,10 @@
           <div class="value" id="total_alerts">-</div>
         </div>
         <div class="card">
+          <div class="label">Alerts 24h</div>
+          <div class="value" id="alerts_24h">-</div>
+        </div>
+        <div class="card">
           <div class="label">Cooldowns</div>
           <div class="value" id="cooldowns">-</div>
         </div>
@@ -204,6 +208,9 @@
       function applyStats(data){
         const sig = data.signals_summary || {};
         document.getElementById('total_alerts').textContent = (sig.total_alerts ?? data.total_alerts) ?? '-';
+        if (sig.alerts_24h != null) {
+          document.getElementById('alerts_24h').textContent = sig.alerts_24h;
+        }
         document.getElementById('cooldowns').textContent = data.cooldowns ?? '-';
         document.getElementById('tracking_count').textContent = data.tracking_count ?? '-';
 
