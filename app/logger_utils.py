@@ -41,7 +41,10 @@ def mask_secret(value: Optional[str], *, show: int = 4) -> str:
 
 def _sanitize_obj(obj: Any) -> Any:
     """Deep-copy sanitize of objects for logging: redact sensitive keys and headers.
-    - Redacts keys: authorization, x-api-key, x-callsbot-admin-key, api_key, token, password, secret
+    - Redacts auth/secret material but PRESERVES on-chain token addresses.
+    - Redacted keys (case-insensitive): authorization, x-api-key, x-callsbot-admin-key,
+      api_key, apikey, password, secret, and any key that ends with "_token" EXCEPT
+      plain "token" and "token_address" which are legitimate data fields for the app.
     - Applies recursively to dicts/lists
     """
     try:
@@ -49,7 +52,16 @@ def _sanitize_obj(obj: Any) -> Any:
             out: Dict[str, Any] = {}
             for k, v in obj.items():
                 lk = str(k).lower()
-                if lk in ("authorization", "x-api-key", "x-callsbot-admin-key", "api_key", "apikey", "token", "password", "secret") or ("authorization" in lk) or ("api-key" in lk) or ("admin-key" in lk):
+                # Determine if key should be redacted
+                redact = False
+                if lk in ("authorization", "x-api-key", "x-callsbot-admin-key", "api_key", "apikey", "password", "secret"):
+                    redact = True
+                if ("authorization" in lk) or ("api-key" in lk) or ("admin-key" in lk):
+                    redact = True
+                # Generic *_token secrets, but do NOT redact plain 'token' fields or 'token_address'
+                if (lk.endswith("_token") or lk.endswith("-token")) and lk not in ("token", "token_address"):
+                    redact = True
+                if redact:
                     out[k] = mask_secret(str(v) if v is not None else "")
                 else:
                     out[k] = _sanitize_obj(v)

@@ -88,6 +88,22 @@ def _finite(value: Any) -> Any:
 def _sanitize_alert_row(alert: Dict[str, Any] | None) -> Dict[str, Any] | None:
     if not isinstance(alert, dict):
         return alert  # type: ignore
+    # Ensure alert rows have finite numeric values for UI rendering
+    try:
+        row = dict(alert)
+        for k in (
+            "market_cap",
+            "liquidity",
+            "volume_24h",
+            "price",
+            "change_1h",
+            "change_24h",
+        ):
+            if k in row:
+                row[k] = _finite(row.get(k))
+        return row
+    except Exception:
+        return alert  # type: ignore
 
 
 def _safe_json_dumps(obj: Any) -> str:
@@ -550,12 +566,18 @@ def create_app() -> Flask:
         process = _read_jsonl(process_path, limit=max(500, limit))
         tracking = _read_jsonl(tracking_path, limit=max(500, limit))
 
+        def _san_list(rows):
+            try:
+                return [_sanitize_json(r) for r in rows]
+            except Exception:
+                return rows
+
         if log_type == "alerts":
-            return _no_cache(jsonify({"ok": True, "rows": alerts[-limit:]}))
+            return _no_cache(jsonify({"ok": True, "rows": _san_list(alerts[-limit:])}))
         if log_type == "process":
-            return _no_cache(jsonify({"ok": True, "rows": process[-limit:]}))
+            return _no_cache(jsonify({"ok": True, "rows": _san_list(process[-limit:])}))
         if log_type == "tracking":
-            return _no_cache(jsonify({"ok": True, "rows": tracking[-limit:]}))
+            return _no_cache(jsonify({"ok": True, "rows": _san_list(tracking[-limit:])}))
 
         # combined view
         def _tag(rows, tag):
@@ -565,7 +587,7 @@ def create_app() -> Flask:
             return out
         combined = _tag(alerts, "alerts") + _tag(process, "process") + _tag(tracking, "tracking")
         combined.sort(key=lambda r: _coerce_ts(r.get("ts")), reverse=True)
-        return _no_cache(jsonify({"ok": True, "rows": combined[:limit]}))
+        return _no_cache(jsonify({"ok": True, "rows": _san_list(combined[:limit])}))
 
     @app.get("/api/tracked")
     def api_tracked():
@@ -579,6 +601,14 @@ def create_app() -> Flask:
             signals_db = _pick_signals_db_path(default_db)
             con = sqlite3.connect(signals_db, timeout=5)
             cur = con.cursor()
+            # Detect optional columns for broad compatibility across historical DBs
+            has_conviction_col: bool = False
+            try:
+                cur.execute("PRAGMA table_info('alerted_tokens')")
+                cols = {str(r[1]) for r in (cur.fetchall() or [])}
+                has_conviction_col = ("conviction_type" in cols)
+            except Exception:
+                has_conviction_col = False
             # If stats table doesn't exist yet, return alerts-only rows
             try:
                 cur.execute("SELECT COUNT(1) FROM sqlite_master WHERE type='table' AND name='alerted_token_stats'")
@@ -590,18 +620,33 @@ def create_app() -> Flask:
                     pass
                 has_stats = False
             if not has_stats:
-                cur.execute(
-                    """
-                    SELECT t.token_address,
-                           t.alerted_at,
-                           t.final_score,
-                           t.conviction_type
-                    FROM alerted_tokens t
-                    ORDER BY datetime(t.alerted_at) DESC
-                    LIMIT ?
-                    """,
-                    (limit,)
-                )
+                # Older schemas may not have conviction_type; substitute NULL when absent
+                if has_conviction_col:
+                    cur.execute(
+                        """
+                        SELECT t.token_address,
+                               t.alerted_at,
+                               t.final_score,
+                               t.conviction_type
+                        FROM alerted_tokens t
+                        ORDER BY datetime(t.alerted_at) DESC
+                        LIMIT ?
+                        """,
+                        (limit,)
+                    )
+                else:
+                    cur.execute(
+                        """
+                        SELECT t.token_address,
+                               t.alerted_at,
+                               t.final_score,
+                               NULL AS conviction_type
+                        FROM alerted_tokens t
+                        ORDER BY datetime(t.alerted_at) DESC
+                        LIMIT ?
+                        """,
+                        (limit,)
+                    )
                 for r in cur.fetchall() or []:
                     rows.append({
                         "token": r[0],
@@ -625,29 +670,54 @@ def create_app() -> Flask:
                 cur.close(); con.close()
                 return _no_cache(jsonify({"ok": True, "rows": rows, "source": "db_alerts_only"}))
             try:
-                cur.execute(
-                    """
-                    SELECT t.token_address,
-                           t.alerted_at,
-                           t.final_score,
-                           t.conviction_type,
-                           s.first_price_usd,
-                           NULLIF(s.last_price_usd,0),
-                           NULLIF(s.peak_price_usd,0),
-                           s.first_market_cap_usd,
-                           NULLIF(s.last_market_cap_usd,0),
-                           NULLIF(s.peak_market_cap_usd,0),
-                           NULLIF(s.last_liquidity_usd,0),
-                           NULLIF(s.last_volume_24h_usd,0),
-                           s.peak_drawdown_pct,
-                           s.outcome
-                    FROM alerted_tokens t
-                    LEFT JOIN alerted_token_stats s ON s.token_address = t.token_address
-                    ORDER BY datetime(COALESCE(s.last_checked_at, t.alerted_at)) DESC
-                    LIMIT ?
-                    """,
-                    (limit,)
-                )
+                if has_conviction_col:
+                    cur.execute(
+                        """
+                        SELECT t.token_address,
+                               t.alerted_at,
+                               t.final_score,
+                               t.conviction_type,
+                               s.first_price_usd,
+                               NULLIF(s.last_price_usd,0),
+                               NULLIF(s.peak_price_usd,0),
+                               s.first_market_cap_usd,
+                               NULLIF(s.last_market_cap_usd,0),
+                               NULLIF(s.peak_market_cap_usd,0),
+                               NULLIF(s.last_liquidity_usd,0),
+                               NULLIF(s.last_volume_24h_usd,0),
+                               s.peak_drawdown_pct,
+                               s.outcome
+                        FROM alerted_tokens t
+                        LEFT JOIN alerted_token_stats s ON s.token_address = t.token_address
+                        ORDER BY datetime(COALESCE(s.last_checked_at, t.alerted_at)) DESC
+                        LIMIT ?
+                        """,
+                        (limit,)
+                    )
+                else:
+                    cur.execute(
+                        """
+                        SELECT t.token_address,
+                               t.alerted_at,
+                               t.final_score,
+                               NULL AS conviction_type,
+                               s.first_price_usd,
+                               NULLIF(s.last_price_usd,0),
+                               NULLIF(s.peak_price_usd,0),
+                               s.first_market_cap_usd,
+                               NULLIF(s.last_market_cap_usd,0),
+                               NULLIF(s.peak_market_cap_usd,0),
+                               NULLIF(s.last_liquidity_usd,0),
+                               NULLIF(s.last_volume_24h_usd,0),
+                               s.peak_drawdown_pct,
+                               s.outcome
+                        FROM alerted_tokens t
+                        LEFT JOIN alerted_token_stats s ON s.token_address = t.token_address
+                        ORDER BY datetime(COALESCE(s.last_checked_at, t.alerted_at)) DESC
+                        LIMIT ?
+                        """,
+                        (limit,)
+                    )
             except Exception as e:
                 # Fallback for older schemas missing some columns; select a compatible subset
                 try:
