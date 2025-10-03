@@ -642,7 +642,7 @@ def create_app() -> Flask:
         except Exception as e:
             try:
                 print(f"api_tracked: db error: {e}")
-        except Exception:
+            except Exception:
                 pass
             rows = []
 
@@ -1004,7 +1004,7 @@ def create_app() -> Flask:
         except Exception as e:
             try:
                 print(f"api_paper: bad max_mcap: {e}")
-        except Exception:
+            except Exception:
                 pass
             max_mcap_val = None
 
