@@ -502,3 +502,43 @@ def ensure_indices() -> None:
         pass
     finally:
         conn.close()
+
+
+def repair_first_prices_from_alerts() -> int:
+    """Backfill first_price_usd from alerts.jsonl for tokens with 0 or NULL first_price."""
+    import json
+    import os
+    
+    conn = _get_conn()
+    c = conn.cursor()
+    
+    # Read alerts.jsonl to extract baseline prices
+    alerts_file = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data', 'logs', 'alerts.jsonl')
+    alerts = {}
+    try:
+        with open(alerts_file, 'r') as f:
+            for line in f:
+                try:
+                    obj = json.loads(line)
+                    if 'token_address' in obj and 'price' in obj:
+                        price = float(obj.get('price', 0) or 0)
+                        if price > 0:
+                            alerts[obj['token_address']] = price
+                except:
+                    pass
+    except Exception:
+        pass
+    
+    # Update first_price_usd for tokens with 0 or NULL
+    updated = 0
+    for token, price in alerts.items():
+        c.execute(
+            "UPDATE alerted_token_stats SET first_price_usd = ? WHERE token_address = ? AND (first_price_usd IS NULL OR first_price_usd = 0)",
+            (price, token)
+        )
+        if c.rowcount > 0:
+            updated += 1
+    
+    conn.commit()
+    conn.close()
+    return updated
