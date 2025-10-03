@@ -180,6 +180,8 @@
         if (name === 'tracked') { try { fetchTracked(); } catch (e) {} }
       }
       document.querySelectorAll('.nav-link').forEach(a=>a.addEventListener('click', e=>{e.preventDefault();showTab(a.dataset.tab);}));
+      // Prime both data sources on load to avoid initial empties
+      setTimeout(()=>{ try{ fetchStats(); }catch(e){} try{ fetchTracked(); }catch(e){} }, 100);
       showTab('dashboard');
 
       let sseConnected = false;
