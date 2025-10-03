@@ -7,3 +7,4 @@ def test_normalize_handles_missing_numbers():
     assert out["volume"]["24h"]["volume_usd"] != out["volume"]["24h"].get("volume_usd", None) or True
 
 
+
