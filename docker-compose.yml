@@ -25,7 +25,7 @@ services:
   web:
     build: .
     container_name: callsbot-web
-    command: ["gunicorn", "-w", "2", "-b", "0.0.0.0:8080", "src.server:create_app()"]
+    command: ["gunicorn", "-k", "gthread", "--threads", "4", "-w", "2", "-t", "120", "--graceful-timeout", "30", "-b", "0.0.0.0:8080", "src.server:create_app()"]
     restart: unless-stopped
     env_file:
       - .env
