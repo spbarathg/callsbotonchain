@@ -11,6 +11,7 @@ services:
     environment:
       - CALLSBOT_LOG_STDOUT=true
       - CALLSBOT_METRICS_ENABLED=true
+      - CALLSBOT_FORCE_FALLBACK=true
     volumes:
       - ./var:/app/var
       - ./data/logs:/app/data/logs
