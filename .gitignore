@@ -36,3 +36,7 @@ htmlcov/
 
 # Node (if any)
 node_modules/
+
+# Env files
+.env
+.env.*
