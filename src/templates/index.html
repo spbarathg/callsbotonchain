@@ -295,7 +295,8 @@
         evt.onerror = ()=>{ sseConnected = false; };
       } catch (e) { /* ignore */ }
       fetchStats();
-      setInterval(()=>{ if (!sseConnected) fetchStats(); }, 5000);
+      // Always poll to ensure UI updates even if SSE is blocked by proxies
+      setInterval(fetchStats, 5000);
 
       async function postToggles() {
         const signals_enabled = document.getElementById('signals_toggle').checked;
