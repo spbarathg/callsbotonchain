@@ -328,7 +328,10 @@ def process_feed_item(tx: dict, is_smart_cycle: bool, session_alerted_tokens: se
 
 	token_address, usd_value = _select_token_and_usd(tx)
 	tx["usd_value"] = usd_value
-	smart_involved = tx_has_smart_money(tx)
+	# FIX: Trust the feed cycle instead of looking for non-existent metadata
+	# When smart_money=true is passed to Cielo API, it filters BY smart wallets
+	# but doesn't include wallet metadata in responses to flag them
+	smart_involved = is_smart_cycle or tx_has_smart_money(tx)
 	if (not token_address) or (usd_value == 0):
 		return "skipped", None, 0, None
 	if token_address in session_alerted_tokens or has_been_alerted(token_address):
