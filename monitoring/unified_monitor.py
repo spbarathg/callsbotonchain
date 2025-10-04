@@ -35,33 +35,61 @@ def sync_database_from_server():
         if LOCAL_DB_PATH.exists():
             try:
                 LOCAL_DB_PATH.unlink()
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"  ⚠️  Could not remove old database: {e}")
         
         # Create a SQLite checkpoint on server first to ensure consistency
+        print(f"  ⏳ Creating WAL checkpoint on server...")
         checkpoint_cmd = f"ssh {SERVER} 'cd /opt/callsbotonchain && sqlite3 {SERVER_DB_PATH} \"PRAGMA wal_checkpoint(FULL);\"'"
         subprocess.run(checkpoint_cmd, shell=True, capture_output=True, timeout=10)
         
-        # Use scp with compression and force overwrite
-        # Convert Windows path to use backslashes
-        local_path_str = str(LOCAL_DB_PATH).replace('/', '\\')
+        # Method 1: Try using ssh with cat (more reliable on Windows)
+        print(f"  ⏳ Downloading database via SSH stream...")
+        ssh_cmd = f'ssh {SERVER} "cat {SERVER_DB_PATH}"'
         
         result = subprocess.run(
-            ["scp", "-C", f"{SERVER}:{SERVER_DB_PATH}", local_path_str],
+            ssh_cmd,
+            shell=True,
             capture_output=True,
-            text=True,
-            timeout=60,
-            shell=False
+            timeout=60
         )
         
-        if result.returncode == 0 and LOCAL_DB_PATH.exists():
-            file_size = LOCAL_DB_PATH.stat().st_size / 1024  # KB
-            print(f"  ✅ Database synced successfully ({file_size:.1f} KB)")
-            return True
+        if result.returncode == 0 and result.stdout:
+            # Write the binary data to file
+            with open(LOCAL_DB_PATH, 'wb') as f:
+                f.write(result.stdout)
+            
+            if LOCAL_DB_PATH.exists() and LOCAL_DB_PATH.stat().st_size > 0:
+                file_size = LOCAL_DB_PATH.stat().st_size / 1024  # KB
+                print(f"  ✅ Database synced successfully ({file_size:.1f} KB)")
+                return True
+            else:
+                print(f"  ⚠️  Database file is empty or missing after download")
+                return False
         else:
-            error_msg = result.stderr.strip() if result.stderr else "Unknown error"
+            error_msg = result.stderr.decode('utf-8', errors='ignore').strip() if result.stderr else "Unknown error"
             print(f"  ⚠️  Database sync failed: {error_msg}")
-            return False
+            
+            # Fallback: Try scp with quoted path
+            print(f"  ⏳ Trying alternative method (scp)...")
+            local_path_unix = str(LOCAL_DB_PATH).replace('\\', '/')
+            scp_cmd = f'scp -C {SERVER}:{SERVER_DB_PATH} "{local_path_unix}"'
+            
+            result = subprocess.run(
+                scp_cmd,
+                shell=True,
+                capture_output=True,
+                timeout=60
+            )
+            
+            if result.returncode == 0 and LOCAL_DB_PATH.exists():
+                file_size = LOCAL_DB_PATH.stat().st_size / 1024  # KB
+                print(f"  ✅ Database synced successfully via scp ({file_size:.1f} KB)")
+                return True
+            else:
+                print(f"  ❌ Both sync methods failed")
+                return False
+                
     except subprocess.TimeoutExpired:
         print(f"  ⚠️  Database sync timed out (network issue?)")
         return False
