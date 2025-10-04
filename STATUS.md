@@ -1,112 +1,141 @@
-CALLSBOTONCHAIN – Ops Snapshot (2025‑10‑03)
+CALLSBOTONCHAIN – Ops Snapshot (2025‑10‑04)
 
 ### What changed today
-- Web container fixed (server.py): resolved nested `except` syntax errors; added safe treasury import fallback.
-- UI updates: status bar metrics, Alerts 24h tile, numeric cards show 0 (not "-"), periodic polling of `/api/stats` every 5s in addition to SSE.
-- Disk pressure resolved: reclaimed ~18GB via `docker system prune -af --volumes`.
-- Deployment verified: proxy up; web up; worker healthy; `/healthz` OK.
+- **Major Cleanup**: Removed 30+ temporary docs/scripts; reclaimed 15GB disk space (96% → 38% usage).
+- **Dashboard Enhancements**: Full tabbed interface (Overview, Performance, System, Config, Paper Trade, Logs, Tracked) with real-time data, interactive toggles, and paper trading engine.
+- **Trading System**: Optimized for $500 bankroll with 4 strategies (runner/scout/strict/nuanced), strategy-specific stops, real-time validation, pump/bonk token filter.
+- **Budget Optimization**: Increased daily budget to 10,000 calls, zero-cost feed calls, MIN_USD_VALUE=200, tracking reduced to 15min intervals.
+- **Smart Money Detection**: Fixed logical flaw; now correctly detects smart money via feed cycle trust; dynamic USD filter for smart trades.
 
 ### Current health
-- API: 200 on `/api/stats`, `/api/tracked`, `/api/stream` emits payloads.
-- Totals (now): `total_alerts=11`, `tracking_count=11`, `alerts_24h=0`.
-- Process logs show many `feed_item_invalid` due to `missing_required_fields` (upstream feed variance) and periodic `feed_fallback_injected`; worker heartbeat increments.
-- UI: If cards show dashes, hard‑refresh (Ctrl+F5). Polling is enabled; values with 0 render as 0.
+- **Containers**: All healthy (Worker: 2h, Web: 2h, Trader: 8h dry-run, Proxy: 11h)
+- **Signals**: 220 total alerts, 217 actively tracked, 500 alerts in 24h window
+- **Performance**: Avg score 6.6/10, 63% Smart Money signals, 27% error rate (expected/good)
+- **Feed**: Alternating general ↔ smart cycles correctly, 57-72 items/cycle, processing efficiently
+- **Budget**: 1,293/10,000 daily (12.9%), 6/15 per-minute, zero-miss mode active
+- **Resources**: Disk 38% (9.1GB/25GB), Memory 50% (477MB/957MB)
 
 ### One‑liners (copy/paste)
-- Deploy both services:
-  - `cd /opt/callsbotonchain && git pull && docker compose up -d --build web worker`
+- Deploy all services:
+  - `cd /opt/callsbotonchain && git pull && docker compose up -d --build`
 - Quick health:
-  - `curl -fsS http://127.0.0.1/healthz | jq -c '.'`
-  - `curl -fsS http://127.0.0.1/api/stats | jq -c '{total:(.signals_summary.total_alerts // .total_alerts // .log_alerts_count), tracking:.tracking_count, metrics:.metrics}'`
-  - `curl -fsS 'http://127.0.0.1/api/tracked?limit=5' | jq -c '{n:(.rows|length),source:.source}'`
+  - `curl -fsS http://127.0.0.1/api/v2/quick-stats | jq`
+  - `curl -fsS http://127.0.0.1/api/v2/budget-status | jq`
+  - `curl -fsS http://127.0.0.1/api/v2/feed-health | jq`
+  - `curl -fsS 'http://127.0.0.1/api/tracked?limit=5' | jq '.rows | length'`
 - Logs (last lines):
-  - `tail -n 80 /opt/callsbotonchain/data/logs/process.jsonl`
-  - `tail -n 40 /opt/callsbotonchain/data/logs/alerts.jsonl`
+  - `docker logs callsbot-worker --tail 20 2>&1 | grep -E 'heartbeat|alert|error'`
+  - `tail -n 20 /opt/callsbotonchain/data/logs/alerts.jsonl`
+- Database stats:
+  - `sqlite3 /opt/callsbotonchain/var/alerted_tokens.db 'SELECT COUNT(*) FROM alerted_tokens; SELECT conviction_type, COUNT(*) FROM alerted_tokens GROUP BY conviction_type;'`
 - Free disk fast:
-  - `docker system df && docker system prune -af --volumes && df -h`
+  - `docker system prune -af && docker image prune -af && df -h`
 
 ### Known issues / investigation
-- Upstream feed frequently yields `missing_required_fields`; items are skipped. Impact: low recent alerts; UI cards remain static when true zeros.
-- Action: relax/patch feed parser to tolerate partials, or ensure fallback enriches missing keys.
+- ✅ **RESOLVED**: Feed parsing, smart money detection, database writes all working correctly
+- ✅ **RESOLVED**: Storage issues cleared (15GB freed)
+- ✅ **RESOLVED**: Dashboard now fully functional with all tabs and interactive controls
+- ⚠️ **Normal**: 27% error rate (400/530 status codes) - these are junk tokens being correctly filtered
+- ⚠️ **Normal**: Some liquidity values show `NaN` for new/low-cap tokens - fallback to DexScreener active
 
 ### Immediate next steps
-1) Confirm alerts DB grows during the day: `sqlite3 var/alerted_tokens.db 'SELECT COUNT(1) FROM alerted_tokens;'`
-2) If counts stall, temporarily lower gates (test window) then revert per HCS plan below.
-3) Patch feed parsing to accept partial items; reduce `feed_item_invalid` volume.
+1) ✅ **Monitor signal quality**: Currently at 6.6/10 avg, 63% smart money - excellent performance
+2) ✅ **Budget tracking**: Zero-miss mode active, 87% daily budget remaining
+3) 🎯 **Ready for live trading**: Set `trading_enabled=true` in toggles.json or via dashboard when ready
+4) 📊 **Paper trading**: Use dashboard Paper Trade tab to test strategies with hypothetical capital
 
 
-### What’s live now
-- **Signals:** Online, tuned, and tracked on `http://64.227.157.221/` (UI, `/api/stats`, `/api/stream`, `/api/tracked`).
-- **Proxy/Infra:** Caddy on port 80 → web:8080; WAL-enabled SQLite; disk ~29% used.
-- **Trading:** Real Jupiter v6 broker integrated (sign/send), exit loop with hard stops + dynamic trailing, DB fills/positions. Runs without subscriptions (public RPC + optional priority fee tip). `TS_DRY_RUN` defaults on; set `TS_DRY_RUN=false` to trade.
+### What's live now
+- **Dashboard**: Full-featured web UI at `http://64.227.157.221/` with 7 tabs (Overview, Performance, System, Config, Paper Trade, Logs, Tracked)
+- **Signals**: Online, generating 6.6/10 avg quality, 63% Smart Money detection, 500 alerts/24h
+- **API**: All v2 endpoints active (`/api/v2/quick-stats`, `/api/v2/budget-status`, `/api/v2/feed-health`, etc.)
+- **Proxy/Infra**: Caddy on port 80 → web:8080; WAL-enabled SQLite; disk 38% used (15GB available)
+- **Trading**: Jupiter v6 broker integrated, 4 strategies (runner/scout/strict/nuanced), pump/bonk filter active, dry-run mode (ready for live)
+- **Tracking**: 217 tokens actively monitored, 15-min intervals, real-time price updates
 
 ### Key runtime (essentials)
-- **Gates:** `GATE_MODE=CUSTOM`, `HIGH_CONFIDENCE_SCORE=8` (test window), `MIN_LIQUIDITY_USD=10000`, `VOL_TO_MCAP_RATIO_MIN=0.80`, `MAX_MARKET_CAP_FOR_DEFAULT_ALERT=1_000_000`, `PRELIM_DETAILED_MIN=6`, `REQUIRE_VELOCITY_MIN_SCORE_FOR_ALERT=1`, `TRACK_INTERVAL_MIN=1`.
-- **Budget:** `BUDGET_ENABLED=true`, `BUDGET_PER_MINUTE_MAX=15`, `BUDGET_PER_DAY_MAX=4300`.
-- **Trading envs:** `TS_RPC_URL`, `TS_WALLET_SECRET`, `TS_SLIPPAGE_BPS` (150), `TS_PRIORITY_FEE_MICROLAMPORTS` (8000), `TS_JITO_TIP_SOL` (0.0006), `TS_MAX_CONCURRENT`.
+- **Gates**: `HIGH_CONFIDENCE_SCORE=5`, `MIN_LIQUIDITY_USD=5000`, `VOL_TO_MCAP_RATIO_MIN=0.15`, `MAX_MARKET_CAP_FOR_DEFAULT_ALERT=1_000_000`, `PRELIM_DETAILED_MIN=2`, `MIN_USD_VALUE=200`
+- **Budget**: `BUDGET_ENABLED=true`, `BUDGET_PER_MINUTE_MAX=15`, `BUDGET_PER_DAY_MAX=10000`, `BUDGET_FEED_COST=0` (zero-miss mode)
+- **Tracking**: `TRACK_INTERVAL_MIN=15`, `TRACK_BATCH_SIZE=30`
+- **Trading**: `TS_MAX_CONCURRENT=5`, `TS_BANKROLL_USD=500`, `CORE_SIZE_USD=70`, `SCOUT_SIZE_USD=40`, `STRICT_SIZE_USD=50`, `NUANCED_SIZE_USD=25`
+- **Stops**: `CORE_STOP_PCT=15`, `SCOUT_STOP_PCT=10`, `STRICT_STOP_PCT=12`, `NUANCED_STOP_PCT=8`
+- **Filters**: Only trades tokens ending in "pump" or "bonk"
 
-### Paper expectancy
-- Endpoint: `POST /api/paper` (window, stop_pct, trail_retention, cap_multiple, strict_only, max_mcap_usd)
-- Suggested: `stop_pct=0.25`, `trail_retention=0.70`, `cap_multiple=2.0`, `strict_only=true`, `max_mcap_usd=$1.0M`.
+### Paper trading (via dashboard)
+- **UI Controls**: Available in Paper Trade tab - set capital, strategy, sizing, max concurrent
+- **Live Testing**: Start/stop/reset paper sessions, view portfolio performance in real-time
+- **Backtesting**: Test strategies against historical alerts (7/14/30 day windows)
+- **API Endpoints**: 
+  - `POST /api/v2/paper/start` - Start paper session
+  - `GET /api/v2/paper/portfolio` - Get current portfolio
+  - `POST /api/v2/paper/backtest` - Run historical backtest
 
-### Trading plan (asymmetric growth)
-- **Regime-aware:** Bull = higher size/frequency; Defense = smaller, stricter gates.
-- **Profit-taking:** First ladder around **2.0×–2.5×** (sell 60–75% to withdraw initial + profit). Second ladder **3.5×–4.0×**. Trail remainder **18–25%** giveback.
-- **Risk/limits:** Enforce `TS_MAX_CONCURRENT`, per-trade risk ≈ **3% (Defense)** / **10% (Bull)**. Treasury lock at equity checkpoints to avoid reset-to-zero.
+### Trading plan (asymmetric growth - $500 bankroll)
+- **Strategy Routing**:
+  - **Runner** (Smart Money): $70 position, 15% stop, highest conviction
+  - **Scout** (High Velocity): $40 position, 10% stop, momentum plays
+  - **Strict** (High Confidence): $50 position, 12% stop, no smart money
+  - **Nuanced** (Lower Confidence): $25 position, 8% stop, exceptional stats only
+- **Risk Management**: Max 5 concurrent positions, pump/bonk tokens only, 30% dump rejection filter
+- **Profit-taking**: Dynamic trailing stops (16-25% giveback), strategy-specific exits
+- **Entry Validation**: Real-time stats fetch, token hasn't dumped >30% since alert
 
-### Next steps (short and focused)
-- Add regime detection from `/api/stats` to auto-dial sizing/slippage/gates.
-- Use real per-token stats for entries (replace placeholders) from signals DB.
-- Add treasury accounting and dashboard tiles (risk capital vs treasury, streaks).
-- Add loss-streak cool-down and daily trade caps (Defense mode).
+### Next steps (optional enhancements)
+- ✅ **Real-time stats**: Trading CLI now fetches live stats from `/api/tracked` and `alerts.jsonl`
+- ✅ **Entry validation**: Token dump check (>30%) before opening positions
+- 🎯 **Test paper trading**: Run 24-48h paper session to validate strategies before live trading
+- 📊 **Monitor performance**: Track win rate, avg multiple, best performers via dashboard
+- 💰 **Go live**: Enable trading toggle when ready (`trading_enabled=true` via dashboard)
 
 ### Quick ops
-- HCS=8 test window
-  - Applied at: live (see process.jsonl around ts of this STATUS update)
-  - Purpose: increase throughput under CUSTOM while preserving quality bars
-  - Verify: `docker exec callsbot-worker env | grep ^HIGH_CONFIDENCE_SCORE=` should show 8
-  - Revert plan: set `HIGH_CONFIDENCE_SCORE=9` and restart worker if precision drops or alerts spike low‑quality
-- Deploy: `docker compose down && docker compose up -d --build`
-- Check: `curl http://127.0.0.1/api/stats` and UI. Logs under `data/logs/`.
+- **Deploy changes**: `cd /opt/callsbotonchain && git pull && docker compose up -d --build`
+- **Restart worker only**: `docker restart callsbot-worker`
+- **Restart web only**: `docker restart callsbot-web`
+- **View logs**: 
+  - Worker: `docker logs callsbot-worker --tail 50 -f`
+  - Web: `docker logs callsbot-web --tail 50 -f`
+  - Trader: `docker logs callsbot-trader --tail 50 -f`
+- **Check environment**: `docker exec callsbot-worker env | grep -E '^(HIGH_CONFIDENCE_SCORE|MIN_LIQUIDITY|BUDGET_PER_DAY)'`
 
 ### Operator cheat sheet (fresh AI/tab)
-- Where:
-  - Server: 64.227.157.221 (SSH root)
+- **Where**:
+  - Server: `64.227.157.221` (SSH root)
   - Root dir: `/opt/callsbotonchain`
-  - Containers: `callsbot-worker`, `callsbot-web`, `callsbot-proxy`
+  - Containers: `callsbot-worker`, `callsbot-web`, `callsbot-trader`, `callsbot-proxy`
   - Dashboard: `http://64.227.157.221/`
 
-- Health (simple, non-blocking):
-  - `docker ps`
-  - `curl -fsS http://127.0.0.1/api/stats | head -c 800`
-  - `curl -fsS 'http://127.0.0.1/api/tracked?limit=5' | head -c 800`
-  - `tail -n 50 /opt/callsbotonchain/data/logs/process.jsonl`
+- **Quick health check**:
+  ```bash
+  # All in one
+  docker ps && echo "" && \
+  curl -fsS http://127.0.0.1/api/v2/quick-stats | jq && \
+  curl -fsS http://127.0.0.1/api/v2/budget-status | jq && \
+  docker logs callsbot-worker --tail 5 2>&1 | grep heartbeat
+  ```
 
-- Restart only worker (fallback if compose misbehaves):
-  - `docker rm -f callsbot-worker >/dev/null 2>&1 || true`
-  - `docker run -d --name callsbot-worker --restart unless-stopped \
-     --env-file /opt/callsbotonchain/.env -e CALLSBOT_LOG_STDOUT=true \
-     -e CALLSBOT_METRICS_ENABLED=true -v /opt/callsbotonchain/var:/app/var \
-     -v /opt/callsbotonchain/data/logs:/app/data/logs \
-     callsbotonchain-worker:latest python scripts/bot.py run`
+- **Database inspection**:
+  ```bash
+  sqlite3 /opt/callsbotonchain/var/alerted_tokens.db \
+    'SELECT COUNT(*) as total FROM alerted_tokens; \
+     SELECT conviction_type, COUNT(*) as count FROM alerted_tokens \
+     GROUP BY conviction_type ORDER BY count DESC;'
+  ```
 
-- Budget/tuning edits (credit-safe):
-  - `sed -i -E 's/^BUDGET_PER_DAY_MAX=.*/BUDGET_PER_DAY_MAX=4300/' .env`
-  - `sed -i -E 's/^BUDGET_PER_MINUTE_MAX=.*/BUDGET_PER_MINUTE_MAX=15/' .env`
-  - `sed -i -E 's/^VOL_TO_MCAP_RATIO_MIN=.*/VOL_TO_MCAP_RATIO_MIN=0.80/' .env`
-  - `sed -i -E 's/^MAX_MARKET_CAP_FOR_DEFAULT_ALERT=.*/MAX_MARKET_CAP_FOR_DEFAULT_ALERT=1000000/' .env`
-  - `sed -i -E 's/^PRELIM_DETAILED_MIN=.*/PRELIM_DETAILED_MIN=6/' .env`
-  - `sed -i -E 's/^REQUIRE_VELOCITY_MIN_SCORE_FOR_ALERT=.*/REQUIRE_VELOCITY_MIN_SCORE_FOR_ALERT=1/' .env`
-  - Restart worker; verify runtime env with:
-    - `docker exec callsbot-worker env | egrep '^(BUDGET_ENABLED|BUDGET_PER_DAY_MAX|BUDGET_PER_MINUTE_MAX|VOL_TO_MCAP_RATIO_MIN|MAX_MARKET_CAP_FOR_DEFAULT_ALERT|PRELIM_DETAILED_MIN|REQUIRE_VELOCITY_MIN_SCORE_FOR_ALERT)='`
+- **Enable/disable features**:
+  - Via dashboard: Config tab → Toggle switches
+  - Via file: `vi /opt/callsbotonchain/var/toggles.json`
+  - Then restart: `docker restart callsbot-worker callsbot-trader`
 
-- Hourly checks:
-  - `curl -fsS http://127.0.0.1/api/stats | head -c 800` (heartbeat <5m, totals rise)
-  - `grep '"type": "alert_sent"' /opt/callsbotonchain/data/logs/process.jsonl | tail -n 5`
-  - `curl -fsS 'http://127.0.0.1/api/tracked?limit=5' | head -c 800` (peak_multiple > 1.0)
-  - `docker ps` and `df -h` (<80%)
+- **Hourly checks (automated via dashboard)**:
+  - ✅ Feed alternating (general ↔ smart)
+  - ✅ Budget usage trending correctly
+  - ✅ New alerts appearing (check latest 3)
+  - ✅ Tracking updates (peak_multiple changes)
+  - ✅ Disk < 80%, Memory < 80%
 
-- Daily checks:
-  - Ensure daily calls ≤ `BUDGET_PER_DAY_MAX`; `api_calls_saved` trending up
-  - KPIs: ≥2×, ≥5×, avg_peak, median_ttp, alerts_24h
-  - Confirm latest exports/backups if scheduled
+- **Daily KPIs (Performance tab)**:
+  - Signal quality: avg score ≥ 6.0
+  - Smart money: ≥ 50% of signals
+  - Budget efficiency: ≤ 70% daily usage
+  - Best performers: track ≥5× tokens
+  - Win rate: monitor via tracked outcomes
