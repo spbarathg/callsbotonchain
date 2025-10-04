@@ -38,10 +38,12 @@ def _read_alerts_file(limit: int = 1000) -> List[Dict]:
             lines = f.readlines()
             for line in reversed(lines[-limit:]):
                 try:
-                    alerts.append(json.loads(line.strip()))
-                except:
+                    # Replace NaN with null for valid JSON
+                    line_clean = line.strip().replace(': NaN', ': null')
+                    alerts.append(json.loads(line_clean))
+                except Exception as e:
                     continue
-    except:
+    except Exception as e:
         pass
     return alerts
 
@@ -69,23 +71,36 @@ def _read_process_log(limit: int = 1000) -> List[Dict]:
 
 def get_smart_money_status() -> Dict[str, Any]:
     """Get smart money detection status and performance"""
-    alerts = _read_alerts_file(200)
+    alerts = _read_alerts_file(500)
     
-    # Filter recent (last 24h)
-    cutoff = (datetime.now() - timedelta(hours=24)).isoformat()
-    recent = [a for a in alerts if a.get('ts', '') >= cutoff]
+    if not alerts:
+        return {"status": "no_data"}
+    
+    # Filter recent (last 24h) - use simple time comparison
+    cutoff_ts = (datetime.now() - timedelta(hours=24))
+    recent = []
+    for a in alerts:
+        try:
+            alert_ts = datetime.fromisoformat(a.get('ts', '').replace('Z', '+00:00'))
+            if alert_ts >= cutoff_ts:
+                recent.append(a)
+        except:
+            continue
+    
+    if not recent:
+        return {"status": "no_recent_data"}
     
     # Count smart money
-    smart_alerts = [a for a in recent if a.get('smart_money_detected') == True]
+    smart_alerts = [a for a in recent if a.get('smart_money_detected') == True or a.get('smart_cycle') == True]
     
     # Calculate metrics
     total_recent = len(recent)
     smart_count = len(smart_alerts)
-    smart_percentage = (smart_count / total_recent * 100) if total_recent > 0 else 0
+    smart_percentage = round((smart_count / total_recent * 100), 1) if total_recent > 0 else 0
     
     # Average score for smart money
-    smart_scores = [a.get('final_score', 0) for a in smart_alerts]
-    avg_score = sum(smart_scores) / len(smart_scores) if smart_scores else 0
+    smart_scores = [a.get('final_score', 0) for a in smart_alerts if a.get('final_score')]
+    avg_score = round(sum(smart_scores) / len(smart_scores), 1) if smart_scores else 0
     
     # Perfect scores (10/10)
     perfect_scores = len([s for s in smart_scores if s == 10])
@@ -95,8 +110,8 @@ def get_smart_money_status() -> Dict[str, Any]:
     latest_time = None
     if latest_smart:
         try:
-            ts = datetime.fromisoformat(latest_smart.get('ts', ''))
-            latest_time = (datetime.now() - ts).total_seconds() / 60  # minutes ago
+            ts = datetime.fromisoformat(latest_smart.get('ts', '').replace('Z', '+00:00'))
+            latest_time = int((datetime.now() - ts).total_seconds() / 60)  # minutes ago
         except:
             pass
     
