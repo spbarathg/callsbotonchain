@@ -75,9 +75,6 @@ def fetch_solana_feed(cursor=None, smart_money_only: bool = False) -> Dict[str, 
         "limit": 100,
         "cursor": cursor,
     }
-    # Only include minimum_usd_value if configured > 0
-    if MIN_USD_VALUE and MIN_USD_VALUE > 0:
-        base_params["minimum_usd_value"] = MIN_USD_VALUE
     # Multi-list support: if CIELO_LIST_IDS present, prefer it; else fallback to single CIELO_LIST_ID
     if CIELO_LIST_IDS:
         base_params["list_id"] = ",".join(str(x) for x in CIELO_LIST_IDS)
@@ -93,6 +90,10 @@ def fetch_solana_feed(cursor=None, smart_money_only: bool = False) -> Dict[str, 
             "min_wallet_pnl": "1000",  # Only profitable wallets
             "top_wallets": "true"
         })
+        # CRITICAL FIX: Smart money trades are often smaller but highly strategic
+        # Use a much lower USD filter for smart money to catch early entries
+        if MIN_USD_VALUE and MIN_USD_VALUE > 0:
+            base_params["minimum_usd_value"] = max(50, MIN_USD_VALUE // 4)
         try:
             log_process({
                 "type": "feed_mode",
@@ -101,6 +102,9 @@ def fetch_solana_feed(cursor=None, smart_money_only: bool = False) -> Dict[str, 
         except Exception:
             pass
     else:
+        # Only include minimum_usd_value for general feed
+        if MIN_USD_VALUE and MIN_USD_VALUE > 0:
+            base_params["minimum_usd_value"] = MIN_USD_VALUE
         try:
             log_process({
                 "type": "feed_mode",
