@@ -129,6 +129,11 @@ def run() -> None:
 		if engine.has_position(token):
 			continue
 		
+		# FILTER: Only trade pump.fun or bonk tokens
+		if token and not (token.endswith("pump") or token.endswith("bonk")):
+			engine._log("token_filtered", token=token, reason="not_pump_or_bonk")
+			continue
+		
 		# Fetch real-time stats
 		stats = _fetch_real_stats(token)
 		if not stats:
