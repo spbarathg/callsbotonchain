@@ -298,6 +298,7 @@
         if (name === 'performance') { try { fetchPerformanceV2(); } catch (e) {} }
         if (name === 'system') { try { fetchSystemV2(); } catch (e) {} }
         if (name === 'config') { try { fetchConfigV2(); } catch (e) {} }
+        if (name === 'logs') { try { fetchLogs(); } catch (e) {} }
         if (name === 'paper') { 
           try { fetchPaperV2(); } catch (e) {} 
           startPaperAutoRefresh(); // Start auto-refresh for paper trading
