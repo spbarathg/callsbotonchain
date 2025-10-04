@@ -46,7 +46,8 @@ def request_json(method: str, url: str, *, params: Optional[Dict[str, Any]] = No
         from urllib.parse import urlparse
         host = urlparse(url).hostname or ""
         allow_hosts = {"api.dexscreener.com", "dexscreener.com",
-                       "feed-api.cielo.finance", "api.cielo.finance", "api.geckoterminal.com"}
+                       "feed-api.cielo.finance", "api.cielo.finance", "api.geckoterminal.com",
+                       "api.telegram.org"}
         if host and host not in allow_hosts:
             return {"status_code": None, "error": f"host_not_allowed:{host}"}
     except Exception:
