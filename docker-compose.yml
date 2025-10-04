@@ -47,6 +47,27 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  trader:
+    build: .
+    container_name: callsbot-trader
+    command: ["python", "-m", "tradingSystem.cli", "run"]
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - CALLSBOT_LOG_STDOUT=true
+    volumes:
+      - ./var:/app/var
+      - ./data/logs:/app/data/logs
+    depends_on:
+      - worker
+      - web
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
   caddy:
     image: caddy:2
     container_name: callsbot-proxy

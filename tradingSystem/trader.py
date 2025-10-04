@@ -3,7 +3,7 @@ import os
 from datetime import datetime
 from typing import Dict, Optional
 from .db import init as db_init, create_position, add_fill, update_peak_and_trail, close_position, get_open_qty
-from .config import CORE_STOP_PCT, SCOUT_STOP_PCT, LOG_JSON_PATH, LOG_TEXT_PATH, MAX_CONCURRENT
+from .config import CORE_STOP_PCT, SCOUT_STOP_PCT, STRICT_STOP_PCT, NUANCED_STOP_PCT, LOG_JSON_PATH, LOG_TEXT_PATH, MAX_CONCURRENT
 from .config import DB_PATH
 from .broker import Broker
 
@@ -74,7 +74,16 @@ class TradeEngine:
 			return False
 		peak, trail = update_peak_and_trail(pid, price)
 		strategy = str(data.get("strategy")) if data else "runner"
-		stop_pct = CORE_STOP_PCT if strategy == "runner" else SCOUT_STOP_PCT
+		
+		# Strategy-specific stop loss percentages
+		stop_pct_map = {
+			"runner": CORE_STOP_PCT,
+			"scout": SCOUT_STOP_PCT,
+			"strict": STRICT_STOP_PCT,
+			"nuanced": NUANCED_STOP_PCT,
+		}
+		stop_pct = stop_pct_map.get(strategy, CORE_STOP_PCT)
+		
 		# Hard stop
 		if price <= (1.0 - stop_pct / 100.0) * max(1e-9, peak):
 			qty_open = get_open_qty(int(pid))
@@ -82,7 +91,7 @@ class TradeEngine:
 			close_position(pid)
 			self.live.pop(token, None)
 			add_fill(int(pid), "sell", float(fill.price), float(fill.qty), float(fill.usd))
-			self._log("exit_stop", token=token, pid=pid, price=price, peak=peak, stop_pct=stop_pct)
+			self._log("exit_stop", token=token, pid=pid, price=price, peak=peak, stop_pct=stop_pct, strategy=strategy)
 			return True
 		# Trail
 		if peak and price <= (1.0 - trail / 100.0) * peak:
@@ -91,7 +100,7 @@ class TradeEngine:
 			close_position(pid)
 			self.live.pop(token, None)
 			add_fill(int(pid), "sell", float(fill.price), float(fill.qty), float(fill.usd))
-			self._log("exit_trail", token=token, pid=pid, price=price, peak=peak, trail_pct=trail)
+			self._log("exit_trail", token=token, pid=pid, price=price, peak=peak, trail_pct=trail, strategy=strategy)
 			return True
 		return False
 
