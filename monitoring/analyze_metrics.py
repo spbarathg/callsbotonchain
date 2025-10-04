@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 from collections import defaultdict, Counter
 import statistics
 
-ANALYTICS_DIR = Path("analytics")
+ANALYTICS_DIR = Path(__file__).parent.parent / "analytics"
 
 def load_metrics(date_str=None):
     """Load metrics from a specific date or today"""

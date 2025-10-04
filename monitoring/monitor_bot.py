@@ -15,7 +15,7 @@ import time
 # Configuration
 SERVER = "root@64.227.157.221"
 SERVER_PATH = "/opt/callsbotonchain"
-LOCAL_ANALYTICS_DIR = Path("analytics")
+LOCAL_ANALYTICS_DIR = Path(__file__).parent.parent / "analytics"
 CHECK_INTERVAL_SECONDS = 300  # 5 minutes
 
 # Ensure analytics directory exists

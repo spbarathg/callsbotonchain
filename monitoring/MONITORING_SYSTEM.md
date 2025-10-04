@@ -60,19 +60,19 @@ ssh-copy-id root@64.227.157.221
 
 **Run in foreground** (recommended for testing):
 ```bash
-python monitor_bot.py
+python monitoring/monitor_bot.py
 ```
 
 **Run in background** (for continuous monitoring):
 
 **Windows (PowerShell):**
 ```powershell
-Start-Process python -ArgumentList "monitor_bot.py" -NoNewWindow -RedirectStandardOutput "monitor.log"
+Start-Process python -ArgumentList "monitoring/monitor_bot.py" -NoNewWindow -RedirectStandardOutput "monitor.log"
 ```
 
 **Linux/Mac:**
 ```bash
-nohup python3 monitor_bot.py > monitor.log 2>&1 &
+nohup python3 monitoring/monitor_bot.py > monitor.log 2>&1 &
 ```
 
 ### Stop Monitoring
@@ -104,10 +104,10 @@ cat analytics/summary_$(date +%Y-%m-%d).json | python -m json.tool
 ### Run Comprehensive Analysis
 ```bash
 # Analyze today's data
-python analyze_metrics.py
+python monitoring/analyze_metrics.py
 
 # Analyze specific date
-python analyze_metrics.py 2025-10-04
+python monitoring/analyze_metrics.py 2025-10-04
 ```
 
 ### View Available Data
