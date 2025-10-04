@@ -31,13 +31,6 @@ def sync_database_from_server():
         # Ensure var directory exists
         LOCAL_DB_PATH.parent.mkdir(exist_ok=True, parents=True)
         
-        # Close any existing database file handles
-        if LOCAL_DB_PATH.exists():
-            try:
-                LOCAL_DB_PATH.unlink()
-            except Exception as e:
-                print(f"  ⚠️  Could not remove old database: {e}")
-        
         # Create a SQLite checkpoint on server first to ensure consistency
         print(f"  ⏳ Creating WAL checkpoint on server...")
         checkpoint_cmd = f"ssh {SERVER} 'cd /opt/callsbotonchain && sqlite3 {SERVER_DB_PATH} \"PRAGMA wal_checkpoint(FULL);\"'"
@@ -55,7 +48,8 @@ def sync_database_from_server():
         )
         
         if result.returncode == 0 and result.stdout:
-            # Write the binary data to file
+            # Write the binary data to file (overwrites existing file)
+            # Note: 'wb' mode truncates and overwrites, no need to delete first
             with open(LOCAL_DB_PATH, 'wb') as f:
                 f.write(result.stdout)
             
