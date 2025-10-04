@@ -1,7 +1,7 @@
 # storage.py
 import sqlite3
 from datetime import datetime, timedelta
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from config import DB_FILE, DB_RETENTION_HOURS
 
 
@@ -240,6 +240,38 @@ def get_token_velocity(token_address: str, minutes_back: int = 30) -> Optional[D
             'unique_traders': unique_traders or 0
         }
     return None
+
+
+def get_recent_token_signals(token_address: str, window_seconds: int) -> List[str]:
+    """Return timestamps (ISO) of recent observations for a token within window.
+    Used for multi-signal confirmation prior to expensive stats calls.
+    """
+    conn = _get_conn()
+    c = conn.cursor()
+    try:
+        c.execute(
+            """
+            SELECT observed_at FROM token_activity
+            WHERE token_address = ? AND observed_at >= datetime('now', printf('-%d seconds', ?))
+            ORDER BY observed_at DESC
+            """,
+            (token_address, int(window_seconds)),
+        )
+        rows = [r[0] for r in c.fetchall()]
+    except Exception:
+        # Fallback for environments without printf
+        c.execute(
+            """
+            SELECT observed_at FROM token_activity
+            WHERE token_address = ? AND (strftime('%s','now') - strftime('%s', observed_at)) <= ?
+            ORDER BY observed_at DESC
+            """,
+            (token_address, int(window_seconds)),
+        )
+        rows = [r[0] for r in c.fetchall()]
+    finally:
+        conn.close()
+    return rows
 
 
 def should_fetch_detailed_stats(token_address: str, current_prelim_score: int, *, is_synthetic: bool = False) -> bool:

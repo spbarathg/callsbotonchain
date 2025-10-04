@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from typing import Optional
 import os
 from config import CIELO_API_KEY, MIN_USD_VALUE, CIELO_LIST_ID, CIELO_NEW_TRADE_ONLY
+from config import CIELO_MIN_WALLET_PNL, CIELO_MIN_TRADES, CIELO_MIN_WIN_RATE
 from config import HTTP_TIMEOUT_FEED
 from app.http_client import request_json
 from app.logger_utils import log_process
@@ -87,9 +88,15 @@ def fetch_solana_feed(cursor=None, smart_money_only: bool = False) -> Dict[str, 
     if smart_money_only:
         base_params.update({
             "smart_money": "true",
-            "min_wallet_pnl": "1000",  # Only profitable wallets
+            # Raise wallet quality bar significantly to avoid bots/noise
+            "min_wallet_pnl": str(int(CIELO_MIN_WALLET_PNL)),
             "top_wallets": "true"
         })
+        # Optional quality parameters if upstream supports them
+        if int(CIELO_MIN_TRADES or 0) > 0:
+            base_params["min_trades"] = str(int(CIELO_MIN_TRADES))
+        if int(CIELO_MIN_WIN_RATE or 0) > 0:
+            base_params["min_win_rate"] = str(int(CIELO_MIN_WIN_RATE))
         # CRITICAL FIX: Smart money trades are often smaller but highly strategic
         # Use a much lower USD filter for smart money to catch early entries
         if MIN_USD_VALUE and MIN_USD_VALUE > 0:

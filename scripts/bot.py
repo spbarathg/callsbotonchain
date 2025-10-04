@@ -46,6 +46,7 @@ from app.storage import (
 	mark_as_alerted,
 	record_token_activity,
 	get_token_velocity,
+	get_recent_token_signals,
 	should_fetch_detailed_stats,
 	ensure_indices,
 	prune_old_activity,
@@ -353,6 +354,41 @@ def process_feed_item(tx: dict, is_smart_cycle: bool, session_alerted_tokens: se
 	trader = tx.get('from') or tx.get('wallet')
 	record_token_activity(token_address, usd_value, 1, smart_involved, preliminary_score, trader)
 	# gating
+	# Phase 2: Multi-signal confirmation prior to expensive stats calls
+	try:
+		from config import REQUIRE_MULTI_SIGNAL, MULTI_SIGNAL_WINDOW_SEC, MULTI_SIGNAL_MIN_COUNT, MIN_TOKEN_AGE_MINUTES
+	except Exception:
+		REQUIRE_MULTI_SIGNAL, MULTI_SIGNAL_WINDOW_SEC, MULTI_SIGNAL_MIN_COUNT, MIN_TOKEN_AGE_MINUTES = True, 300, 2, 0
+
+	if REQUIRE_MULTI_SIGNAL:
+		# We already recorded this observation above via record_token_activity
+		recent_obs = get_recent_token_signals(token_address, MULTI_SIGNAL_WINDOW_SEC)
+		if len(recent_obs) < int(MULTI_SIGNAL_MIN_COUNT or 2):
+			try:
+				_out(f"Awaiting confirmations: {token_address} ({len(recent_obs)}/{int(MULTI_SIGNAL_MIN_COUNT or 2)} in {int(MULTI_SIGNAL_WINDOW_SEC)}s)")
+			except Exception:
+				pass
+			return "skipped", None, 1, None
+
+	# Quick token age heuristic using first-seen in our DB
+	# If MIN_TOKEN_AGE_MINUTES > 0, require token to be seen earlier than this window
+	if int(MIN_TOKEN_AGE_MINUTES or 0) > 0:
+		try:
+			from datetime import datetime
+			obs = get_recent_token_signals(token_address, 365*24*3600)  # all-time
+			if obs:
+				first_seen = obs[-1]  # oldest due to ORDER BY DESC
+				# Parse SQLite timestamp 'YYYY-MM-DD HH:MM:SS'
+				first_dt = datetime.strptime(first_seen, '%Y-%m-%d %H:%M:%S')
+				age_minutes = (datetime.now() - first_dt).total_seconds() / 60.0
+				if age_minutes < float(MIN_TOKEN_AGE_MINUTES):
+					try:
+						_out(f"Rejected (Too new: {age_minutes:.1f}m < {MIN_TOKEN_AGE_MINUTES}m): {token_address}")
+					except Exception:
+						pass
+					return "skipped", None, 0, None
+		except Exception:
+			pass
 	is_synthetic = bool(tx.get('is_synthetic')) or str(tx.get('tx_type') or '').endswith('_fallback')
 	if not should_fetch_detailed_stats(token_address, preliminary_score, is_synthetic=is_synthetic):
 		try:
@@ -370,6 +406,26 @@ def process_feed_item(tx: dict, is_smart_cycle: bool, session_alerted_tokens: se
 	stats = get_token_stats(token_address)
 	if not stats:
 		return "skipped", None, 0, None
+
+	# Phase 2: Quick security hard gate before expensive scoring paths
+	try:
+		from config import REQUIRE_LP_LOCKED, REQUIRE_MINT_REVOKED, ALLOW_UNKNOWN_SECURITY
+		security = (stats or {}).get('security') or {}
+		liq = (stats or {}).get('liquidity') or {}
+		lp_locked = (
+			liq.get('is_lp_locked')
+			or (liq.get('lock_status') in ("locked", "burned"))
+			or liq.get('is_lp_burned')
+		)
+		mint_revoked = security.get('is_mint_revoked')
+		if REQUIRE_LP_LOCKED and (lp_locked is False or (lp_locked is None and not ALLOW_UNKNOWN_SECURITY)):
+			_out(f"REJECTED (Quick Security: LP not locked): {token_address}")
+			return "skipped", None, 0, None
+		if REQUIRE_MINT_REVOKED and (mint_revoked is False or (mint_revoked is None and not ALLOW_UNKNOWN_SECURITY)):
+			_out(f"REJECTED (Quick Security: Mint not revoked): {token_address}")
+			return "skipped", None, 0, None
+	except Exception:
+		pass
 	# scoring with velocity bonus
 	velocity_data = get_token_velocity(token_address, minutes_back=15)
 	velocity_bonus = velocity_data['velocity_score'] if velocity_data else 0

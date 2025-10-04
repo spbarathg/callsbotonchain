@@ -23,6 +23,8 @@ This system provides automated, continuous monitoring of your callsbotonchain bo
 - System resources (disk, memory, CPU)
 - Error counts and types
 - Tracking sample data
+- **Signal performance and outcomes** (NEW)
+- **Signal quality metrics** (NEW)
 
 ### 🔍 Analysis Capabilities
 - Health trend analysis
@@ -495,7 +497,169 @@ Potential features to add:
 
 ---
 
+---
+
+## Signal Performance Analysis
+
+### Overview
+
+The signal performance system tracks **which tokens pumped/dumped after your alerts** and **WHY the bot sent each signal**. This is the most critical piece for tuning your bot's decision-making.
+
+### Analyze Signal Performance
+
+**Basic Analysis (last 7 days):**
+```bash
+python monitoring/analyze_signals.py
+```
+
+**Custom time period:**
+```bash
+python monitoring/analyze_signals.py 30  # Last 30 days
+```
+
+### What It Analyzes
+
+**1. Outcome Classification**
+- `big_win` - Hit 3x and held gains
+- `win` - 50%+ gain and holding
+- `small_win` - 10%+ gain
+- `flat` - Sideways movement
+- `small_loss` - Down 30%+
+- `loss` - Down 50%+
+- `rug` - Down 80%+ or liquidity gone
+- `pumped_then_dumped` - Hit 3x but gave it back
+- `pumped_then_faded` - Pumped but faded
+
+**2. Performance Metrics**
+- Overall win rate
+- Average gain by outcome type
+- Time to peak for winners
+- Score correlation with outcomes
+- Smart money advantage
+- Market cap range performance
+
+**3. Criteria Correlation**
+- Which signal scores lead to wins
+- Smart money detection accuracy
+- Conviction type performance
+- Market cap sweet spots
+
+**4. Tuning Recommendations**
+- Specific parameter adjustments
+- Threshold recommendations
+- Gating criteria suggestions
+- Prioritized by impact
+
+### Example Output
+
+```bash
+$ python monitoring/analyze_signals.py 7
+
+================================================================================
+SIGNAL PERFORMANCE ANALYZER
+================================================================================
+Analyzing signals from last 7 days
+
+================================================================================
+OUTCOME ANALYSIS
+================================================================================
+
+📊 Overall Performance:
+  Total Signals: 45
+  Win Rate: 42.2%
+  Wins: 19
+  Losses: 12
+
+📈 Outcome Distribution:
+  win                  :  12 (26.7%) | Avg Gain: +85.3% | Avg Score: 7.8
+  big_win             :   7 (15.6%) | Avg Gain: +320.5% | Avg Score: 8.4
+  small_win           :   8 (17.8%) | Avg Gain: +15.2% | Avg Score: 6.9
+  flat                :   6 (13.3%) | Avg Gain: +2.1% | Avg Score: 6.5
+  small_loss          :   5 (11.1%) | Avg Gain: -18.4% | Avg Score: 6.2
+  loss                :   4 ( 8.9%) | Avg Gain: -45.8% | Avg Score: 6.0
+  rug                 :   3 ( 6.7%) | Avg Gain: -85.2% | Avg Score: 5.8
+
+🎯 Conviction Performance:
+  Smart Money         :  25 signals | Win Rate: 52.0%
+  Nuanced             :  12 signals | Win Rate: 33.3%
+  Velocity            :   8 signals | Win Rate: 37.5%
+
+⏱️  Average Time to Peak: 47 minutes
+
+================================================================================
+CORRELATION ANALYSIS
+================================================================================
+
+📊 Score Analysis:
+  Winners Avg Score: 7.8/10
+  Losers Avg Score: 6.0/10
+  Difference: +1.8 ✅
+
+💎 Smart Money Analysis:
+  Smart Money Win Rate: 52.0%
+  No Smart Money Win Rate: 28.6%
+  Smart Money Advantage: +23.4% ✅
+
+💰 Market Cap Performance:
+  micro (<100k)       : Win Rate 55.6% (n=18)
+  small (100k-500k)   : Win Rate 41.7% (n=12)
+  mid (500k-2M)       : Win Rate 35.3% (n=8)
+  large (>2M)         : Win Rate 28.6% (n=7)
+
+================================================================================
+TUNING RECOMMENDATIONS
+================================================================================
+
+[MEDIUM] Conviction Type
+  Issue: Nuanced conviction underperforming: 33.3% win rate
+  Recommendation: Disable or tighten criteria for Nuanced conviction alerts
+  Action: Review why Nuanced signals are failing - may need higher thresholds
+
+[LOW   ] Market Cap
+  Issue: micro (<100k) range performs best (55.6% vs 42.2% overall)
+  Recommendation: Consider focusing more on micro (<100k) tokens
+  Action: Adjust MAX_MARKET_CAP_FOR_DEFAULT_ALERT to favor this range
+
+[LOW   ] Timing
+  Issue: Winners pump quickly (avg 47 min to peak)
+  Recommendation: Consider shorter tracking intervals to catch momentum early
+  Action: Reduce TRACK_INTERVAL_MIN to capture fast movers
+```
+
+### Integration with Main Monitoring
+
+The signal analyzer works with the same database as your main monitoring system. You can:
+
+1. **Copy database from server** (for local analysis):
+```bash
+scp root@64.227.157.221:/opt/callsbotonchain/var/alerted_tokens.db var/
+```
+
+2. **Run analysis locally**:
+```bash
+python monitoring/analyze_signals.py
+```
+
+3. **Compare with operational metrics**:
+```bash
+python monitoring/analyze_metrics.py  # Operational health
+python monitoring/analyze_signals.py  # Signal quality
+```
+
+### Recording Signal Reasons (Optional)
+
+To track WHY each signal was sent (detailed criteria breakdown), the system can record:
+- Score breakdown with weights
+- All metrics at alert time
+- Gating path taken
+- Security/holder composition
+- Transaction context
+
+This enables deep correlation analysis between specific criteria and outcomes.
+
+---
+
 **Last Updated**: October 4, 2025  
-**Version**: 1.0  
+**Version**: 1.1  
 **Status**: Production Ready
 

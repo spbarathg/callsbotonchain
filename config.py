@@ -23,7 +23,7 @@ TELEGRAM_ENABLED = bool(TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID)
 # BOT SETTINGS
 # ==============================================
 try:
-    HIGH_CONFIDENCE_SCORE = int(os.getenv("HIGH_CONFIDENCE_SCORE", "9"))
+    HIGH_CONFIDENCE_SCORE = int(os.getenv("HIGH_CONFIDENCE_SCORE", "8"))
     MIN_USD_VALUE = int(os.getenv("MIN_USD_VALUE", "100"))
     FETCH_INTERVAL = int(os.getenv("FETCH_INTERVAL", "120"))
     # Optional feed scoping
@@ -121,7 +121,7 @@ DRAW_24H_MAJOR = _get_int("DRAW_24H_MAJOR", -80)
 TOP10_CONCERN = _get_int("TOP10_CONCERN", 40)
 
 # Detailed fetch decision thresholds
-PRELIM_DETAILED_MIN = _get_int("PRELIM_DETAILED_MIN", 6)
+PRELIM_DETAILED_MIN = _get_int("PRELIM_DETAILED_MIN", 2)
 PRELIM_VELOCITY_MIN_SCORE = _get_int("PRELIM_VELOCITY_MIN_SCORE", 3)
 VELOCITY_REQUIRED = _get_int("VELOCITY_REQUIRED", 5)
 
@@ -194,7 +194,7 @@ REQUIRE_LP_LOCKED = os.getenv("REQUIRE_LP_LOCKED", "false").lower() == "true"
 ALLOW_UNKNOWN_SECURITY = os.getenv("ALLOW_UNKNOWN_SECURITY", "true").lower() == "true"
 
 # Maximum acceptable top-10 holders concentration (%). Above this → drop
-MAX_TOP10_CONCENTRATION = _get_int("MAX_TOP10_CONCENTRATION", 45)
+MAX_TOP10_CONCENTRATION = _get_int("MAX_TOP10_CONCENTRATION", 22)
 
 # Volume-to-MCap ratio minimum gate (e.g., 0.5 means 24h vol >= 50% of mcap)
 VOL_TO_MCAP_RATIO_MIN = _get_float("VOL_TO_MCAP_RATIO_MIN", 0.60)  # 0 disables
@@ -235,6 +235,24 @@ REQUIRE_HOLDER_STATS_FOR_LARGE_CAP_ALERT = os.getenv(
     "REQUIRE_HOLDER_STATS_FOR_LARGE_CAP_ALERT", "false"
 ).lower() == "true"
 LARGE_CAP_HOLDER_STATS_MCAP_USD = _get_int("LARGE_CAP_HOLDER_STATS_MCAP_USD", 2_000_000)
+
+# ==============================================
+# FEED INTELLIGENCE (PHASE 1/2)
+# ==============================================
+# Multi-signal confirmation before spending expensive stats calls
+REQUIRE_MULTI_SIGNAL = os.getenv("REQUIRE_MULTI_SIGNAL", "true").lower() == "true"
+MULTI_SIGNAL_WINDOW_SEC = _get_int("MULTI_SIGNAL_WINDOW_SEC", 300)  # 5 minutes
+MULTI_SIGNAL_MIN_COUNT = _get_int("MULTI_SIGNAL_MIN_COUNT", 2)
+
+# Token age preferences using first-seen heuristic
+# 0 disables minimum age requirement
+MIN_TOKEN_AGE_MINUTES = _get_int("MIN_TOKEN_AGE_MINUTES", 0)
+OPTIMAL_TOKEN_AGE_MAX_HOURS = _get_int("OPTIMAL_TOKEN_AGE_MAX_HOURS", 24)
+
+# Smart-money feed wallet quality thresholds
+CIELO_MIN_WALLET_PNL = _get_int("CIELO_MIN_WALLET_PNL", 10_000)
+CIELO_MIN_TRADES = _get_int("CIELO_MIN_TRADES", 0)  # optional; 0 disables
+CIELO_MIN_WIN_RATE = _get_int("CIELO_MIN_WIN_RATE", 0)  # percent; 0 disables
 
 # Optional enforcement switches for holder-composition caps
 ENFORCE_BUNDLER_CAP = os.getenv("ENFORCE_BUNDLER_CAP", "false").lower() == "true"
