@@ -31,6 +31,74 @@ except Exception:
         return _TreasuryDummy()
 
 from flask import Response
+try:
+    from src.api_enhanced import (
+        get_smart_money_status,
+        get_feed_health,
+        get_budget_status,
+        get_recent_activity,
+        get_quick_stats,
+        get_signal_quality,
+        get_gate_performance,
+        get_performance_trends,
+        get_hourly_heatmap,
+    )
+    from src.api_system import (
+        get_system_health,
+        get_database_status,
+        get_error_logs,
+        get_lifecycle_tracking,
+        get_current_config,
+        update_toggle as _update_toggle_v2,
+    )
+    from src.paper_trading import get_paper_trading_engine
+except Exception:
+    # Soft-fallbacks if new modules are not present
+    def get_smart_money_status():
+        return {"status": "unavailable"}
+    def get_feed_health():
+        return {"status": "unavailable"}
+    def get_budget_status():
+        return {"status": "unavailable"}
+    def get_recent_activity(limit: int = 20):
+        return {"alerts": [], "count": 0}
+    def get_quick_stats():
+        return {}
+    def get_signal_quality():
+        return {}
+    def get_gate_performance():
+        return {}
+    def get_performance_trends(days: int = 7):
+        return {"trends": [], "days": days}
+    def get_hourly_heatmap():
+        return {"heatmap": [], "peak_hour": None, "peak_count": 0}
+    def get_system_health():
+        return {"error": "unavailable"}
+    def get_database_status():
+        return {"error": "unavailable"}
+    def get_error_logs(limit: int = 50, level: str = "all"):
+        return {"logs": [], "counts": {"error": 0, "warning": 0, "info": 0}}
+    def get_lifecycle_tracking():
+        return {"total_tracking": 0, "stages": {}, "movement": {}}
+    def get_current_config():
+        return {}
+    def _update_toggle_v2(toggle_name: str, value: bool):
+        return {"success": False, "error": "unavailable"}
+    def get_paper_trading_engine():
+        class _Dummy:  # type: ignore
+            def start_session(self, *a, **k):
+                return {"success": False, "error": "unavailable"}
+            def stop_session(self):
+                return {"success": False, "error": "unavailable"}
+            def reset_session(self):
+                return {"success": False, "error": "unavailable"}
+            def get_portfolio_summary(self):
+                return None
+            def update_positions(self):
+                return {"success": True}
+            def run_backtest(self, *a, **k):
+                return {"success": False, "error": "unavailable"}
+        return _Dummy()
 import time
 from app.toggles import get_toggles, set_toggles
 import socket
@@ -414,6 +482,127 @@ def create_app() -> Flask:
             "metrics": metrics,
         }
         return _no_cache(jsonify(_sanitize_json(data)))
+
+    # ---------------- v2 Enhanced API (read-only) ----------------
+    @app.get("/api/v2/smart-money-status")
+    def api_v2_smart_money_status():
+        return _no_cache(jsonify(_sanitize_json(get_smart_money_status())))
+
+    @app.get("/api/v2/feed-health")
+    def api_v2_feed_health():
+        return _no_cache(jsonify(_sanitize_json(get_feed_health())))
+
+    @app.get("/api/v2/budget-status")
+    def api_v2_budget_status():
+        return _no_cache(jsonify(_sanitize_json(get_budget_status())))
+
+    @app.get("/api/v2/recent-activity")
+    def api_v2_recent_activity():
+        try:
+            limit = int(request.args.get("limit") or 20)
+        except Exception:
+            limit = 20
+        return _no_cache(jsonify(_sanitize_json(get_recent_activity(limit=limit))))
+
+    @app.get("/api/v2/quick-stats")
+    def api_v2_quick_stats():
+        return _no_cache(jsonify(_sanitize_json(get_quick_stats())))
+
+    # Performance
+    @app.get("/api/v2/signal-quality")
+    def api_v2_signal_quality():
+        return _no_cache(jsonify(_sanitize_json(get_signal_quality())))
+
+    @app.get("/api/v2/gate-performance")
+    def api_v2_gate_performance():
+        return _no_cache(jsonify(_sanitize_json(get_gate_performance())))
+
+    @app.get("/api/v2/performance-trends")
+    def api_v2_performance_trends():
+        try:
+            days = int(request.args.get("days") or 7)
+        except Exception:
+            days = 7
+        return _no_cache(jsonify(_sanitize_json(get_performance_trends(days=days))))
+
+    @app.get("/api/v2/hourly-heatmap")
+    def api_v2_hourly_heatmap():
+        return _no_cache(jsonify(_sanitize_json(get_hourly_heatmap())))
+
+    # System
+    @app.get("/api/v2/system-health")
+    def api_v2_system_health():
+        return _no_cache(jsonify(_sanitize_json(get_system_health())))
+
+    @app.get("/api/v2/database-status")
+    def api_v2_database_status():
+        return _no_cache(jsonify(_sanitize_json(get_database_status())))
+
+    @app.get("/api/v2/error-logs")
+    def api_v2_error_logs():
+        try:
+            limit = int(request.args.get("limit") or 50)
+        except Exception:
+            limit = 50
+        level = (request.args.get("level") or "all").lower()
+        return _no_cache(jsonify(_sanitize_json(get_error_logs(limit=limit, level=level))))
+
+    @app.get("/api/v2/lifecycle-tracking")
+    def api_v2_lifecycle_tracking():
+        return _no_cache(jsonify(_sanitize_json(get_lifecycle_tracking())))
+
+    @app.get("/api/v2/current-config")
+    def api_v2_current_config():
+        return _no_cache(jsonify(_sanitize_json(get_current_config())))
+
+    @app.post("/api/v2/update-toggle")
+    def api_v2_update_toggle():
+        body = request.get_json(force=True, silent=True) or {}
+        name = str(body.get("name") or "").strip()
+        val = bool(body.get("value"))
+        if not name:
+            return jsonify({"success": False, "error": "name required"}), 400
+        return _no_cache(jsonify(_sanitize_json(_update_toggle_v2(name, val))))
+
+    # Paper trading
+    @app.post("/api/v2/paper/start")
+    def api_v2_paper_start():
+        body = request.get_json(force=True, silent=True) or {}
+        capital = float(body.get("capital") or 1000.0)
+        strategy = str(body.get("strategy") or "smart_money_only")
+        sizing = str(body.get("position_sizing") or "fixed_50")
+        max_conc = int(body.get("max_concurrent") or 5)
+        eng = get_paper_trading_engine()
+        return _no_cache(jsonify(_sanitize_json(eng.start_session(capital, strategy, sizing, max_conc))))
+
+    @app.post("/api/v2/paper/stop")
+    def api_v2_paper_stop():
+        eng = get_paper_trading_engine()
+        return _no_cache(jsonify(_sanitize_json(eng.stop_session())))
+
+    @app.post("/api/v2/paper/reset")
+    def api_v2_paper_reset():
+        eng = get_paper_trading_engine()
+        return _no_cache(jsonify(_sanitize_json(eng.reset_session())))
+
+    @app.get("/api/v2/paper/portfolio")
+    def api_v2_paper_portfolio():
+        eng = get_paper_trading_engine()
+        # update positions before returning
+        try:
+            eng.update_positions()
+        except Exception:
+            pass
+        return _no_cache(jsonify(_sanitize_json({"portfolio": eng.get_portfolio_summary()})))
+
+    @app.post("/api/v2/paper/backtest")
+    def api_v2_paper_backtest():
+        body = request.get_json(force=True, silent=True) or {}
+        days = int(body.get("days") or 7)
+        capital = float(body.get("capital") or 1000.0)
+        strategy = str(body.get("strategy") or "smart_money_only")
+        eng = get_paper_trading_engine()
+        return _no_cache(jsonify(_sanitize_json(eng.run_backtest(days, capital, strategy))))
 
     @app.get("/healthz")
     def healthz():

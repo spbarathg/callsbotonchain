@@ -18,14 +18,18 @@
     <header class="topbar">
       <div class="brand">CALLSBOTONCHAIN</div>
       <nav class="navbar horizontal">
-        <a href="#" class="nav-link active" data-tab="dashboard">Dashboard</a>
+        <a href="#" class="nav-link active" data-tab="overview">Overview</a>
+        <a href="#" class="nav-link" data-tab="performance">Performance</a>
+        <a href="#" class="nav-link" data-tab="system">System</a>
+        <a href="#" class="nav-link" data-tab="config">Config</a>
+        <a href="#" class="nav-link" data-tab="paper">Paper</a>
         <a href="#" class="nav-link" data-tab="logs">Logs</a>
         <a href="#" class="nav-link" data-tab="tracked">Tracked</a>
       </nav>
     </header>
     <main class="content">
       <header class="content-header"><h1 class="page-title" id="page_title">Dashboard</h1></header>
-      <section id="tab-dashboard" class="tab visible">
+      <section id="tab-overview" class="tab visible">
       <div class="cards">
         <div class="card">
           <div class="label">Total Alerts</div>
@@ -89,6 +93,24 @@
         </div>
       </div>
 
+      <div class="cards">
+        <div class="card">
+          <div class="label">Smart Money (24h)</div>
+          <div class="value" id="sm_24h">-</div>
+          <div class="muted" id="sm_status" style="margin-top:4px"></div>
+        </div>
+        <div class="card">
+          <div class="label">Feed Health</div>
+          <div class="value" id="feed_status">-</div>
+          <div class="muted" id="feed_cycle" style="margin-top:4px"></div>
+        </div>
+        <div class="card">
+          <div class="label">API Budget (Day)</div>
+          <div class="value" id="budget_day">-</div>
+          <div class="muted" id="budget_reset" style="margin-top:4px"></div>
+        </div>
+      </div>
+
       <section>
         <h2>Recent Alerts</h2>
         <div class="sql-controls" style="margin-bottom:8px; display:flex; gap:8px; align-items:center;">
@@ -131,6 +153,100 @@
         <div id="sql_status" class="muted" style="margin:8px 0 4px;"></div>
         <div id="sql_results"></div>
       </section>
+      </section>
+
+      <section id="tab-performance" class="tab">
+        <h2>Signal Quality</h2>
+        <div class="cards">
+          <div class="card"><div class="label">Avg Score</div><div class="value" id="perf_avg_score">-</div></div>
+          <div class="card"><div class="label">Total Signals (24h)</div><div class="value" id="perf_total">-</div></div>
+        </div>
+        <div class="table-wrap" style="margin-top:8px">
+          <table id="conviction_table"><thead><tr><th>Conviction</th><th>Count</th></tr></thead><tbody></tbody></table>
+        </div>
+        <h2 style="margin-top:16px">Score Distribution</h2>
+        <div class="table-wrap"><table id="score_table"><thead><tr><th>Range</th><th>Count</th></tr></thead><tbody></tbody></table></div>
+        <h2 style="margin-top:16px">Trends (7 days)</h2>
+        <div class="table-wrap"><table id="trends_table"><thead><tr><th>Date</th><th>Alerts</th><th>Smart %</th><th>Avg Score</th></tr></thead><tbody></tbody></table></div>
+        <h2 style="margin-top:16px">Hourly Heatmap (24h)</h2>
+        <div class="table-wrap"><table id="heatmap_table"><thead><tr><th>Hour</th><th>Alerts</th></tr></thead><tbody></tbody></table></div>
+      </section>
+
+      <section id="tab-system" class="tab">
+        <h2>System Health</h2>
+        <div class="cards">
+          <div class="card"><div class="label">CPU</div><div class="value" id="sys_cpu">-</div></div>
+          <div class="card"><div class="label">Memory</div><div class="value" id="sys_mem">-</div></div>
+          <div class="card"><div class="label">Disk</div><div class="value" id="sys_disk">-</div></div>
+        </div>
+        <h3>Containers</h3>
+        <div class="table-wrap"><table id="containers_table"><thead><tr><th>Name</th><th>Status</th></tr></thead><tbody></tbody></table></div>
+        <h3 style="margin-top:16px">Database</h3>
+        <div class="table-wrap"><table id="db_table"><thead><tr><th>Table</th><th>Rows</th></tr></thead><tbody></tbody></table></div>
+        <h3 style="margin-top:16px">Errors & Warnings</h3>
+        <div class="table-wrap"><table id="errors_table"><thead><tr><th>Time</th><th>Level</th><th>Type</th><th>Component</th></tr></thead><tbody></tbody></table></div>
+      </section>
+
+      <section id="tab-config" class="tab">
+        <h2>Configuration</h2>
+        <div class="cards">
+          <div class="card"><div class="label">Signals</div><div class="value"><label class="switch"><input type="checkbox" id="cfg_signals"><span class="slider"></span></label></div></div>
+          <div class="card"><div class="label">Trading</div><div class="value"><label class="switch"><input type="checkbox" id="cfg_trading"><span class="slider"></span></label></div></div>
+        </div>
+        <div class="table-wrap" style="margin-top:8px"><table id="cfg_table"><thead><tr><th>Group</th><th>Key</th><th>Value</th></tr></thead><tbody></tbody></table></div>
+      </section>
+
+      <section id="tab-paper" class="tab">
+        <h2>Paper Trading</h2>
+        <div class="cards">
+          <div class="card">
+            <div class="label">Starting Capital</div>
+            <div class="value"><input id="pt_capital" type="number" value="1000" min="100" step="50" style="width:140px"></div>
+          </div>
+          <div class="card">
+            <div class="label">Strategy</div>
+            <div class="value">
+              <select id="pt_strategy">
+                <option value="smart_money_only">Smart Money Only</option>
+                <option value="high_conviction">High Conviction (≥7)</option>
+                <option value="all_signals">All Signals</option>
+              </select>
+            </div>
+          </div>
+          <div class="card">
+            <div class="label">Position Sizing</div>
+            <div class="value">
+              <select id="pt_sizing">
+                <option value="fixed_50">Fixed $50</option>
+                <option value="percentage_5">5% Capital</option>
+                <option value="score_based">Score-Based</option>
+              </select>
+            </div>
+          </div>
+          <div class="card">
+            <div class="label">Max Concurrent</div>
+            <div class="value"><input id="pt_max" type="number" value="5" min="1" max="20" style="width:100px"></div>
+          </div>
+        </div>
+        <div style="margin:8px 0; display:flex; gap:8px; flex-wrap:wrap">
+          <button id="pt_start">Start Session</button>
+          <button id="pt_stop">Stop</button>
+          <button id="pt_reset">Reset</button>
+        </div>
+        <h3>Portfolio</h3>
+        <div id="pt_portfolio" class="table-wrap"></div>
+        <h3 style="margin-top:16px">Backtest</h3>
+        <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap">
+          <label>Days <input id="bt_days" type="number" value="7" min="1" max="60" style="width:100px"></label>
+          <label>Capital $ <input id="bt_capital" type="number" value="1000" min="100" step="50" style="width:120px"></label>
+          <select id="bt_strategy">
+            <option value="smart_money_only">Smart Money Only</option>
+            <option value="high_conviction">High Conviction (≥7)</option>
+            <option value="all_signals">All Signals</option>
+          </select>
+          <button id="bt_run">Run Backtest</button>
+        </div>
+        <pre id="bt_output" style="height:200px;overflow:auto;background:#0d1117;color:#c9d1d9;padding:12px;border-radius:6px;margin-top:8px"></pre>
       </section>
 
       <section id="tab-logs" class="tab">
@@ -178,11 +294,16 @@
         const title = name.charAt(0).toUpperCase()+name.slice(1);
         const el = document.getElementById('page_title'); if (el) el.textContent = title;
         if (name === 'tracked') { try { fetchTracked(); } catch (e) {} }
+        if (name === 'overview') { try { fetchOverviewV2(); } catch (e) {} }
+        if (name === 'performance') { try { fetchPerformanceV2(); } catch (e) {} }
+        if (name === 'system') { try { fetchSystemV2(); } catch (e) {} }
+        if (name === 'config') { try { fetchConfigV2(); } catch (e) {} }
+        if (name === 'paper') { try { fetchPaperV2(); } catch (e) {} }
       }
       document.querySelectorAll('.nav-link').forEach(a=>a.addEventListener('click', e=>{e.preventDefault();showTab(a.dataset.tab);}));
       // Prime both data sources on load to avoid initial empties
       setTimeout(()=>{ try{ fetchStats(); }catch(e){} try{ fetchTracked(); }catch(e){} }, 100);
-      showTab('dashboard');
+      showTab('overview');
 
       let sseConnected = false;
       async function resolveAxiomUrl(token){
@@ -443,6 +564,128 @@
         }catch(e){/* ignore */}
       }
       fetchTracked(); setInterval(fetchTracked, 15000);
+
+      // ---------- v2 Overview ----------
+      async function fetchOverviewV2(){
+        try{
+          const [qs, sm, fh, bs, ra] = await Promise.all([
+            fetch('/api/v2/quick-stats').then(r=>r.json()),
+            fetch('/api/v2/smart-money-status').then(r=>r.json()),
+            fetch('/api/v2/feed-health').then(r=>r.json()),
+            fetch('/api/v2/budget-status').then(r=>r.json()),
+            fetch('/api/v2/recent-activity?limit=20').then(r=>r.json()),
+          ]);
+          // Quick stats
+          document.getElementById('total_alerts').textContent = String(qs.total_alerts||0);
+          document.getElementById('alerts_24h').textContent = String(qs.alerts_24h||0);
+          document.getElementById('tracking_count').textContent = String(qs.tracking_count||0);
+          // Smart money
+          document.getElementById('sm_24h').textContent = `${sm.smart_alerts_24h||0}/${sm.total_alerts_24h||0}`;
+          document.getElementById('sm_status').textContent = `Avg ${sm.avg_score??'-'}/10 • ${sm.percentage??0}% • latest ${sm.latest_minutes_ago!=null? sm.latest_minutes_ago+'m ago':'-'} • cycle ${sm.current_cycle||'-'}`;
+          // Feed health
+          document.getElementById('feed_status').textContent = fh.status||'-';
+          document.getElementById('feed_cycle').textContent = `${fh.current_cycle||'-'} (${fh.feed_items||0} items)`;
+          // Budget
+          document.getElementById('budget_day').textContent = `${bs.daily_used||0}/${bs.daily_max||0} (${bs.daily_percent||0}%)`;
+          document.getElementById('budget_reset').textContent = `resets in ~${bs.reset_hours||0}h ${bs.reset_minutes||0}m`;
+          // Recent table (reuse existing alerts table)
+          const tbody = document.querySelector('#alerts_table tbody');
+          tbody.innerHTML = '';
+          (ra.alerts||[]).forEach(a=>{
+            const tr = document.createElement('tr');
+            tr.innerHTML = `<td>${a.timestamp||''}</td><td>${tokenLinks(a.token_full||a.token)}</td><td>${a.symbol||''}</td><td>${a.score??''}</td><td>${a.conviction||''}</td><td></td><td></td><td></td>`;
+            tbody.appendChild(tr);
+          });
+        }catch(e){/* ignore */}
+      }
+
+      // ---------- v2 Performance ----------
+      async function fetchPerformanceV2(){
+        try{
+          const [q, t, h] = await Promise.all([
+            fetch('/api/v2/signal-quality').then(r=>r.json()),
+            fetch('/api/v2/performance-trends?days=7').then(r=>r.json()),
+            fetch('/api/v2/hourly-heatmap').then(r=>r.json()),
+          ]);
+          document.getElementById('perf_avg_score').textContent = String(q.avg_score||0);
+          document.getElementById('perf_total').textContent = String(q.total_signals||0);
+          const convT = document.querySelector('#conviction_table tbody'); convT.innerHTML='';
+          Object.entries(q.conviction_breakdown||{}).forEach(([k,v])=>{ const tr=document.createElement('tr'); tr.innerHTML=`<td>${k}</td><td>${v}</td>`; convT.appendChild(tr); });
+          const scoreT = document.querySelector('#score_table tbody'); scoreT.innerHTML='';
+          Object.entries(q.score_distribution||{}).forEach(([k,v])=>{ const tr=document.createElement('tr'); tr.innerHTML=`<td>${k}</td><td>${v}</td>`; scoreT.appendChild(tr); });
+          const trendsT = document.querySelector('#trends_table tbody'); trendsT.innerHTML='';
+          (t.trends||[]).forEach(row=>{ const tr=document.createElement('tr'); tr.innerHTML=`<td>${row.date}</td><td>${row.alerts}</td><td>${row.smart_percentage}%</td><td>${row.avg_score}</td>`; trendsT.appendChild(tr); });
+          const heatT = document.querySelector('#heatmap_table tbody'); heatT.innerHTML='';
+          (h.heatmap||[]).forEach(row=>{ const tr=document.createElement('tr'); tr.innerHTML=`<td>${row.hour}</td><td>${row.count}</td>`; heatT.appendChild(tr); });
+        }catch(e){/* ignore */}
+      }
+
+      // ---------- v2 System ----------
+      async function fetchSystemV2(){
+        try{
+          const s = await fetch('/api/v2/system-health').then(r=>r.json());
+          const cpu = (s.resources&&s.resources.cpu_percent!=null)? s.resources.cpu_percent+'%':'-';
+          const mem = (s.resources&&s.resources.memory_percent!=null)? s.resources.memory_percent+'%':'-';
+          const disk = (s.resources&&s.resources.disk_percent!=null)? s.resources.disk_percent+'%':'-';
+          document.getElementById('sys_cpu').textContent = cpu;
+          document.getElementById('sys_mem').textContent = mem;
+          document.getElementById('sys_disk').textContent = disk;
+          const ct = document.querySelector('#containers_table tbody'); ct.innerHTML='';
+          Object.entries(s.containers||{}).forEach(([name,info])=>{ const tr=document.createElement('tr'); tr.innerHTML=`<td>${name}</td><td>${(info||{}).details||''}</td>`; ct.appendChild(tr); });
+          const dbs = await fetch('/api/v2/database-status').then(r=>r.json());
+          const dbT = document.querySelector('#db_table tbody'); dbT.innerHTML='';
+          Object.entries(dbs.tables||{}).forEach(([name,count])=>{ const tr=document.createElement('tr'); tr.innerHTML=`<td>${name}</td><td>${count}</td>`; dbT.appendChild(tr); });
+          const errs = await fetch('/api/v2/error-logs?limit=50&level=all').then(r=>r.json());
+          const eT = document.querySelector('#errors_table tbody'); eT.innerHTML='';
+          (errs.logs||[]).forEach(row=>{ const tr=document.createElement('tr'); tr.innerHTML=`<td>${row.timestamp||''}</td><td>${row.level||''}</td><td>${row.type||''}</td><td>${row.component||''}</td>`; eT.appendChild(tr); });
+        }catch(e){/* ignore */}
+      }
+
+      // ---------- v2 Config ----------
+      async function fetchConfigV2(){
+        try{
+          const cfg = await fetch('/api/v2/current-config').then(r=>r.json());
+          const t = document.querySelector('#cfg_table tbody'); t.innerHTML='';
+          Object.entries(cfg||{}).forEach(([group,vals])=>{
+            Object.entries(vals||{}).forEach(([k,v])=>{ const tr=document.createElement('tr'); tr.innerHTML=`<td>${group}</td><td>${k}</td><td>${v}</td>`; t.appendChild(tr); });
+          });
+          document.getElementById('cfg_signals').checked = !!((cfg.toggles&&cfg.toggles.signals_enabled) || false);
+          document.getElementById('cfg_trading').checked = !!((cfg.toggles&&cfg.toggles.trading_enabled) || false);
+        }catch(e){/* ignore */}
+      }
+
+      // ---------- v2 Paper ----------
+      async function fetchPaperV2(){
+        try{
+          const r = await fetch('/api/v2/paper/portfolio');
+          const d = await r.json();
+          const p = (d||{}).portfolio;
+          const wrap = document.getElementById('pt_portfolio');
+          if(!p){ wrap.innerHTML = '<div class="muted">No active session</div>'; return; }
+          const rows = [];
+          rows.push(`<div class=\"cards\"><div class=\"card\"><div class=\"label\">Current Value</div><div class=\"value\">$${(p.current_value||0).toLocaleString()}</div></div><div class=\"card\"><div class=\"label\">PnL</div><div class=\"value\">$${(p.total_pnl||0).toLocaleString()} (${p.total_pnl_percent||0}%)</div></div><div class=\"card\"><div class=\"label\">Win Rate</div><div class=\"value\">${p.win_rate||0}%</div></div></div>`);
+          wrap.innerHTML = rows.join('') + '<h4 style="margin-top:12px">Open Positions</h4>';
+          const table = document.createElement('table');
+          table.innerHTML = '<thead><tr><th>Token</th><th>Score</th><th>Conviction</th><th>PnL%</th><th>PnL$</th><th>Hold (h)</th></tr></thead><tbody></tbody>';
+          const tb = table.querySelector('tbody');
+          (p.open_positions||[]).forEach(pos=>{ const tr=document.createElement('tr'); tr.innerHTML=`<td>${tokenLinks(pos.token)}</td><td>${pos.score}</td><td>${pos.conviction}</td><td>${(pos.pnl_percent||0).toFixed(1)}%</td><td>$${(pos.pnl_usd||0).toFixed(2)}</td><td>${(pos.hold_time_hours||0).toFixed(2)}</td>`; tb.appendChild(tr); });
+          wrap.appendChild(table);
+        }catch(e){/* ignore */}
+      }
+
+      document.getElementById('pt_start').addEventListener('click', async ()=>{
+        const body = { capital: Number(document.getElementById('pt_capital').value||1000), strategy: document.getElementById('pt_strategy').value, position_sizing: document.getElementById('pt_sizing').value, max_concurrent: Number(document.getElementById('pt_max').value||5) };
+        await fetch('/api/v2/paper/start', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+        fetchPaperV2();
+      });
+      document.getElementById('pt_stop').addEventListener('click', async ()=>{ await fetch('/api/v2/paper/stop', { method:'POST' }); fetchPaperV2(); });
+      document.getElementById('pt_reset').addEventListener('click', async ()=>{ await fetch('/api/v2/paper/reset', { method:'POST' }); fetchPaperV2(); });
+      document.getElementById('bt_run').addEventListener('click', async ()=>{
+        const body = { days: Number(document.getElementById('bt_days').value||7), capital: Number(document.getElementById('bt_capital').value||1000), strategy: document.getElementById('bt_strategy').value };
+        const r = await fetch('/api/v2/paper/backtest', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+        const d = await r.json();
+        document.getElementById('bt_output').textContent = JSON.stringify(d, null, 2);
+      });
     </script>
   </body>
   </html>
