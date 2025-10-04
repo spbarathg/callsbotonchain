@@ -298,7 +298,12 @@
         if (name === 'performance') { try { fetchPerformanceV2(); } catch (e) {} }
         if (name === 'system') { try { fetchSystemV2(); } catch (e) {} }
         if (name === 'config') { try { fetchConfigV2(); } catch (e) {} }
-        if (name === 'paper') { try { fetchPaperV2(); } catch (e) {} }
+        if (name === 'paper') { 
+          try { fetchPaperV2(); } catch (e) {} 
+          startPaperAutoRefresh(); // Start auto-refresh for paper trading
+        } else {
+          stopPaperAutoRefresh(); // Stop auto-refresh when leaving paper tab
+        }
       }
       document.querySelectorAll('.nav-link').forEach(a=>a.addEventListener('click', e=>{e.preventDefault();showTab(a.dataset.tab);}));
       // Prime both data sources on load to avoid initial empties
@@ -429,17 +434,255 @@
       // Poll only when SSE is not connected; otherwise back off
       setInterval(()=>{ if (!sseConnected) { fetchStats(); } }, 7000);
 
-      async function postToggles() {
-        const signals_enabled = document.getElementById('signals_toggle').checked;
-        const trading_enabled = document.getElementById('trading_toggle').checked;
+      // Enhanced toggle functionality with v2 API and visual feedback
+      async function updateToggle(toggleName, value) {
         try {
-          await fetch('/api/toggles', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Callsbot-Admin-Key': (window.CALLSBOT_ADMIN_KEY || '') }, body: JSON.stringify({ signals_enabled, trading_enabled }) });
+          const response = await fetch('/api/v2/update-toggle', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: toggleName, value: value })
+          });
+          const result = await response.json();
+          
+          if (result.success) {
+            showNotification(`✅ ${toggleName} ${value ? 'enabled' : 'disabled'}`, 'success');
+          } else {
+            showNotification(`❌ Failed to update ${toggleName}: ${result.error}`, 'error');
+            // Revert the toggle
+            const checkbox = document.getElementById(toggleName + '_toggle');
+            if (checkbox) checkbox.checked = !value;
+          }
         } catch (e) {
-          console.error('Failed to update toggles', e);
+          console.error('Failed to update toggle', e);
+          showNotification(`❌ Error updating ${toggleName}`, 'error');
+          // Revert the toggle
+          const checkbox = document.getElementById(toggleName + '_toggle');
+          if (checkbox) checkbox.checked = !value;
         }
       }
-      document.getElementById('signals_toggle').addEventListener('change', postToggles);
-      document.getElementById('trading_toggle').addEventListener('change', postToggles);
+
+      function showNotification(message, type = 'info') {
+        const notif = document.createElement('div');
+        notif.className = `notification ${type}`;
+        notif.textContent = message;
+        notif.style.cssText = `
+          position: fixed;
+          top: 20px;
+          right: 20px;
+          padding: 15px 20px;
+          background: ${type === 'success' ? '#17bf63' : type === 'error' ? '#e0245e' : '#1da1f2'};
+          color: white;
+          border-radius: 8px;
+          font-weight: 500;
+          box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+          z-index: 10000;
+          animation: slideIn 0.3s ease;
+        `;
+        document.body.appendChild(notif);
+        
+        setTimeout(() => {
+          notif.style.animation = 'slideOut 0.3s ease';
+          setTimeout(() => notif.remove(), 300);
+        }, 3000);
+      }
+
+      // Add animation styles
+      const style = document.createElement('style');
+      style.textContent = `
+        @keyframes slideIn {
+          from { transform: translateX(100%); opacity: 0; }
+          to { transform: translateX(0); opacity: 1; }
+        }
+        @keyframes slideOut {
+          from { transform: translateX(0); opacity: 1; }
+          to { transform: translateX(100%); opacity: 0; }
+        }
+      `;
+      document.head.appendChild(style);
+
+      // Wire up toggle switches
+      document.getElementById('signals_toggle').addEventListener('change', function() {
+        updateToggle('signals_enabled', this.checked);
+      });
+      document.getElementById('trading_toggle').addEventListener('change', function() {
+        if (this.checked && !confirm('⚠️ Enable LIVE TRADING? This will execute real trades with real money!')) {
+          this.checked = false;
+          return;
+        }
+        updateToggle('trading_enabled', this.checked);
+      });
+
+      // Paper Trading Controls
+      async function startPaperTrading() {
+        const capital = parseFloat(document.getElementById('pt_capital').value) || 1000;
+        const strategy = document.getElementById('pt_strategy').value;
+        const sizing = document.getElementById('pt_sizing').value;
+        const max_concurrent = parseInt(document.getElementById('pt_max').value) || 5;
+
+        try {
+          const response = await fetch('/api/v2/paper/start', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ capital, strategy, position_sizing: sizing, max_concurrent })
+          });
+          const result = await response.json();
+          
+          if (result.success) {
+            showNotification('📊 Paper trading session started!', 'success');
+            refreshPaperPortfolio();
+          } else {
+            showNotification(`❌ Failed to start: ${result.error}`, 'error');
+          }
+        } catch (e) {
+          console.error('Failed to start paper trading', e);
+          showNotification('❌ Error starting paper trading', 'error');
+        }
+      }
+
+      async function stopPaperTrading() {
+        if (!confirm('⏸️ Stop the current paper trading session?')) return;
+        
+        try {
+          const response = await fetch('/api/v2/paper/stop', { method: 'POST' });
+          const result = await response.json();
+          
+          if (result.success) {
+            showNotification('⏸️ Paper trading stopped', 'success');
+            refreshPaperPortfolio();
+          } else {
+            showNotification(`❌ Failed to stop: ${result.error}`, 'error');
+          }
+        } catch (e) {
+          console.error('Failed to stop paper trading', e);
+          showNotification('❌ Error stopping paper trading', 'error');
+        }
+      }
+
+      async function resetPaperTrading() {
+        if (!confirm('🔄 Reset paper trading? This will clear all positions and history!')) return;
+        
+        try {
+          const response = await fetch('/api/v2/paper/reset', { method: 'POST' });
+          const result = await response.json();
+          
+          if (result.success) {
+            showNotification('🔄 Paper trading reset', 'success');
+            refreshPaperPortfolio();
+          } else {
+            showNotification(`❌ Failed to reset: ${result.error}`, 'error');
+          }
+        } catch (e) {
+          console.error('Failed to reset paper trading', e);
+          showNotification('❌ Error resetting paper trading', 'error');
+        }
+      }
+
+      async function refreshPaperPortfolio() {
+        try {
+          const response = await fetch('/api/v2/paper/portfolio');
+          const portfolio = await response.json();
+          
+          const container = document.getElementById('pt_portfolio');
+          if (!portfolio || portfolio.error) {
+            container.innerHTML = '<div class="card"><div class="value" style="text-align:center;padding:20px;color:#8899a6">No active session</div></div>';
+            return;
+          }
+
+          let html = '<div class="cards">';
+          html += `<div class="card"><div class="label">Starting Capital</div><div class="value">$${portfolio.starting_capital?.toFixed(2) || '0.00'}</div></div>`;
+          html += `<div class="card"><div class="label">Current Value</div><div class="value">$${portfolio.current_value?.toFixed(2) || '0.00'}</div></div>`;
+          
+          const pnl = portfolio.total_pnl || 0;
+          const pnlPct = portfolio.total_pnl_pct || 0;
+          const pnlColor = pnl >= 0 ? '#17bf63' : '#e0245e';
+          html += `<div class="card"><div class="label">Total P/L</div><div class="value" style="color:${pnlColor}">$${pnl.toFixed(2)} (${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(2)}%)</div></div>`;
+          
+          html += `<div class="card"><div class="label">Open Positions</div><div class="value">${portfolio.open_positions || 0}</div></div>`;
+          html += `<div class="card"><div class="label">Total Trades</div><div class="value">${portfolio.total_trades || 0}</div></div>`;
+          html += `<div class="card"><div class="label">Win Rate</div><div class="value">${portfolio.win_rate?.toFixed(1) || '0.0'}%</div></div>`;
+          html += '</div>';
+
+          if (portfolio.positions && portfolio.positions.length > 0) {
+            html += '<h4 style="margin-top:16px">Open Positions</h4>';
+            html += '<table style="width:100%;margin-top:8px"><thead><tr><th>Token</th><th>Entry</th><th>Current</th><th>P/L</th><th>Size</th></tr></thead><tbody>';
+            portfolio.positions.forEach(pos => {
+              const posColor = (pos.pnl_pct || 0) >= 0 ? '#17bf63' : '#e0245e';
+              html += `<tr>
+                <td>${pos.token_short || pos.token || 'N/A'}</td>
+                <td>$${pos.entry_price?.toFixed(6) || '0'}</td>
+                <td>$${pos.current_price?.toFixed(6) || '0'}</td>
+                <td style="color:${posColor}">${(pos.pnl_pct || 0) >= 0 ? '+' : ''}${pos.pnl_pct?.toFixed(2) || '0'}%</td>
+                <td>$${pos.size_usd?.toFixed(2) || '0'}</td>
+              </tr>`;
+            });
+            html += '</tbody></table>';
+          }
+
+          container.innerHTML = html;
+        } catch (e) {
+          console.error('Failed to refresh portfolio', e);
+          document.getElementById('pt_portfolio').innerHTML = '<div class="card"><div class="value" style="color:#e0245e">Error loading portfolio</div></div>';
+        }
+      }
+
+      async function runBacktest() {
+        const days = parseInt(document.getElementById('bt_days').value) || 7;
+        const capital = parseFloat(document.getElementById('bt_capital').value) || 1000;
+        const strategy = document.getElementById('bt_strategy').value;
+
+        const output = document.getElementById('bt_output');
+        output.textContent = 'Running backtest...\n';
+
+        try {
+          const response = await fetch('/api/v2/paper/backtest', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ days, capital, strategy })
+          });
+          const result = await response.json();
+          
+          if (result.success && result.results) {
+            const r = result.results;
+            let text = `Backtest Results (${days} days, $${capital} capital, ${strategy})\n`;
+            text += `${'='.repeat(60)}\n\n`;
+            text += `Total Trades: ${r.total_trades || 0}\n`;
+            text += `Win Rate: ${r.win_rate?.toFixed(1) || '0.0'}%\n`;
+            text += `Final Value: $${r.final_value?.toFixed(2) || '0.00'}\n`;
+            text += `Total P/L: $${r.total_pnl?.toFixed(2) || '0.00'} (${r.total_pnl_pct >= 0 ? '+' : ''}${r.total_pnl_pct?.toFixed(2) || '0'}%)\n`;
+            text += `Max Drawdown: ${r.max_drawdown?.toFixed(2) || '0'}%\n`;
+            text += `Sharpe Ratio: ${r.sharpe_ratio?.toFixed(2) || 'N/A'}\n`;
+            output.textContent = text;
+            showNotification('✅ Backtest complete!', 'success');
+          } else {
+            output.textContent = `Error: ${result.error || 'Unknown error'}`;
+            showNotification(`❌ Backtest failed: ${result.error}`, 'error');
+          }
+        } catch (e) {
+          console.error('Failed to run backtest', e);
+          output.textContent = `Error: ${e.message}`;
+          showNotification('❌ Error running backtest', 'error');
+        }
+      }
+
+      // Wire up paper trading buttons
+      document.getElementById('pt_start').addEventListener('click', startPaperTrading);
+      document.getElementById('pt_stop').addEventListener('click', stopPaperTrading);
+      document.getElementById('pt_reset').addEventListener('click', resetPaperTrading);
+      document.getElementById('bt_run').addEventListener('click', runBacktest);
+
+      // Auto-refresh paper portfolio when tab is active
+      let paperRefreshInterval;
+      function startPaperAutoRefresh() {
+        if (paperRefreshInterval) clearInterval(paperRefreshInterval);
+        refreshPaperPortfolio(); // Initial load
+        paperRefreshInterval = setInterval(refreshPaperPortfolio, 10000); // Refresh every 10s
+      }
+      function stopPaperAutoRefresh() {
+        if (paperRefreshInterval) {
+          clearInterval(paperRefreshInterval);
+          paperRefreshInterval = null;
+        }
+      }
 
       function renderTable(columns, rows) {
         const el = document.createElement('table');
