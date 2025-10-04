@@ -29,24 +29,41 @@ def sync_database_from_server():
     
     try:
         # Ensure var directory exists
-        LOCAL_DB_PATH.parent.mkdir(exist_ok=True)
+        LOCAL_DB_PATH.parent.mkdir(exist_ok=True, parents=True)
         
-        # Use scp to download database
+        # Close any existing database file handles
+        if LOCAL_DB_PATH.exists():
+            try:
+                LOCAL_DB_PATH.unlink()
+            except Exception:
+                pass
+        
+        # Create a SQLite checkpoint on server first to ensure consistency
+        checkpoint_cmd = f"ssh {SERVER} 'cd /opt/callsbotonchain && sqlite3 {SERVER_DB_PATH} \"PRAGMA wal_checkpoint(FULL);\"'"
+        subprocess.run(checkpoint_cmd, shell=True, capture_output=True, timeout=10)
+        
+        # Use scp with compression and force overwrite
+        # Convert Windows path to use backslashes
+        local_path_str = str(LOCAL_DB_PATH).replace('/', '\\')
+        
         result = subprocess.run(
-            ["scp", f"{SERVER}:{SERVER_DB_PATH}", str(LOCAL_DB_PATH)],
+            ["scp", "-C", f"{SERVER}:{SERVER_DB_PATH}", local_path_str],
             capture_output=True,
             text=True,
-            timeout=30
+            timeout=60,
+            shell=False
         )
         
-        if result.returncode == 0:
-            print(f"  ✅ Database synced successfully")
+        if result.returncode == 0 and LOCAL_DB_PATH.exists():
+            file_size = LOCAL_DB_PATH.stat().st_size / 1024  # KB
+            print(f"  ✅ Database synced successfully ({file_size:.1f} KB)")
             return True
         else:
-            print(f"  ⚠️  Database sync failed: {result.stderr}")
+            error_msg = result.stderr.strip() if result.stderr else "Unknown error"
+            print(f"  ⚠️  Database sync failed: {error_msg}")
             return False
     except subprocess.TimeoutExpired:
-        print(f"  ⚠️  Database sync timed out")
+        print(f"  ⚠️  Database sync timed out (network issue?)")
         return False
     except Exception as e:
         print(f"  ⚠️  Database sync error: {e}")
