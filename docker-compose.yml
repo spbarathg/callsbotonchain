@@ -50,7 +50,7 @@ services:
   trader:
     build: .
     container_name: callsbot-trader
-    command: ["python", "-m", "tradingSystem.cli", "run"]
+    command: ["python", "-m", "tradingSystem.cli"]
     restart: unless-stopped
     env_file:
       - .env

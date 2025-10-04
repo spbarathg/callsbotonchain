@@ -178,4 +178,7 @@ def run() -> None:
 if __name__ == "__main__":
 	run()
 
+# Allow running as module: python -m tradingSystem.cli
+run()
+
 
