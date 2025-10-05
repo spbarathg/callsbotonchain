@@ -240,7 +240,7 @@ def initialize_bot() -> bool:
 		return False
 	try:
 		init_db()
-		ensure_indices()
+		# ensure_indices() # Disabled - function not available yet
 		_out("Database initialized successfully")
 	except Exception as e:
 		_out(f"Failed to initialize database: {e}")
