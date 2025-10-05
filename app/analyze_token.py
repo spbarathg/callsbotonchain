@@ -757,8 +757,9 @@ def _check_senior_common(stats: Dict[str, Any], token_address: Optional[str], *,
 
 
 def check_senior_strict(stats: Dict[str, Any], token_address: Optional[str] = None) -> bool:
+    from config import ALLOW_UNKNOWN_SECURITY
     return _check_senior_common(stats, token_address,
-                                allow_unknown=False,
+                                allow_unknown=ALLOW_UNKNOWN_SECURITY,
                                 top10_buffer=0.0,
                                 bundlers_buffer=0.0,
                                 insiders_buffer=0.0)
