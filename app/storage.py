@@ -199,8 +199,8 @@ def record_token_activity(token_address: str, usd_value: float, tx_count: int, s
     try:
         c.execute("""
             INSERT INTO token_activity
-            (token_address, usd_value, transaction_count, smart_money_involved, preliminary_score, trader_address)
-            VALUES (?, ?, ?, ?, ?, ?)
+            (token_address, observed_at, usd_value, transaction_count, smart_money_involved, preliminary_score, trader_address)
+            VALUES (?, datetime('now'), ?, ?, ?, ?, ?)
         """, (token_address, usd_value, tx_count, smart_money_involved, prelim_score, trader_address))
         conn.commit()
     except sqlite3.IntegrityError:
