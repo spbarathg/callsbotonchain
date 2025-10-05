@@ -153,3 +153,8 @@ def mirror_stdout_line(line: str) -> None:
             f.write((line or "").rstrip("\n") + "\n")
     except Exception:
         pass
+
+
+def _out(msg: str) -> None:
+    """Simple stdout logger with timestamp prefix"""
+    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {msg}", flush=True)
