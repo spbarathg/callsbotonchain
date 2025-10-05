@@ -668,48 +668,49 @@ def process_feed_item(tx: dict, is_smart_cycle: bool, session_alerted_tokens: se
 
 def run_periodic_tasks(last_track_time: float) -> float:
 	"""Pruning and tracking tasks; returns updated last_track_time."""
-	try:
-		deleted = prune_old_activity()
-		if deleted:
-			_out(f"Pruned {deleted} old activity rows")
-	except Exception:
-		pass
-	from config import TRACK_INTERVAL_MIN, TRACK_BATCH_SIZE
-	now = time.time()
-	if now - last_track_time > TRACK_INTERVAL_MIN * 60:
-		to_check = get_alerted_tokens_batch(limit=TRACK_BATCH_SIZE, older_than_minutes=TRACK_INTERVAL_MIN)
-		if to_check:
-			_out(f"Tracking {len(to_check)} alerted tokens for price updates")
-		for ca in to_check:
-			try:
-				stats = get_token_stats(ca)
-				price = float((stats or {}).get('price_usd') or 0.0)
-				mcap = (stats or {}).get('market_cap_usd')
-				liq = (stats or {}).get('liquidity_usd') or ((stats or {}).get('liquidity', {}) or {}).get('usd')
-				vol24obj = ((stats or {}).get('volume', {}) or {}).get('24h', {}) or {}
-				vol24 = vol24obj.get('volume_usd')
-				update_token_tracking(ca, price, mcap, liq, vol24)
-				try:
-					snap = get_tracking_snapshot(ca) or {}
-					log_tracking({
-						"token": ca,
-						"price": price,
-						"market_cap": mcap,
-						"liquidity": liq,
-						"vol24": vol24,
-						"peak_price": snap.get('peak_price'),
-						"peak_mcap": snap.get('peak_mcap'),
-						"time_to_peak_price_s": snap.get('time_to_peak_price_s'),
-						"time_to_peak_mcap_s": snap.get('time_to_peak_mcap_s'),
-						"peak_x_price": snap.get('peak_x_price'),
-						"peak_x_mcap": snap.get('peak_x_mcap'),
-						"data_source": ((stats or {}).get("_source") if isinstance(stats, dict) else None) or "unknown",
-					})
-				except Exception:
-					pass
-			except Exception:
-				continue
-		last_track_time = now
+	# Disabled - tracking functions not yet implemented
+	# try:
+	# 	deleted = prune_old_activity()
+	# 	if deleted:
+	# 		_out(f"Pruned {deleted} old activity rows")
+	# except Exception:
+	# 	pass
+	# from config import TRACK_INTERVAL_MIN, TRACK_BATCH_SIZE
+	# now = time.time()
+	# if now - last_track_time > TRACK_INTERVAL_MIN * 60:
+	# 	to_check = get_alerted_tokens_batch(limit=TRACK_BATCH_SIZE, older_than_minutes=TRACK_INTERVAL_MIN)
+	# 	if to_check:
+	# 		_out(f"Tracking {len(to_check)} alerted tokens for price updates")
+	# 	for ca in to_check:
+	# 		try:
+	# 			stats = get_token_stats(ca)
+	# 			price = float((stats or {}).get('price_usd') or 0.0)
+	# 			mcap = (stats or {}).get('market_cap_usd')
+	# 			liq = (stats or {}).get('liquidity_usd') or ((stats or {}).get('liquidity', {}) or {}).get('usd')
+	# 			vol24obj = ((stats or {}).get('volume', {}) or {}).get('24h', {}) or {}
+	# 			vol24 = vol24obj.get('volume_usd')
+	# 			update_token_tracking(ca, price, mcap, liq, vol24)
+	# 			try:
+	# 				snap = get_tracking_snapshot(ca) or {}
+	# 				log_tracking({
+	# 					"token": ca,
+	# 					"price": price,
+	# 					"market_cap": mcap,
+	# 					"liquidity": liq,
+	# 					"vol24": vol24,
+	# 					"peak_price": snap.get('peak_price'),
+	# 					"peak_mcap": snap.get('peak_mcap'),
+	# 					"time_to_peak_price_s": snap.get('time_to_peak_price_s'),
+	# 					"time_to_peak_mcap_s": snap.get('time_to_peak_mcap_s'),
+	# 					"peak_x_price": snap.get('peak_x_price'),
+	# 					"peak_x_mcap": snap.get('peak_x_mcap'),
+	# 					"data_source": ((stats or {}).get("_source") if isinstance(stats, dict) else None) or "unknown",
+	# 				})
+	# 			except Exception:
+	# 				pass
+	# 		except Exception:
+	# 			continue
+	# 	last_track_time = now
 	return last_track_time
 
 
