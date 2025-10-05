@@ -1,5 +1,6 @@
 # storage.py
 import sqlite3
+import math
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List
 from config import DB_FILE, DB_RETENTION_HOURS
@@ -223,6 +224,21 @@ def record_alert_with_metadata(
     holders_data = stats.get('holders', {})
     metadata = stats.get('metadata', {})
     
+    # Extract security/liquidity/holders data with proper handling for missing data
+    lp_locked = liquidity_data.get('is_lp_locked')
+    if lp_locked is None:
+        lp_locked = liquidity_data.get('is_lp_burned')
+    if lp_locked is None and liquidity_data.get('lock_status') in ("locked", "burned"):
+        lp_locked = True
+    
+    mint_revoked = security_data.get('is_mint_revoked')
+    
+    top10 = holders_data.get('top_10_holders_percent')
+    if top10 is None:
+        top10 = holders_data.get('top_10_concentration')
+    if top10 is None:
+        top10 = holders_data.get('top10_concentration')
+    
     c.execute("""
         INSERT OR REPLACE INTO alerted_token_stats (
             token_address, first_alert_at, last_checked_at,
@@ -248,16 +264,16 @@ def record_alert_with_metadata(
         final_score,
         conviction_type,
         price_data.get('price_usd'),
-        market_data.get('market_cap_usd'),
-        liquidity_data.get('liquidity_usd'),
+        market_data.get('market_cap_usd') if not isinstance(market_data.get('market_cap_usd'), float) or not math.isnan(market_data.get('market_cap_usd')) else stats.get('market_cap_usd'),
+        liquidity_data.get('liquidity_usd') if not isinstance(liquidity_data.get('liquidity_usd'), float) or not math.isnan(liquidity_data.get('liquidity_usd')) else stats.get('liquidity_usd'),
         price_data.get('price_usd'),
-        market_data.get('market_cap_usd'),
-        liquidity_data.get('liquidity_usd'),
-        market_data.get('volume_24h_usd'),
-        metadata.get('name'),
-        metadata.get('symbol'),
+        market_data.get('market_cap_usd') if not isinstance(market_data.get('market_cap_usd'), float) or not math.isnan(market_data.get('market_cap_usd')) else stats.get('market_cap_usd'),
+        liquidity_data.get('liquidity_usd') if not isinstance(liquidity_data.get('liquidity_usd'), float) or not math.isnan(liquidity_data.get('liquidity_usd')) else stats.get('liquidity_usd'),
+        (market_data.get('volume', {}) or {}).get('24h_usd') or market_data.get('volume_24h_usd') or stats.get('volume', {}).get('24h', {}).get('volume_usd'),
+        metadata.get('name') or stats.get('name'),
+        metadata.get('symbol') or stats.get('symbol'),
         alert_metadata.get('token_age_minutes'),
-        holders_data.get('holder_count'),
+        holders_data.get('holder_count') or holders_data.get('holders'),
         alert_metadata.get('unique_traders_15m'),
         alert_metadata.get('smart_money_involved', False),
         alert_metadata.get('smart_wallet_address'),
@@ -267,16 +283,16 @@ def record_alert_with_metadata(
         alert_metadata.get('passed_junior_strict', False),
         alert_metadata.get('passed_senior_strict', False),
         alert_metadata.get('passed_debate', False),
-        liquidity_data.get('is_lp_locked') or liquidity_data.get('is_lp_burned'),
-        security_data.get('is_mint_revoked'),
-        holders_data.get('top_10_holders_percent'),
-        holders_data.get('bundlers_percent'),
-        holders_data.get('insiders_percent'),
+        lp_locked,
+        mint_revoked,
+        top10,
+        holders_data.get('bundlers_percent') or holders_data.get('bundlers'),
+        holders_data.get('insiders_percent') or holders_data.get('insiders'),
         alert_metadata.get('sol_price_usd'),
         alert_metadata.get('feed_source'),
         alert_metadata.get('dex_name'),
-        price_data.get('price_change_1h'),
-        price_data.get('price_change_24h'),
+        (price_data.get('change', {}) or {}).get('1h') or price_data.get('price_change_1h') or stats.get('change', {}).get('1h'),
+        (price_data.get('change', {}) or {}).get('24h') or price_data.get('price_change_24h') or stats.get('change', {}).get('24h'),
     ))
     
     conn.commit()
