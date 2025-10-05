@@ -5,14 +5,14 @@ import time
 from datetime import datetime, timezone
 from typing import Optional
 import os
-from config import CIELO_API_KEY, MIN_USD_VALUE, CIELO_LIST_ID, CIELO_NEW_TRADE_ONLY
-from config import CIELO_MIN_WALLET_PNL, CIELO_MIN_TRADES, CIELO_MIN_WIN_RATE
-from config import HTTP_TIMEOUT_FEED
+from config.config import CIELO_API_KEY, MIN_USD_VALUE, CIELO_LIST_ID, CIELO_NEW_TRADE_ONLY
+from config.config import CIELO_MIN_WALLET_PNL, CIELO_MIN_TRADES, CIELO_MIN_WIN_RATE
+from config.config import HTTP_TIMEOUT_FEED
 from app.http_client import request_json
 from app.logger_utils import log_process
 from app.budget import get_budget
 try:
-    from config import CIELO_LIST_IDS  # optional multi-list support
+    from config.config import CIELO_LIST_IDS  # optional multi-list support
 except Exception:
     CIELO_LIST_IDS = []
 

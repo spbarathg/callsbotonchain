@@ -1,0 +1,1 @@
+this bot should be able to flip 500$ to 3000$ within a week

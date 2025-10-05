@@ -5,8 +5,8 @@ Automated cryptocurrency signal detection and trading bot for Solana tokens.
 ## 🚀 Quick Links
 
 - **Documentation**: See [`docs/`](docs/) folder
-- **Operations**: See [`ops/`](ops/) folder  
-- **Monitoring**: See [`monitoring/`](monitoring/) folder
+- **Operations**: See [`docs/operations/`](docs/operations/) folder  
+- **Monitoring**: See [`docs/monitoring/`](docs/monitoring/) folder
 - **Current Status**: See [`docs/STATUS.md`](docs/STATUS.md)
 
 ## 📁 Repository Structure
@@ -20,50 +20,48 @@ callsbotonchain/
 │   ├── budget.py           # API budget management
 │   └── ...                 # Other app modules
 │
-├── scripts/                # Executable scripts
-│   └── bot.py              # Main worker script
+├── config/                 # Configuration files
+│   ├── config.py           # Main configuration
+│   └── conftest.py         # Test configuration
 │
+├── deployment/             # Deployment configuration
+│   ├── Caddyfile           # Reverse proxy config
+│   ├── docker-compose.yml  # Docker orchestration
+│   └── Dockerfile          # Container definition
+│
+├── docs/                   # Documentation (consolidated)
+│   ├── api/                # API documentation
+│   ├── development/        # Developer guides
+│   ├── operations/         # Operations guides
+│   ├── monitoring/         # Monitoring guides
+│   ├── guides/             # General guides
+│   └── README.md           # Documentation index
+│
+├── scripts/                # Executable scripts
+│   ├── bot.py              # Main worker script
+│   ├── track_performance.py # Performance tracking
+│   └── analyze_performance.py # Analysis script
+│
+├── src/                    # Web interface
+│   ├── server.py           # Flask API server
+│   ├── api_enhanced.py     # Enhanced API endpoints
+│   ├── paper_trading.py    # Paper trading simulator
+│   ├── templates/          # HTML templates
+│   └── static/             # CSS, JS assets
+│
+├── tests/                  # Test suite
 ├── tradingSystem/          # Trading system (Jupiter V6)
 │   ├── cli.py              # Trading CLI
 │   ├── trader.py           # Trade engine
 │   ├── broker.py           # Exchange interface
-│   ├── strategy.py         # Trading strategies
-│   └── ...                 # Other trading modules
+│   └── strategy.py         # Trading strategies
 │
-├── src/                    # Web interface
-│   ├── server.py           # Flask API server
-│   ├── templates/          # HTML templates
-│   └── static/             # CSS, JS assets
-│
-├── docs/                   # Documentation
-│   ├── STATUS.md           # Current operational status
-│   ├── README.md           # Documentation index
-│   ├── PRODUCTION_SAFETY.md
-│   ├── TRADING_DEPLOYMENT.md
-│   └── TRADING_MONITORING.md
-│
-├── ops/                    # Operations guides
-│   ├── README.md           # Ops documentation index
-│   ├── HEALTH_CHECK.md     # Health monitoring
-│   ├── ANALYSIS_GUIDE.md   # Performance analysis
-│   └── TROUBLESHOOTING.md  # Issue resolution
-│
-├── monitoring/             # Local monitoring system
-│   ├── monitor_bot.py      # Main monitor script
-│   ├── analyze_metrics.py  # Analysis tool
-│   └── MONITORING_SYSTEM.md # Monitoring guide
-│
-├── tests/                  # Test suite
-├── tools/                  # Utility scripts
 ├── analytics/              # Generated monitoring data (gitignored)
 ├── var/                    # Runtime data (gitignored)
 ├── data/                   # Logs and backups (gitignored)
 │
-├── config.py               # Configuration settings
-├── conftest.py             # Test configuration
 ├── requirements.txt        # Python dependencies
-├── docker-compose.yml      # Docker orchestration
-├── Dockerfile              # Container definition
+├── .gitignore              # Git ignore rules
 └── README.md               # This file
 ```
 
@@ -103,7 +101,7 @@ docker ps
 curl http://127.0.0.1/api/v2/quick-stats | jq
 ```
 
-**See Full Guide**: [`ops/HEALTH_CHECK.md`](ops/HEALTH_CHECK.md)
+**See Full Guide**: [`docs/operations/HEALTH_CHECK.md`](docs/operations/HEALTH_CHECK.md)
 
 ### For Developers
 
@@ -119,7 +117,7 @@ pytest
 python monitoring/monitor_bot.py
 ```
 
-**See Development Guide**: [`docs/README.md`](docs/README.md)
+**See Development Guide**: [`docs/development/README.md`](docs/development/README.md)
 
 ### For Analysis
 
@@ -133,7 +131,7 @@ python monitoring/monitor_bot.py
 python monitoring/analyze_metrics.py
 ```
 
-**See Monitoring Guide**: [`monitoring/MONITORING_SYSTEM.md`](monitoring/MONITORING_SYSTEM.md)
+**See Monitoring Guide**: [`docs/monitoring/MONITORING_SYSTEM.md`](docs/monitoring/MONITORING_SYSTEM.md)
 
 ## 📊 Current Status
 
@@ -161,16 +159,16 @@ python monitoring/analyze_metrics.py
 ## 🐛 Troubleshooting
 
 **Common Issues:**
-- No alerts? Check [`ops/TROUBLESHOOTING.md`](ops/TROUBLESHOOTING.md#3-no-alerts-being-generated)
-- Budget exhausted? See [`ops/TROUBLESHOOTING.md`](ops/TROUBLESHOOTING.md#2-high-budget-usage--api-exhaustion)
-- Database errors? Check [`ops/TROUBLESHOOTING.md`](ops/TROUBLESHOOTING.md#4-database-errors--permission-issues)
+- No alerts? Check [`docs/operations/TROUBLESHOOTING.md`](docs/operations/TROUBLESHOOTING.md#3-no-alerts-being-generated)
+- Budget exhausted? See [`docs/operations/TROUBLESHOOTING.md`](docs/operations/TROUBLESHOOTING.md#2-high-budget-usage--api-exhaustion)
+- Database errors? Check [`docs/operations/TROUBLESHOOTING.md`](docs/operations/TROUBLESHOOTING.md#4-database-errors--permission-issues)
 
 ## 📚 Documentation Index
 
 ### Operations
-- [`ops/HEALTH_CHECK.md`](ops/HEALTH_CHECK.md) - Health monitoring procedures
-- [`ops/ANALYSIS_GUIDE.md`](ops/ANALYSIS_GUIDE.md) - Performance analysis
-- [`ops/TROUBLESHOOTING.md`](ops/TROUBLESHOOTING.md) - Issue resolution
+- [`docs/operations/HEALTH_CHECK.md`](docs/operations/HEALTH_CHECK.md) - Health monitoring procedures
+- [`docs/operations/ANALYSIS_GUIDE.md`](docs/operations/ANALYSIS_GUIDE.md) - Performance analysis
+- [`docs/operations/TROUBLESHOOTING.md`](docs/operations/TROUBLESHOOTING.md) - Issue resolution
 
 ### System Documentation
 - [`docs/STATUS.md`](docs/STATUS.md) - Current operational status
@@ -179,7 +177,7 @@ python monitoring/analyze_metrics.py
 - [`docs/TRADING_MONITORING.md`](docs/TRADING_MONITORING.md) - Trading monitoring
 
 ### Monitoring
-- [`monitoring/MONITORING_SYSTEM.md`](monitoring/MONITORING_SYSTEM.md) - Local monitoring guide
+- [`docs/monitoring/MONITORING_SYSTEM.md`](docs/monitoring/MONITORING_SYSTEM.md) - Local monitoring guide
 
 ## 🔗 External Resources
 

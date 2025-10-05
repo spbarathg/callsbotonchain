@@ -3,7 +3,7 @@ from typing import Any, Dict, Optional
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
-from config import HTTP_MAX_RETRIES, HTTP_BACKOFF_FACTOR
+from config.config import HTTP_MAX_RETRIES, HTTP_BACKOFF_FACTOR
 from app.metrics import inc_api_call
 
 

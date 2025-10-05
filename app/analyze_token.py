@@ -4,7 +4,7 @@ import os
 import json
 import threading
 from typing import Dict, Tuple, List, Any, Optional
-from config import (
+from config.config import (
     CIELO_API_KEY,
     CIELO_DISABLE_STATS,
     PRELIM_USD_HIGH,
@@ -49,7 +49,7 @@ from config import (
     ENFORCE_BUNDLER_CAP,
     ENFORCE_INSIDER_CAP,
 )
-from config import HTTP_TIMEOUT_STATS
+from config.config import HTTP_TIMEOUT_STATS
 from app.http_client import request_json
 from app.budget import get_budget
 from app.logger_utils import log_process
@@ -757,7 +757,7 @@ def _check_senior_common(stats: Dict[str, Any], token_address: Optional[str], *,
 
 
 def check_senior_strict(stats: Dict[str, Any], token_address: Optional[str] = None) -> bool:
-    from config import ALLOW_UNKNOWN_SECURITY
+    from config.config import ALLOW_UNKNOWN_SECURITY
     return _check_senior_common(stats, token_address,
                                 allow_unknown=ALLOW_UNKNOWN_SECURITY,
                                 top10_buffer=0.0,

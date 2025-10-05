@@ -1,7 +1,7 @@
 # notify.py
 import time
-from config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, TELEGRAM_ENABLED
-from config import HTTP_TIMEOUT_TELEGRAM
+from config.config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, TELEGRAM_ENABLED
+from config.config import HTTP_TIMEOUT_TELEGRAM
 from app.http_client import request_json
 
 

@@ -3,7 +3,7 @@ import sqlite3
 import math
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List
-from config import DB_FILE, DB_RETENTION_HOURS
+from config.config import DB_FILE, DB_RETENTION_HOURS
 
 
 def _get_conn() -> sqlite3.Connection:

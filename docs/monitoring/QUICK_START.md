@@ -171,7 +171,6 @@ NUANCED_SCORE_REDUCTION = 2  # Increase from 1
 | File | Purpose |
 |------|---------|
 | `analyze_signals.py` | Main signal performance analyzer |
-| `track_signal_reasons.py` | Records WHY each signal was sent (optional) |
 | `SIGNAL_ANALYSIS.md` | Comprehensive documentation |
 | `MONITORING_SYSTEM.md` | Updated with signal analysis section |
 | `QUICK_START.md` | This file |

@@ -1,0 +1,44 @@
+# CallsBotOnChain Reverse Proxy Configuration
+# Routes traffic to the web service
+
+# Main dashboard
+:80 {
+    # Enable compression
+    encode gzip
+
+    # Route to web service
+    reverse_proxy web:8080 {
+        # Health check
+        health_uri /api/v2/quick-stats
+        health_interval 30s
+        health_timeout 5s
+    }
+
+    # Logging
+    log {
+        output file /var/log/caddy/access.log
+        format json
+    }
+
+    # Security headers
+    header {
+        # Enable HSTS
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        
+        # Prevent clickjacking
+        X-Frame-Options "SAMEORIGIN"
+        
+        # XSS protection
+        X-Content-Type-Options "nosniff"
+        X-XSS-Protection "1; mode=block"
+        
+        # Content Security Policy
+        Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:;"
+    }
+}
+
+# Optional: HTTPS redirect (uncomment if using SSL)
+# :443 {
+#     tls your-email@domain.com
+#     reverse_proxy web:8080
+# }

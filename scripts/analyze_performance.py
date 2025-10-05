@@ -11,7 +11,7 @@ from typing import Dict, List, Tuple
 # Add parent directory to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from config import DB_FILE
+from config.config import DB_FILE
 
 
 def get_conn():

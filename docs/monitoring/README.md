@@ -98,7 +98,6 @@ See **[MONITORING_SYSTEM.md](MONITORING_SYSTEM.md)** for details.
 | **monitor_bot.py** | Continuous operational health monitoring |
 | **analyze_metrics.py** | Analyzes operational metrics and trends |
 | **analyze_signals.py** | Analyzes signal performance and profitability ⭐ |
-| **track_signal_reasons.py** | Records detailed signal criteria (optional) |
 | **MONITORING_SYSTEM.md** | Full operational monitoring documentation |
 | **SIGNAL_ANALYSIS.md** | Full signal performance documentation ⭐ |
 | **QUICK_START.md** | Quick start guide for signal analysis ⭐ |
