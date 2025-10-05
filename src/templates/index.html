@@ -842,12 +842,12 @@
       // ---------- v2 Overview ----------
       async function fetchOverviewV2(){
         try{
-          const [qs, sm, fh, bs, ra] = await Promise.all([
+          const [qs, sm, fh, bs, statsData] = await Promise.all([
             fetch('/api/v2/quick-stats').then(r=>r.json()),
             fetch('/api/v2/smart-money-status').then(r=>r.json()),
             fetch('/api/v2/feed-health').then(r=>r.json()),
             fetch('/api/v2/budget-status').then(r=>r.json()),
-            fetch('/api/v2/recent-activity?limit=20').then(r=>r.json()),
+            fetch('/api/stats').then(r=>r.json()), // Use old stats API for full alert data
           ]);
           // Quick stats
           document.getElementById('total_alerts').textContent = String(qs.total_alerts||0);
@@ -862,12 +862,33 @@
           // Budget
           document.getElementById('budget_day').textContent = `${bs.daily_used||0}/${bs.daily_max||0} (${bs.daily_percent||0}%)`;
           document.getElementById('budget_reset').textContent = `resets in ~${bs.reset_hours||0}h ${bs.reset_minutes||0}m`;
-          // Recent table (reuse existing alerts table)
+          // Recent table - use stats data which includes mcap/liq/vol
           const tbody = document.querySelector('#alerts_table tbody');
           tbody.innerHTML = '';
-          (ra.alerts||[]).forEach(a=>{
+          const filter = (document.getElementById('alerts_filter').value||'').toLowerCase();
+          const onlySmart = document.getElementById('alerts_only_smart').checked;
+          const onlyHigh = document.getElementById('alerts_only_high').checked;
+          let rows = (statsData.recent_alerts || []).slice(0, 20);
+          rows = rows.filter(a=>{
+            const sym = (a.symbol||'').toLowerCase();
+            const tok = (a.token||'').toLowerCase();
+            if (filter && !(sym.includes(filter) || tok.includes(filter))) return false;
+            if (onlyHigh && !((a.score||0) >= 9)) return false;
+            if (onlySmart && !String(a.conviction||'').toLowerCase().includes('high confidence')) return false;
+            return true;
+          });
+          rows.forEach(a => {
             const tr = document.createElement('tr');
-            tr.innerHTML = `<td>${a.timestamp||''}</td><td>${tokenLinks(a.token_full||a.token)}</td><td>${a.symbol||''}</td><td>${a.score??''}</td><td>${a.conviction||''}</td><td></td><td></td><td></td>`;
+            tr.innerHTML = `
+              <td>${a.ts||''}</td>
+              <td>${tokenLinks(a.token)}</td>
+              <td>${a.symbol && a.symbol !== '?' ? a.symbol : (a.token ? (a.token || '').slice(0,4)+'…' : '')}</td>
+              <td>${a.score != null ? a.score : ''}</td>
+              <td>${a.conviction || ''}</td>
+              <td>${a.market_cap != null ? ('$' + Number(a.market_cap).toLocaleString()) : ''}</td>
+              <td>${a.liquidity != null ? ('$' + Number(a.liquidity).toLocaleString()) : ''}</td>
+              <td>${a.vol24 != null ? ('$' + Number(a.vol24).toLocaleString()) : ''}</td>
+            `;
             tbody.appendChild(tr);
           });
         }catch(e){/* ignore */}
