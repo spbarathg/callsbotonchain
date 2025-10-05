@@ -44,6 +44,7 @@ from app.storage import (
 	init_db,
 	has_been_alerted,
 	mark_as_alerted,
+	record_alert_with_metadata,
 	record_token_activity,
 	get_token_velocity,
 	get_recent_token_signals,
@@ -435,12 +436,31 @@ def process_feed_item(tx: dict, is_smart_cycle: bool, session_alerted_tokens: se
 			scoring_details.append(f"Velocity: +{velocity_bonus//2} ({velocity_data['observations']} observations)")
 		except Exception:
 			pass
+	
+	# Smart money bonus
+	try:
+		from config import SMART_MONEY_SCORE_BONUS, GENERAL_CYCLE_MIN_SCORE
+	except:
+		SMART_MONEY_SCORE_BONUS, GENERAL_CYCLE_MIN_SCORE = 2, 9
+	
+	if smart_involved and SMART_MONEY_SCORE_BONUS > 0:
+		score = min(score + SMART_MONEY_SCORE_BONUS, 10)
+		try:
+			scoring_details.append(f"Smart Money: +{SMART_MONEY_SCORE_BONUS}")
+		except Exception:
+			pass
+	
 	# post-score meta gates
 	if REQUIRE_SMART_MONEY_FOR_ALERT and not smart_involved:
 		return "skipped", None, 0, None
 	if REQUIRE_VELOCITY_MIN_SCORE_FOR_ALERT:
 		if (velocity_bonus // 2) < (REQUIRE_VELOCITY_MIN_SCORE_FOR_ALERT // 2):
 			return "skipped", None, 0, None
+	
+	# General cycle requires higher score
+	if not smart_involved and score < GENERAL_CYCLE_MIN_SCORE:
+		_out(f"REJECTED (General Cycle Low Score): {token_address} (score: {score}/{GENERAL_CYCLE_MIN_SCORE} required)")
+		return "skipped", None, 0, None
 	# senior strict
 	if not check_senior_strict(stats, token_address):
 		_out(f"REJECTED (Senior Strict): {token_address}")
@@ -542,11 +562,13 @@ def process_feed_item(tx: dict, is_smart_cycle: bool, session_alerted_tokens: se
 			telegram_ok = send_telegram_alert(message)
 	except Exception:
 		telegram_ok = False
-	# mark and log
+	# mark and log with comprehensive metadata
 	baseline_price = float(price or 0)
 	baseline_mcap = float(market_cap or 0)
 	baseline_liq = float(liquidity or 0)
 	baseline_vol = float(volume_24h or 0)
+	
+	# Legacy mark for backwards compatibility
 	mark_as_alerted(
 		token_address,
 		score,
@@ -557,6 +579,48 @@ def process_feed_item(tx: dict, is_smart_cycle: bool, session_alerted_tokens: se
 		baseline_vol,
 		conviction_type=conviction_type,
 	)
+	
+	# New comprehensive metadata tracking
+	try:
+		vel_snap = get_token_velocity(token_address, minutes_back=15) or {}
+		
+		# Calculate token age if available
+		token_age_minutes = None
+		try:
+			all_obs = get_recent_token_signals(token_address, 365*24*3600)
+			if all_obs:
+				first_seen = all_obs[-1]
+				first_dt = datetime.strptime(first_seen, '%Y-%m-%d %H:%M:%S')
+				token_age_minutes = (datetime.now() - first_dt).total_seconds() / 60.0
+		except Exception:
+			pass
+		
+		alert_metadata = {
+			'token_age_minutes': token_age_minutes,
+			'unique_traders_15m': vel_snap.get('unique_traders'),
+			'smart_money_involved': smart_involved,
+			'smart_wallet_address': trader if smart_involved else None,
+			'smart_wallet_pnl': None,  # Could extract from tx if available
+			'velocity_score_15m': vel_snap.get('velocity_score'),
+			'velocity_bonus': int(velocity_bonus // 2),
+			'passed_junior_strict': jr_strict_ok,
+			'passed_senior_strict': True,  # Always true if we reached here
+			'passed_debate': conviction_type == "Nuanced Conviction",
+			'sol_price_usd': None,  # Could fetch if needed
+			'feed_source': stats.get("_source") or "unknown",
+			'dex_name': tx.get('dex'),
+		}
+		
+		record_alert_with_metadata(
+			token_address=token_address,
+			preliminary_score=preliminary_score,
+			final_score=score,
+			conviction_type=conviction_type,
+			stats=stats,
+			alert_metadata=alert_metadata
+		)
+	except Exception as e:
+		_out(f"Warning: Could not record alert metadata: {e}")
 	try:
 		if relay_enabled():
 			relay_contract_address_sync(token_address)

@@ -33,12 +33,17 @@ def init_db():
         )
     """)
 
-    # Price tracking for alerted tokens
+    # Enhanced price tracking for alerted tokens with comprehensive metadata
     c.execute("""
         CREATE TABLE IF NOT EXISTS alerted_token_stats (
             token_address TEXT PRIMARY KEY,
-            first_alert_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            last_checked_at TIMESTAMP,
+            first_alert_at REAL,
+            last_checked_at REAL,
+            preliminary_score INTEGER,
+            final_score INTEGER,
+            conviction_type TEXT,
+            
+            -- Price tracking
             first_price_usd REAL,
             first_market_cap_usd REAL,
             first_liquidity_usd REAL,
@@ -48,9 +53,47 @@ def init_db():
             last_volume_24h_usd REAL,
             peak_price_usd REAL,
             peak_market_cap_usd REAL,
-            peak_price_at TIMESTAMP,
-            peak_market_cap_at TIMESTAMP,
-            peak_volume_24h_usd REAL
+            peak_price_at REAL,
+            peak_market_cap_at REAL,
+            peak_volume_24h_usd REAL,
+            
+            -- Performance metrics
+            price_change_1h REAL,
+            price_change_6h REAL,
+            price_change_24h REAL,
+            max_gain_percent REAL,
+            max_drawdown_percent REAL,
+            is_rug BOOLEAN DEFAULT 0,
+            rug_detected_at REAL,
+            
+            -- Token metadata at alert time
+            token_name TEXT,
+            token_symbol TEXT,
+            token_age_minutes REAL,
+            holder_count INTEGER,
+            unique_traders_15m INTEGER,
+            
+            -- Alert reasoning - WHY it passed
+            smart_money_involved BOOLEAN,
+            smart_wallet_address TEXT,
+            smart_wallet_pnl REAL,
+            velocity_score_15m INTEGER,
+            velocity_bonus INTEGER,
+            passed_junior_strict BOOLEAN,
+            passed_senior_strict BOOLEAN,
+            passed_debate BOOLEAN,
+            
+            -- Security features at alert
+            lp_locked BOOLEAN,
+            mint_revoked BOOLEAN,
+            top10_concentration REAL,
+            bundlers_percent REAL,
+            insiders_percent REAL,
+            
+            -- Market conditions at alert
+            sol_price_usd REAL,
+            feed_source TEXT,
+            dex_name TEXT
         )
     """)
 
@@ -68,84 +111,68 @@ def init_db():
         )
     """)
 
-    # Migration: if an older schema used a composite PRIMARY KEY
-    try:
-        row = c.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='token_activity'").fetchone()
-        if row and "PRIMARY KEY (token_address, observed_at)" in (row[0] or ""):
-            # Migrate to autoincrement id table
-            c.execute("""
-                CREATE TABLE token_activity_new (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    token_address TEXT,
-                    observed_at TIMESTAMP,
-                    usd_value REAL,
-                    transaction_count INTEGER,
-                    smart_money_involved BOOLEAN,
-                    preliminary_score INTEGER
-                )
-            """)
-            c.execute("""
-                INSERT INTO token_activity_new (token_address, observed_at, usd_value, transaction_count, smart_money_involved, preliminary_score)
-                SELECT token_address, observed_at, usd_value, transaction_count, smart_money_involved, preliminary_score FROM token_activity
-            """)
-            c.execute("DROP TABLE token_activity")
-            c.execute("ALTER TABLE token_activity_new RENAME TO token_activity")
-    except Exception:
-        pass
+    # New table: Price snapshots over time for alerted tokens
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS price_snapshots (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            token_address TEXT,
+            snapshot_at REAL,
+            price_usd REAL,
+            market_cap_usd REAL,
+            liquidity_usd REAL,
+            volume_24h_usd REAL,
+            holder_count INTEGER,
+            price_change_1h REAL,
+            price_change_24h REAL,
+            FOREIGN KEY (token_address) REFERENCES alerted_token_stats(token_address)
+        )
+    """)
+    
+    # Create index for faster lookups
+    c.execute("CREATE INDEX IF NOT EXISTS idx_price_snapshots_token ON price_snapshots(token_address)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_price_snapshots_time ON price_snapshots(snapshot_at)")
 
-    # Migration: add trader_address column if missing
-    try:
-        cols = c.execute("PRAGMA table_info(token_activity)").fetchall()
-        col_names = {col[1] for col in cols}
-        if 'trader_address' not in col_names:
-            c.execute("ALTER TABLE token_activity ADD COLUMN trader_address TEXT")
-    except Exception:
-        pass
-
-    # Migration: add missing columns to alerted_token_stats
-    try:
-        cols = c.execute("PRAGMA table_info(alerted_token_stats)").fetchall()
-        col_names = {col[1] for col in cols}
-        add_cols = []
-        if 'first_price_usd' not in col_names:
-            add_cols.append("ADD COLUMN first_price_usd REAL")
-        if 'first_market_cap_usd' not in col_names:
-            add_cols.append("ADD COLUMN first_market_cap_usd REAL")
-        if 'first_liquidity_usd' not in col_names:
-            add_cols.append("ADD COLUMN first_liquidity_usd REAL")
-        if 'last_market_cap_usd' not in col_names:
-            add_cols.append("ADD COLUMN last_market_cap_usd REAL")
-        if 'last_liquidity_usd' not in col_names:
-            add_cols.append("ADD COLUMN last_liquidity_usd REAL")
-        if 'last_volume_24h_usd' not in col_names:
-            add_cols.append("ADD COLUMN last_volume_24h_usd REAL")
-        if 'peak_market_cap_usd' not in col_names:
-            add_cols.append("ADD COLUMN peak_market_cap_usd REAL")
-        if 'peak_volume_24h_usd' not in col_names:
-            add_cols.append("ADD COLUMN peak_volume_24h_usd REAL")
-        if 'peak_price_at' not in col_names:
-            add_cols.append("ADD COLUMN peak_price_at TIMESTAMP")
-        if 'peak_market_cap_at' not in col_names:
-            add_cols.append("ADD COLUMN peak_market_cap_at TIMESTAMP")
-        if 'outcome' not in col_names:
-            add_cols.append("ADD COLUMN outcome TEXT")
-        if 'outcome_at' not in col_names:
-            add_cols.append("ADD COLUMN outcome_at TIMESTAMP")
-        if 'peak_drawdown_pct' not in col_names:
-            add_cols.append("ADD COLUMN peak_drawdown_pct REAL")
-        for stmt in add_cols:
-            c.execute(f"ALTER TABLE alerted_token_stats {stmt}")
-    except Exception:
-        pass
-
-    # Migration: add conviction_type to alerted_tokens if missing
-    try:
-        cols = c.execute("PRAGMA table_info(alerted_tokens)").fetchall()
-        col_names = {col[1] for col in cols}
-        if 'conviction_type' not in col_names:
-            c.execute("ALTER TABLE alerted_tokens ADD COLUMN conviction_type TEXT")
-    except Exception:
-        pass
+    # Migration: Add new columns to existing tables if they don't exist
+    existing_columns = [row[1] for row in c.execute("PRAGMA table_info(alerted_token_stats)").fetchall()]
+    
+    new_columns = [
+        ("preliminary_score", "INTEGER"),
+        ("token_name", "TEXT"),
+        ("token_symbol", "TEXT"),
+        ("token_age_minutes", "REAL"),
+        ("holder_count", "INTEGER"),
+        ("unique_traders_15m", "INTEGER"),
+        ("smart_money_involved", "BOOLEAN"),
+        ("smart_wallet_address", "TEXT"),
+        ("smart_wallet_pnl", "REAL"),
+        ("velocity_score_15m", "INTEGER"),
+        ("velocity_bonus", "INTEGER"),
+        ("passed_junior_strict", "BOOLEAN"),
+        ("passed_senior_strict", "BOOLEAN"),
+        ("passed_debate", "BOOLEAN"),
+        ("lp_locked", "BOOLEAN"),
+        ("mint_revoked", "BOOLEAN"),
+        ("top10_concentration", "REAL"),
+        ("bundlers_percent", "REAL"),
+        ("insiders_percent", "REAL"),
+        ("sol_price_usd", "REAL"),
+        ("feed_source", "TEXT"),
+        ("dex_name", "TEXT"),
+        ("price_change_1h", "REAL"),
+        ("price_change_6h", "REAL"),
+        ("price_change_24h", "REAL"),
+        ("max_gain_percent", "REAL"),
+        ("max_drawdown_percent", "REAL"),
+        ("is_rug", "BOOLEAN DEFAULT 0"),
+        ("rug_detected_at", "REAL"),
+    ]
+    
+    for col_name, col_type in new_columns:
+        if col_name not in existing_columns:
+            try:
+                c.execute(f"ALTER TABLE alerted_token_stats ADD COLUMN {col_name} {col_type}")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
 
     conn.commit()
     conn.close()
@@ -154,42 +181,336 @@ def init_db():
 def has_been_alerted(token_address: str) -> bool:
     conn = _get_conn()
     c = conn.cursor()
-    c.execute("SELECT 1 FROM alerted_tokens WHERE token_address = ?", (token_address,))
-    result = c.fetchone()
+    c.execute("SELECT 1 FROM alerted_tokens WHERE token_address = ? LIMIT 1", (token_address,))
+    row = c.fetchone()
     conn.close()
-    return result is not None
+    return row is not None
 
 
-def mark_as_alerted(token_address: str, score: int = 0, smart_money_detected: bool = False,
-                    baseline_price_usd: float = None, baseline_market_cap_usd: float = None,
-                    baseline_liquidity_usd: float = None, baseline_volume_24h_usd: float = None,
-                    conviction_type: Optional[str] = None) -> None:
+def mark_alerted(token_address: str, final_score: int, smart_money_detected: bool, conviction_type: str) -> None:
     conn = _get_conn()
     c = conn.cursor()
     c.execute("""
-        INSERT OR IGNORE INTO alerted_tokens
-        (token_address, final_score, smart_money_detected, conviction_type)
+        INSERT OR IGNORE INTO alerted_tokens (token_address, final_score, smart_money_detected, conviction_type)
         VALUES (?, ?, ?, ?)
-    """, (token_address, score, smart_money_detected, conviction_type))
-    # initialize tracking row
-    c.execute(
-        """
-        INSERT OR IGNORE INTO alerted_token_stats (
-            token_address, last_checked_at, first_price_usd, first_market_cap_usd, first_liquidity_usd,
-            last_price_usd, last_market_cap_usd, last_liquidity_usd, last_volume_24h_usd,
-            peak_price_usd, peak_market_cap_usd, peak_volume_24h_usd,
-            peak_price_at, peak_market_cap_at
-        ) VALUES (?, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-        """,
-        (
-            token_address,
-            baseline_price_usd, baseline_market_cap_usd, baseline_liquidity_usd,
-            baseline_price_usd, baseline_market_cap_usd, baseline_liquidity_usd, baseline_volume_24h_usd,
-            baseline_price_usd, baseline_market_cap_usd, baseline_volume_24h_usd,
-        ),
-    )
+    """, (token_address, final_score, smart_money_detected, conviction_type))
     conn.commit()
     conn.close()
+
+
+def record_alert_with_metadata(
+    token_address: str,
+    preliminary_score: int,
+    final_score: int,
+    conviction_type: str,
+    stats: Dict[str, Any],
+    alert_metadata: Dict[str, Any]
+) -> None:
+    """
+    Record comprehensive alert data including WHY the token passed gates.
+    This allows us to analyze which features correlate with success/failure.
+    """
+    conn = _get_conn()
+    c = conn.cursor()
+    
+    now = datetime.now().timestamp()
+    
+    # Extract all relevant data
+    price_data = stats.get('price', {})
+    market_data = stats.get('market', {})
+    security_data = stats.get('security', {})
+    liquidity_data = stats.get('liquidity', {})
+    holders_data = stats.get('holders', {})
+    metadata = stats.get('metadata', {})
+    
+    c.execute("""
+        INSERT OR REPLACE INTO alerted_token_stats (
+            token_address, first_alert_at, last_checked_at,
+            preliminary_score, final_score, conviction_type,
+            first_price_usd, first_market_cap_usd, first_liquidity_usd,
+            last_price_usd, last_market_cap_usd, last_liquidity_usd,
+            last_volume_24h_usd,
+            token_name, token_symbol, token_age_minutes,
+            holder_count, unique_traders_15m,
+            smart_money_involved, smart_wallet_address, smart_wallet_pnl,
+            velocity_score_15m, velocity_bonus,
+            passed_junior_strict, passed_senior_strict, passed_debate,
+            lp_locked, mint_revoked,
+            top10_concentration, bundlers_percent, insiders_percent,
+            sol_price_usd, feed_source, dex_name,
+            price_change_1h, price_change_24h
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        token_address,
+        now,
+        now,
+        preliminary_score,
+        final_score,
+        conviction_type,
+        price_data.get('price_usd'),
+        market_data.get('market_cap_usd'),
+        liquidity_data.get('liquidity_usd'),
+        price_data.get('price_usd'),
+        market_data.get('market_cap_usd'),
+        liquidity_data.get('liquidity_usd'),
+        market_data.get('volume_24h_usd'),
+        metadata.get('name'),
+        metadata.get('symbol'),
+        alert_metadata.get('token_age_minutes'),
+        holders_data.get('holder_count'),
+        alert_metadata.get('unique_traders_15m'),
+        alert_metadata.get('smart_money_involved', False),
+        alert_metadata.get('smart_wallet_address'),
+        alert_metadata.get('smart_wallet_pnl'),
+        alert_metadata.get('velocity_score_15m'),
+        alert_metadata.get('velocity_bonus'),
+        alert_metadata.get('passed_junior_strict', False),
+        alert_metadata.get('passed_senior_strict', False),
+        alert_metadata.get('passed_debate', False),
+        liquidity_data.get('is_lp_locked') or liquidity_data.get('is_lp_burned'),
+        security_data.get('is_mint_revoked'),
+        holders_data.get('top_10_holders_percent'),
+        holders_data.get('bundlers_percent'),
+        holders_data.get('insiders_percent'),
+        alert_metadata.get('sol_price_usd'),
+        alert_metadata.get('feed_source'),
+        alert_metadata.get('dex_name'),
+        price_data.get('price_change_1h'),
+        price_data.get('price_change_24h'),
+    ))
+    
+    conn.commit()
+    conn.close()
+
+
+def record_price_snapshot(token_address: str, stats: Dict[str, Any]) -> None:
+    """Record a price snapshot for tracking performance over time"""
+    conn = _get_conn()
+    c = conn.cursor()
+    
+    now = datetime.now().timestamp()
+    price_data = stats.get('price', {})
+    market_data = stats.get('market', {})
+    liquidity_data = stats.get('liquidity', {})
+    holders_data = stats.get('holders', {})
+    
+    c.execute("""
+        INSERT INTO price_snapshots (
+            token_address, snapshot_at, price_usd, market_cap_usd,
+            liquidity_usd, volume_24h_usd, holder_count,
+            price_change_1h, price_change_24h
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        token_address,
+        now,
+        price_data.get('price_usd'),
+        market_data.get('market_cap_usd'),
+        liquidity_data.get('liquidity_usd'),
+        market_data.get('volume_24h_usd'),
+        holders_data.get('holder_count'),
+        price_data.get('price_change_1h'),
+        price_data.get('price_change_24h'),
+    ))
+    
+    conn.commit()
+    conn.close()
+
+
+def update_token_performance(token_address: str, stats: Dict[str, Any]) -> None:
+    """Update performance metrics for an alerted token"""
+    conn = _get_conn()
+    c = conn.cursor()
+    
+    now = datetime.now().timestamp()
+    price_data = stats.get('price', {})
+    market_data = stats.get('market', {})
+    liquidity_data = stats.get('liquidity', {})
+    
+    # Get first price to calculate gains/losses
+    c.execute("SELECT first_price_usd, peak_price_usd FROM alerted_token_stats WHERE token_address = ?", (token_address,))
+    row = c.fetchone()
+    
+    if row:
+        first_price = row[0] or 0
+        current_peak = row[1] or 0
+        current_price = price_data.get('price_usd', 0)
+        
+        # Calculate performance metrics
+        if first_price > 0:
+            gain_percent = ((current_price - first_price) / first_price) * 100
+            max_gain = max(gain_percent, ((current_peak - first_price) / first_price) * 100) if current_peak else gain_percent
+            max_drawdown = min(0, gain_percent)  # Track worst drop from entry
+        else:
+            gain_percent = max_gain = max_drawdown = 0
+        
+        # Update peak if current price is higher
+        new_peak_price = max(current_peak, current_price) if current_peak else current_price
+        peak_price_at = now if new_peak_price > (current_peak or 0) else None
+        
+        # Detect rug pull: >80% drop from peak or liquidity removed
+        is_rug = False
+        rug_at = None
+        if current_peak and current_price < current_peak * 0.2:  # >80% drop from peak
+            is_rug = True
+            rug_at = now
+        elif liquidity_data.get('liquidity_usd', float('inf')) < 100:  # Liquidity removed
+            is_rug = True
+            rug_at = now
+        
+        # Calculate time-based returns
+        c.execute("SELECT snapshot_at, price_usd FROM price_snapshots WHERE token_address = ? ORDER BY snapshot_at", (token_address,))
+        snapshots = c.fetchall()
+        
+        price_1h = price_6h = None
+        for snap_time, snap_price in snapshots:
+            if now - snap_time <= 3600 and price_1h is None:  # 1 hour
+                price_1h = snap_price
+            if now - snap_time <= 21600 and price_6h is None:  # 6 hours
+                price_6h = snap_price
+        
+        change_1h = ((current_price - price_1h) / price_1h * 100) if price_1h and price_1h > 0 else None
+        change_6h = ((current_price - price_6h) / price_6h * 100) if price_6h and price_6h > 0 else None
+        change_24h = price_data.get('price_change_24h')
+        
+        update_sql = """
+            UPDATE alerted_token_stats SET
+                last_checked_at = ?,
+                last_price_usd = ?,
+                last_market_cap_usd = ?,
+                last_liquidity_usd = ?,
+                last_volume_24h_usd = ?,
+                peak_price_usd = ?,
+                max_gain_percent = ?,
+                max_drawdown_percent = ?,
+                price_change_1h = ?,
+                price_change_6h = ?,
+                price_change_24h = ?
+        """
+        
+        params = [
+            now,
+            current_price,
+            market_data.get('market_cap_usd'),
+            liquidity_data.get('liquidity_usd'),
+            market_data.get('volume_24h_usd'),
+            new_peak_price,
+            max_gain,
+            max_drawdown,
+            change_1h,
+            change_6h,
+            change_24h,
+        ]
+        
+        if peak_price_at:
+            update_sql += ", peak_price_at = ?"
+            params.append(peak_price_at)
+        
+        if is_rug and not row:  # Only set rug flag once
+            update_sql += ", is_rug = 1, rug_detected_at = ?"
+            params.extend([rug_at])
+        
+        update_sql += " WHERE token_address = ?"
+        params.append(token_address)
+        
+        c.execute(update_sql, params)
+    
+    conn.commit()
+    conn.close()
+
+
+def get_alerted_tokens_for_tracking() -> List[str]:
+    """Get list of tokens that need performance tracking"""
+    conn = _get_conn()
+    c = conn.cursor()
+    
+    # Get tokens alerted in last 48 hours that aren't rugged
+    two_days_ago = (datetime.now() - timedelta(hours=48)).timestamp()
+    c.execute("""
+        SELECT token_address FROM alerted_token_stats
+        WHERE first_alert_at >= ? AND (is_rug IS NULL OR is_rug = 0)
+        ORDER BY first_alert_at DESC
+    """, (two_days_ago,))
+    
+    tokens = [row[0] for row in c.fetchall()]
+    conn.close()
+    return tokens
+
+
+def get_performance_summary() -> Dict[str, Any]:
+    """Get aggregate performance statistics"""
+    conn = _get_conn()
+    c = conn.cursor()
+    
+    summary = {}
+    
+    # Overall stats
+    c.execute("""
+        SELECT 
+            COUNT(*) as total_alerts,
+            AVG(max_gain_percent) as avg_max_gain,
+            AVG(price_change_1h) as avg_1h,
+            AVG(price_change_6h) as avg_6h,
+            AVG(price_change_24h) as avg_24h,
+            COUNT(CASE WHEN max_gain_percent > 50 THEN 1 END) as pumps_50plus,
+            COUNT(CASE WHEN max_gain_percent > 100 THEN 1 END) as pumps_100plus,
+            COUNT(CASE WHEN is_rug = 1 THEN 1 END) as rugs,
+            COUNT(CASE WHEN max_gain_percent < -20 THEN 1 END) as dumps_20plus
+        FROM alerted_token_stats
+        WHERE last_checked_at IS NOT NULL
+    """)
+    
+    row = c.fetchone()
+    if row:
+        summary['total_alerts'] = row[0]
+        summary['avg_max_gain'] = row[1]
+        summary['avg_1h'] = row[2]
+        summary['avg_6h'] = row[3]
+        summary['avg_24h'] = row[4]
+        summary['pumps_50plus'] = row[5]
+        summary['pumps_100plus'] = row[6]
+        summary['rugs'] = row[7]
+        summary['dumps_20plus'] = row[8]
+    
+    # Performance by conviction type
+    c.execute("""
+        SELECT 
+            conviction_type,
+            COUNT(*) as count,
+            AVG(max_gain_percent) as avg_gain,
+            COUNT(CASE WHEN is_rug = 1 THEN 1 END) as rug_count
+        FROM alerted_token_stats
+        WHERE last_checked_at IS NOT NULL
+        GROUP BY conviction_type
+    """)
+    
+    summary['by_conviction'] = {}
+    for row in c.fetchall():
+        summary['by_conviction'][row[0]] = {
+            'count': row[1],
+            'avg_gain': row[2],
+            'rug_count': row[3]
+        }
+    
+    # Performance by feature
+    for feature in ['smart_money_involved', 'lp_locked', 'mint_revoked', 'passed_senior_strict']:
+        c.execute(f"""
+            SELECT 
+                AVG(max_gain_percent) as avg_gain,
+                COUNT(CASE WHEN is_rug = 1 THEN 1 END) as rug_count,
+                COUNT(*) as total
+            FROM alerted_token_stats
+            WHERE last_checked_at IS NOT NULL AND {feature} = 1
+        """)
+        row = c.fetchone()
+        if row:
+            summary[f'{feature}_performance'] = {
+                'avg_gain': row[0],
+                'rug_count': row[1],
+                'total': row[2]
+            }
+    
+    conn.close()
+    return summary
 
 
 def record_token_activity(token_address: str, usd_value: float, tx_count: int, smart_money_involved: bool, prelim_score: int, trader_address: Optional[str] = None) -> None:
@@ -207,39 +528,6 @@ def record_token_activity(token_address: str, usd_value: float, tx_count: int, s
         # Ignore duplicate-in-same-second inserts on legacy schemas
         pass
     conn.close()
-
-
-def get_token_velocity(token_address: str, minutes_back: int = 30) -> Optional[Dict[str, Any]]:
-    """Calculate token velocity - activity increase over time"""
-    conn = _get_conn()
-    c = conn.cursor()
-
-    cutoff_time = datetime.now() - timedelta(minutes=minutes_back)
-    # Format cutoff to ISO string for consistent SQLite comparison
-    cutoff_iso = cutoff_time.strftime('%Y-%m-%d %H:%M:%S')
-    c.execute("""
-        SELECT COUNT(*), AVG(usd_value), MAX(transaction_count),
-               COUNT(CASE WHEN smart_money_involved = 1 THEN 1 END),
-               COUNT(DISTINCT COALESCE(trader_address, ''))
-        FROM token_activity
-        WHERE token_address = ? AND observed_at > ?
-    """, (token_address, cutoff_iso))
-
-    result = c.fetchone()
-    conn.close()
-
-    if result and result[0] > 0:
-        observations, avg_usd, max_tx_count, smart_money_count, unique_traders = result
-        velocity_score = min(observations * 2 + smart_money_count, 10)  # Cap at 10
-        return {
-            'observations': observations,
-            'avg_usd_value': avg_usd or 0,
-            'max_tx_count': max_tx_count or 0,
-            'smart_money_interactions': smart_money_count,
-            'velocity_score': velocity_score,
-            'unique_traders': unique_traders or 0
-        }
-    return None
 
 
 def get_recent_token_signals(token_address: str, window_seconds: int) -> List[str]:
@@ -274,303 +562,11 @@ def get_recent_token_signals(token_address: str, window_seconds: int) -> List[st
     return rows
 
 
-def should_fetch_detailed_stats(token_address: str, current_prelim_score: int, *, is_synthetic: bool = False) -> bool:
-    """Determine if we should make expensive API call for detailed stats"""
-    # Always fetch for high preliminary scores
-    from config import PRELIM_DETAILED_MIN, PRELIM_VELOCITY_MIN_SCORE, VELOCITY_REQUIRED
-    # Synthetic items require a higher barrier to spend credits
-    threshold = int(PRELIM_DETAILED_MIN + (1 if is_synthetic else 0))
-    if current_prelim_score >= threshold:
-        return True
-
-    # Check velocity for medium scores
-    vel_gate = int(PRELIM_VELOCITY_MIN_SCORE + (1 if is_synthetic else 0))
-    if current_prelim_score >= vel_gate:
-        velocity = get_token_velocity(token_address, minutes_back=15)
-        if velocity and velocity['velocity_score'] >= VELOCITY_REQUIRED:
-            return True
-
-    return False
-
-
-def get_alerted_tokens_batch(limit: int = 25, older_than_minutes: int = 55):
-    """Return a batch of alerted tokens that haven't been checked recently."""
+def cleanup_old_activity():
+    """Remove old token activity records beyond retention window"""
     conn = _get_conn()
     c = conn.cursor()
-    try:
-        c.execute(
-            """
-            SELECT t.token_address
-            FROM alerted_token_stats s
-            JOIN alerted_tokens t ON t.token_address = s.token_address
-            WHERE s.last_checked_at IS NULL OR s.last_checked_at < datetime('now', printf('-%d minutes', ?))
-            ORDER BY (s.last_checked_at IS NOT NULL), s.last_checked_at ASC
-            LIMIT ?
-            """,
-            (older_than_minutes, limit),
-        )
-    except Exception as e:
-        from app.logger_utils import log_process
-        try:
-            log_process({"type": "error", "stage": "get_alerted_tokens_batch", "error": str(e)})
-        except Exception:
-            pass
-        # Fallback to previous expression if printf not supported
-        c.execute(
-            """
-            SELECT t.token_address
-            FROM alerted_token_stats s
-            JOIN alerted_tokens t ON t.token_address = s.token_address
-            WHERE (strftime('%s','now') - strftime('%s', COALESCE(s.last_checked_at, '1970-01-01 00:00:00'))) > (? * 60)
-            ORDER BY (s.last_checked_at IS NOT NULL), s.last_checked_at ASC
-            LIMIT ?
-            """,
-            (older_than_minutes, limit),
-        )
-    rows = [r[0] for r in c.fetchall()]
-    conn.close()
-    return rows
-
-
-def update_token_tracking(token_address: str, price_usd: float, market_cap_usd: float = None,
-                          liquidity_usd: float = None, volume_24h_usd: float = None) -> None:
-    conn = _get_conn()
-    c = conn.cursor()
-    c.execute(
-        """
-        UPDATE alerted_token_stats
-        SET last_checked_at = CURRENT_TIMESTAMP,
-            last_price_usd = ?,
-            last_market_cap_usd = COALESCE(?, last_market_cap_usd),
-            last_liquidity_usd = COALESCE(?, last_liquidity_usd),
-            last_volume_24h_usd = COALESCE(?, last_volume_24h_usd),
-            peak_price_usd = CASE WHEN peak_price_usd IS NULL OR ? > peak_price_usd THEN ? ELSE peak_price_usd END,
-            peak_price_at  = CASE WHEN peak_price_usd IS NULL OR ? > peak_price_usd THEN CURRENT_TIMESTAMP ELSE peak_price_at END,
-            peak_market_cap_usd = CASE WHEN peak_market_cap_usd IS NULL OR COALESCE(?,0) > COALESCE(peak_market_cap_usd,0) THEN COALESCE(?, peak_market_cap_usd) ELSE peak_market_cap_usd END,
-            peak_market_cap_at  = CASE WHEN peak_market_cap_usd IS NULL OR COALESCE(?,0) > COALESCE(peak_market_cap_usd,0) THEN CURRENT_TIMESTAMP ELSE peak_market_cap_at END,
-            peak_volume_24h_usd = CASE WHEN peak_volume_24h_usd IS NULL OR COALESCE(?,0) > COALESCE(peak_volume_24h_usd,0) THEN COALESCE(?, peak_volume_24h_usd) ELSE peak_volume_24h_usd END
-        WHERE token_address = ?
-        """,
-        (
-            price_usd,
-            market_cap_usd,
-            liquidity_usd,
-            volume_24h_usd,
-            price_usd, price_usd,
-            price_usd,
-            market_cap_usd, market_cap_usd,
-            market_cap_usd,
-            volume_24h_usd, volume_24h_usd,
-            token_address,
-        ),
-    )
-    # Backfill baseline if missing (improves export completeness)
-    try:
-        row = c.execute(
-            """
-            SELECT first_price_usd, first_market_cap_usd, first_liquidity_usd, first_alert_at
-            FROM alerted_token_stats WHERE token_address = ?
-            """,
-            (token_address,),
-        ).fetchone()
-        if row:
-            first_p, first_m, first_l, first_at = row
-            if first_p is None or first_m is None or first_l is None:
-                c.execute(
-                    """
-                    UPDATE alerted_token_stats
-                    SET first_price_usd = COALESCE(first_price_usd, ?),
-                        first_market_cap_usd = COALESCE(first_market_cap_usd, ?),
-                        first_liquidity_usd = COALESCE(first_liquidity_usd, ?),
-                        first_alert_at = COALESCE(first_alert_at, CURRENT_TIMESTAMP)
-                    WHERE token_address = ?
-                    """,
-                    (price_usd, market_cap_usd, liquidity_usd, token_address),
-                )
-    except Exception:
-        pass
-    # Rug/outcome heuristic and drawdown update always
-    try:
-        row = c.execute(
-            """
-            SELECT first_price_usd, peak_price_usd, last_price_usd, last_liquidity_usd, outcome
-            FROM alerted_token_stats WHERE token_address = ?
-            """,
-            (token_address,),
-        ).fetchone()
-        if row:
-            first_p, peak_p, last_p, last_liq, outcome = row
-            peak_p = peak_p or 0
-            last_p = last_p or 0
-            drawdown_pct = None
-            if peak_p > 0 and last_p >= 0:
-                drawdown_pct = (1 - (last_p / peak_p)) * 100
-                c.execute(
-                    """
-                    UPDATE alerted_token_stats
-                    SET peak_drawdown_pct = ?
-                    WHERE token_address = ?
-                    """,
-                    (drawdown_pct, token_address),
-                )
-            from config import RUG_DRAWDOWN_PCT, RUG_MIN_LIQUIDITY_USD
-            is_lp_gone = (last_liq or 0) <= RUG_MIN_LIQUIDITY_USD
-            is_hard_drawdown = (drawdown_pct is not None) and (drawdown_pct >= RUG_DRAWDOWN_PCT)
-            if outcome is None and (is_lp_gone or is_hard_drawdown):
-                c.execute(
-                    """
-                    UPDATE alerted_token_stats
-                    SET outcome = 'rug', outcome_at = CURRENT_TIMESTAMP, peak_drawdown_pct = ?
-                    WHERE token_address = ?
-                    """,
-                    (drawdown_pct, token_address),
-                )
-            # Mark ongoing explicitly if no rug and we have at least one check
-            if outcome is None and not is_lp_gone and not is_hard_drawdown:
-                c.execute(
-                    """
-                    UPDATE alerted_token_stats
-                    SET outcome = COALESCE(outcome, 'ongoing')
-                    WHERE token_address = ?
-                    """,
-                    (token_address,),
-                )
-    except Exception:
-        pass
+    cutoff = datetime.now() - timedelta(hours=DB_RETENTION_HOURS)
+    c.execute("DELETE FROM token_activity WHERE observed_at < ?", (cutoff,))
     conn.commit()
     conn.close()
-
-
-def get_tracking_snapshot(token_address: str) -> Optional[Dict[str, Any]]:
-    """Return current tracking snapshot with computed peak multiples and time-to-peak seconds."""
-    conn = _get_conn()
-    c = conn.cursor()
-    c.execute(
-        """
-        SELECT token_address, first_alert_at, first_price_usd, first_market_cap_usd,
-               last_price_usd, last_market_cap_usd,
-               peak_price_usd, peak_market_cap_usd, peak_price_at, peak_market_cap_at,
-               outcome, peak_drawdown_pct
-        FROM alerted_token_stats WHERE token_address = ?
-        """,
-        (token_address,),
-    )
-    row = c.fetchone()
-    conn.close()
-    if not row:
-        return None
-    (
-        tok, first_alert_at, first_price, first_mcap,
-        last_price, last_mcap,
-        peak_price, peak_mcap, peak_price_at, peak_mcap_at,
-        outcome, peak_drawdown_pct,
-    ) = row
-
-    def _parse(ts: Optional[str]) -> Optional[datetime]:
-        if not ts:
-            return None
-        try:
-            # SQLite CURRENT_TIMESTAMP is 'YYYY-MM-DD HH:MM:SS'
-            return datetime.strptime(ts, '%Y-%m-%d %H:%M:%S')
-        except Exception:
-            try:
-                return datetime.fromisoformat(ts)
-            except Exception:
-                return None
-
-    t0 = _parse(first_alert_at)
-    tp = _parse(peak_price_at)
-    tm = _parse(peak_mcap_at)
-    ttp_s = int((tp - t0).total_seconds()) if t0 and tp else None
-    ttm_s = int((tm - t0).total_seconds()) if t0 and tm else None
-
-    peak_x_price = (peak_price / first_price) if (first_price or 0) else None
-    peak_x_mcap = (peak_mcap / first_mcap) if (first_mcap or 0) else None
-
-    return {
-        'token': tok,
-        'first_alert_at': first_alert_at,
-        'first_price': first_price or 0,
-        'first_mcap': first_mcap or 0,
-        'last_price': last_price or 0,
-        'last_mcap': last_mcap or 0,
-        'peak_price': peak_price or 0,
-        'peak_mcap': peak_mcap or 0,
-        'peak_price_at': peak_price_at,
-        'peak_mcap_at': peak_mcap_at,
-        'time_to_peak_price_s': ttp_s,
-        'time_to_peak_mcap_s': ttm_s,
-        'peak_x_price': peak_x_price,
-        'peak_x_mcap': peak_x_mcap,
-        'outcome': outcome,
-        'peak_drawdown_pct': peak_drawdown_pct,
-    }
-
-
-def prune_old_activity(hours: int = DB_RETENTION_HOURS) -> int:
-    """Delete token_activity rows older than the retention window. Returns rows deleted."""
-    conn = _get_conn()
-    c = conn.cursor()
-    cutoff_time = datetime.now() - timedelta(hours=hours)
-    cutoff_iso = cutoff_time.strftime('%Y-%m-%d %H:%M:%S')
-    c.execute("DELETE FROM token_activity WHERE observed_at < ?", (cutoff_iso,))
-    deleted = c.rowcount
-    conn.commit()
-    conn.close()
-    return deleted
-
-
-def ensure_indices() -> None:
-    """Create indices to speed up velocity queries if not present."""
-    conn = _get_conn()
-    c = conn.cursor()
-    try:
-        c.execute("CREATE INDEX IF NOT EXISTS idx_token_activity_token_time ON token_activity(token_address, observed_at)")
-        c.execute("CREATE INDEX IF NOT EXISTS idx_alerted_stats_last_checked ON alerted_token_stats(last_checked_at)")
-        c.execute("CREATE INDEX IF NOT EXISTS idx_alerted_tokens_alerted_at ON alerted_tokens(alerted_at)")
-        c.execute("CREATE INDEX IF NOT EXISTS idx_alerted_stats_outcome ON alerted_token_stats(outcome)")
-        conn.commit()
-    except Exception:
-        pass
-    finally:
-        conn.close()
-
-
-def repair_first_prices_from_alerts() -> int:
-    """Backfill first_price_usd from alerts.jsonl for tokens with 0 or NULL first_price."""
-    import json
-    import os
-    
-    conn = _get_conn()
-    c = conn.cursor()
-    
-    # Read alerts.jsonl to extract baseline prices
-    alerts_file = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data', 'logs', 'alerts.jsonl')
-    alerts = {}
-    try:
-        with open(alerts_file, 'r') as f:
-            for line in f:
-                try:
-                    obj = json.loads(line)
-                    if 'token_address' in obj and 'price' in obj:
-                        price = float(obj.get('price', 0) or 0)
-                        if price > 0:
-                            alerts[obj['token_address']] = price
-                except:
-                    pass
-    except Exception:
-        pass
-    
-    # Update first_price_usd for tokens with 0 or NULL
-    updated = 0
-    for token, price in alerts.items():
-        c.execute(
-            "UPDATE alerted_token_stats SET first_price_usd = ? WHERE token_address = ? AND (first_price_usd IS NULL OR first_price_usd = 0)",
-            (price, token)
-        )
-        if c.rowcount > 0:
-            updated += 1
-    
-    conn.commit()
-    conn.close()
-    return updated

@@ -68,6 +68,26 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  tracker:
+    build: .
+    container_name: callsbot-tracker
+    command: ["python", "scripts/track_performance.py"]
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - CALLSBOT_LOG_STDOUT=true
+    volumes:
+      - ./var:/app/var
+      - ./data/logs:/app/data/logs
+    depends_on:
+      - worker
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
   caddy:
     image: caddy:2
     container_name: callsbot-proxy

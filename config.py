@@ -180,8 +180,22 @@ MIN_LIQUIDITY_USD = _get_int("MIN_LIQUIDITY_USD", 10_000)
 # Minimum 24h volume required (USD)
 VOL_24H_MIN_FOR_ALERT = _get_int("VOL_24H_MIN_FOR_ALERT", 0)
 
+# ==============================================
+# SIGNAL BALANCE (Smart Money vs General Cycle)
+# ==============================================
+
 # Require smart-money cycle for final alert
+# If True, drops all non-smart-money tokens no matter how high they score
+# Recommendation: Set to FALSE to allow high-quality general cycle tokens
 REQUIRE_SMART_MONEY_FOR_ALERT = os.getenv("REQUIRE_SMART_MONEY_FOR_ALERT", "false").lower() == "true"
+
+# Score adjustment for smart money tokens
+# Smart money tokens get this bonus to their final score
+SMART_MONEY_SCORE_BONUS = _get_int("SMART_MONEY_SCORE_BONUS", 2)
+
+# For general cycle (non-smart money), require higher score
+# This ensures general cycle tokens are extra high quality
+GENERAL_CYCLE_MIN_SCORE = _get_int("GENERAL_CYCLE_MIN_SCORE", 9)
 
 # Require minimum velocity score for final alert (0 disables)
 REQUIRE_VELOCITY_MIN_SCORE_FOR_ALERT = _get_int("REQUIRE_VELOCITY_MIN_SCORE_FOR_ALERT", 0)
