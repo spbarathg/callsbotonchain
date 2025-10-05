@@ -8,6 +8,10 @@
   </head>
   <body>
     <div id="statusbar" style="font-family:monospace;font-size:12px;padding:6px 8px;background:#111;color:#eee;display:flex;gap:16px;align-items:center">
+      <span id="live_indicator" style="display:flex;align-items:center;gap:4px;color:#17bf63;font-weight:600">
+        <span style="width:8px;height:8px;background:#17bf63;border-radius:50%;animation:pulse 2s ease-in-out infinite"></span>
+        LIVE
+      </span>
       <span>Signals: <b id="status_signals">?</b></span>
       <span>Trading: <b id="status_trading">?</b></span>
       <span>Kill Switch: <b id="status_kill">?</b></span>
@@ -432,10 +436,10 @@
         evt.onerror = ()=>{ sseConnected = false; };
       } catch (e) { /* ignore */ }
       fetchStats();
-      // Poll every 5 seconds (or faster if SSE is not connected)
-      setInterval(()=>{ fetchStats(); }, 5000);
+      // Poll every 2 seconds for real-time updates
+      setInterval(()=>{ fetchStats(); }, 2000);
       
-      // Auto-refresh active tab every 10 seconds
+      // Auto-refresh active tab every 3 seconds for real-time feel
       setInterval(()=>{
         const activeTab = document.querySelector('.nav-link.active')?.dataset?.tab;
         if (activeTab === 'overview') { try { fetchOverviewV2(); } catch (e) {} }
@@ -443,7 +447,7 @@
         if (activeTab === 'system') { try { fetchSystemV2(); } catch (e) {} }
         if (activeTab === 'config') { try { fetchConfigV2(); } catch (e) {} }
         if (activeTab === 'tracked') { try { fetchTracked(); } catch (e) {} }
-      }, 10000);
+      }, 3000);
 
       // Enhanced toggle functionality with v2 API and visual feedback
       async function updateToggle(toggleName, value) {
@@ -508,6 +512,16 @@
           from { transform: translateX(0); opacity: 1; }
           to { transform: translateX(100%); opacity: 0; }
         }
+        @keyframes pulse {
+          0%, 100% { opacity: 1; transform: scale(1); }
+          50% { opacity: 0.5; transform: scale(0.8); }
+        }
+        @keyframes fadeIn {
+          from { opacity: 0; }
+          to { opacity: 1; }
+        }
+        /* Smooth data updates */
+        .value, tbody tr { transition: all 0.3s ease; }
       `;
       document.head.appendChild(style);
 
@@ -686,7 +700,7 @@
       function startPaperAutoRefresh() {
         if (paperRefreshInterval) clearInterval(paperRefreshInterval);
         refreshPaperPortfolio(); // Initial load
-        paperRefreshInterval = setInterval(refreshPaperPortfolio, 10000); // Refresh every 10s
+        paperRefreshInterval = setInterval(refreshPaperPortfolio, 5000); // Refresh every 5s for real-time
       }
       function stopPaperAutoRefresh() {
         if (paperRefreshInterval) {
@@ -753,7 +767,7 @@
       function startLogsAuto(){
         if (logsTimer) clearInterval(logsTimer);
         if (document.getElementById('logs_autorefresh').checked){
-          logsTimer = setInterval(fetchLogs, 3000);
+          logsTimer = setInterval(fetchLogs, 2000); // Faster log refresh
         }
       }
       document.getElementById('logs_refresh').addEventListener('click', fetchLogs);
@@ -817,7 +831,9 @@
           })
         }catch(e){/* ignore */}
       }
-      fetchTracked(); setInterval(fetchTracked, 15000);
+      fetchTracked(); 
+      // Refresh tracked tokens every 5 seconds for real-time updates
+      setInterval(fetchTracked, 5000);
 
       // ---------- v2 Overview ----------
       async function fetchOverviewV2(){
