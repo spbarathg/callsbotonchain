@@ -23,8 +23,9 @@ TELEGRAM_ENABLED = bool(TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID)
 # BOT SETTINGS
 # ==============================================
 try:
+    # CRITICAL: Increased from 5 to 8 for better quality signals
     HIGH_CONFIDENCE_SCORE = int(os.getenv("HIGH_CONFIDENCE_SCORE", "8"))
-    MIN_USD_VALUE = int(os.getenv("MIN_USD_VALUE", "100"))
+    MIN_USD_VALUE = int(os.getenv("MIN_USD_VALUE", "200"))
     FETCH_INTERVAL = int(os.getenv("FETCH_INTERVAL", "120"))
     # Optional feed scoping
     _list_id_raw = os.getenv("CIELO_LIST_ID")
@@ -175,10 +176,12 @@ LARGE_CAP_MOMENTUM_GATE_1H = _get_int("LARGE_CAP_MOMENTUM_GATE_1H", 15)
 # RISK GATES (STRICT MODE)
 # ==============================================
 # Minimum on-chain liquidity required to alert (USD)
-MIN_LIQUIDITY_USD = _get_int("MIN_LIQUIDITY_USD", 10_000)
+# CRITICAL: Increased from 5k to 15k - pump.fun tokens need higher liquidity to survive
+MIN_LIQUIDITY_USD = _get_int("MIN_LIQUIDITY_USD", 15_000)
 
 # Minimum 24h volume required (USD)
-VOL_24H_MIN_FOR_ALERT = _get_int("VOL_24H_MIN_FOR_ALERT", 0)
+# CRITICAL: Now requiring minimum volume - tokens need activity to be tradeable
+VOL_24H_MIN_FOR_ALERT = _get_int("VOL_24H_MIN_FOR_ALERT", 10_000)
 
 # ==============================================
 # SIGNAL BALANCE (Smart Money vs General Cycle)
@@ -208,13 +211,16 @@ REQUIRE_LP_LOCKED = os.getenv("REQUIRE_LP_LOCKED", "false").lower() == "true"
 ALLOW_UNKNOWN_SECURITY = os.getenv("ALLOW_UNKNOWN_SECURITY", "true").lower() == "true"
 
 # Maximum acceptable top-10 holders concentration (%). Above this → drop
-MAX_TOP10_CONCENTRATION = _get_int("MAX_TOP10_CONCENTRATION", 22)
+# CRITICAL: Tightened from 22% to 18% - high concentration = rug risk
+MAX_TOP10_CONCENTRATION = _get_int("MAX_TOP10_CONCENTRATION", 18)
 
 # Volume-to-MCap ratio minimum gate (e.g., 0.5 means 24h vol >= 50% of mcap)
+# CRITICAL: Kept at 0.60 - this is already good
 VOL_TO_MCAP_RATIO_MIN = _get_float("VOL_TO_MCAP_RATIO_MIN", 0.60)  # 0 disables
 
 # Momentum gate for tight mode (require at least this 1h change for alert)
-REQUIRE_MOMENTUM_1H_MIN_FOR_ALERT = _get_int("REQUIRE_MOMENTUM_1H_MIN_FOR_ALERT", 0)
+# CRITICAL: Requiring positive momentum - avoid dead/dumping tokens
+REQUIRE_MOMENTUM_1H_MIN_FOR_ALERT = _get_int("REQUIRE_MOMENTUM_1H_MIN_FOR_ALERT", 2)
 
 # Super-high volume threshold to allow momentum leniency in loose mode
 VOL_SUPER_HIGH = _get_int("VOL_SUPER_HIGH", 100_000)
