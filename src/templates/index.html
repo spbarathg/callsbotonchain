@@ -432,8 +432,18 @@
         evt.onerror = ()=>{ sseConnected = false; };
       } catch (e) { /* ignore */ }
       fetchStats();
-      // Poll only when SSE is not connected; otherwise back off
-      setInterval(()=>{ if (!sseConnected) { fetchStats(); } }, 7000);
+      // Poll every 5 seconds (or faster if SSE is not connected)
+      setInterval(()=>{ fetchStats(); }, 5000);
+      
+      // Auto-refresh active tab every 10 seconds
+      setInterval(()=>{
+        const activeTab = document.querySelector('.nav-link.active')?.dataset?.tab;
+        if (activeTab === 'overview') { try { fetchOverviewV2(); } catch (e) {} }
+        if (activeTab === 'performance') { try { fetchPerformanceV2(); } catch (e) {} }
+        if (activeTab === 'system') { try { fetchSystemV2(); } catch (e) {} }
+        if (activeTab === 'config') { try { fetchConfigV2(); } catch (e) {} }
+        if (activeTab === 'tracked') { try { fetchTracked(); } catch (e) {} }
+      }, 10000);
 
       // Enhanced toggle functionality with v2 API and visual feedback
       async function updateToggle(toggleName, value) {
