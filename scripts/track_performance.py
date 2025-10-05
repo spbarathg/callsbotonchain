@@ -39,7 +39,7 @@ def track_token_performance(token_address: str, retry_count: int = 0) -> bool:
         
         stats = get_token_stats(token_address)
         
-        if not stats or stats.get('status_code') != 200:
+        if not stats:
             # For very new tokens, this is expected - they're not indexed yet
             # We'll keep trying on subsequent cycles
             return False
