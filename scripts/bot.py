@@ -46,14 +46,7 @@ from app.storage import (
 	mark_alerted,
 	record_alert_with_metadata,
 	record_token_activity,
-	get_token_velocity,
 	get_recent_token_signals,
-	should_fetch_detailed_stats,
-	ensure_indices,
-	prune_old_activity,
-	get_alerted_tokens_batch,
-	update_token_tracking,
-	get_tracking_snapshot,
 )
 
 # Optional Prometheus metrics (enable with CALLSBOT_METRICS_ENABLED=true)
@@ -426,16 +419,17 @@ def process_feed_item(tx: dict, is_smart_cycle: bool, session_alerted_tokens: se
 			return "skipped", None, 0, None
 	except Exception:
 		pass
-	# scoring with velocity bonus
-	velocity_data = get_token_velocity(token_address, minutes_back=15)
-	velocity_bonus = velocity_data['velocity_score'] if velocity_data else 0
+	# scoring with velocity bonus (disabled - function not available yet)
+	# velocity_data = get_token_velocity(token_address, minutes_back=15)
+	# velocity_bonus = velocity_data['velocity_score'] if velocity_data else 0
+	velocity_bonus = 0
 	score, scoring_details = score_token(stats, smart_money_detected=smart_involved, token_address=token_address)
-	if velocity_bonus > 0:
-		score = min(score + (velocity_bonus // 2), 10)
-		try:
-			scoring_details.append(f"Velocity: +{velocity_bonus//2} ({velocity_data['observations']} observations)")
-		except Exception:
-			pass
+	# if velocity_bonus > 0:
+	# 	score = min(score + (velocity_bonus // 2), 10)
+	# 	try:
+	# 		scoring_details.append(f"Velocity: +{velocity_bonus//2} ({velocity_data['observations']} observations)")
+	# 	except Exception:
+	# 		pass
 	
 	# Smart money bonus
 	try:
@@ -578,7 +572,8 @@ def process_feed_item(tx: dict, is_smart_cycle: bool, session_alerted_tokens: se
 	
 	# New comprehensive metadata tracking
 	try:
-		vel_snap = get_token_velocity(token_address, minutes_back=15) or {}
+		# vel_snap = get_token_velocity(token_address, minutes_back=15) or {}
+		vel_snap = {}
 		
 		# Calculate token age if available
 		token_age_minutes = None
@@ -642,7 +637,8 @@ def process_feed_item(tx: dict, is_smart_cycle: bool, session_alerted_tokens: se
 		pass
 	# enriched log
 	try:
-		vel_snap = get_token_velocity(token_address, minutes_back=15) or {}
+		# vel_snap = get_token_velocity(token_address, minutes_back=15) or {}
+		vel_snap = {}
 		log_alert({
 			"token": token_address,
 			"name": name,
