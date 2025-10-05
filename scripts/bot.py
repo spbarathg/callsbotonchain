@@ -383,7 +383,8 @@ def process_feed_item(tx: dict, is_smart_cycle: bool, session_alerted_tokens: se
 		except Exception:
 			pass
 	is_synthetic = bool(tx.get('is_synthetic')) or str(tx.get('tx_type') or '').endswith('_fallback')
-	if not should_fetch_detailed_stats(token_address, preliminary_score, is_synthetic=is_synthetic):
+	# Skip detailed analysis if preliminary score is too low
+	if preliminary_score < PRELIM_DETAILED_MIN:
 		try:
 			_out(f"Token {token_address} prelim: {preliminary_score}/10 (skipped detailed analysis)")
 		except Exception:
