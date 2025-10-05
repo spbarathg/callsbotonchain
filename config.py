@@ -241,7 +241,7 @@ LARGE_CAP_HOLDER_STATS_MCAP_USD = _get_int("LARGE_CAP_HOLDER_STATS_MCAP_USD", 2_
 # ==============================================
 # Multi-signal confirmation before spending expensive stats calls
 REQUIRE_MULTI_SIGNAL = os.getenv("REQUIRE_MULTI_SIGNAL", "true").lower() == "true"
-MULTI_SIGNAL_WINDOW_SEC = _get_int("MULTI_SIGNAL_WINDOW_SEC", 300)  # 5 minutes
+MULTI_SIGNAL_WINDOW_SEC = _get_int("MULTI_SIGNAL_WINDOW_SEC", 1800)  # 30 minutes
 MULTI_SIGNAL_MIN_COUNT = _get_int("MULTI_SIGNAL_MIN_COUNT", 2)
 
 # Token age preferences using first-seen heuristic
