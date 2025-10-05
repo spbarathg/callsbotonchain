@@ -23,8 +23,8 @@ TELEGRAM_ENABLED = bool(TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID)
 # BOT SETTINGS
 # ==============================================
 try:
-    # CRITICAL: Increased from 5 to 8 for better quality signals
-    HIGH_CONFIDENCE_SCORE = int(os.getenv("HIGH_CONFIDENCE_SCORE", "8"))
+    # ADJUSTED: Reduced from 8 to 6 - was blocking all signals
+    HIGH_CONFIDENCE_SCORE = int(os.getenv("HIGH_CONFIDENCE_SCORE", "6"))
     MIN_USD_VALUE = int(os.getenv("MIN_USD_VALUE", "200"))
     FETCH_INTERVAL = int(os.getenv("FETCH_INTERVAL", "120"))
     # Optional feed scoping
@@ -176,12 +176,12 @@ LARGE_CAP_MOMENTUM_GATE_1H = _get_int("LARGE_CAP_MOMENTUM_GATE_1H", 15)
 # RISK GATES (STRICT MODE)
 # ==============================================
 # Minimum on-chain liquidity required to alert (USD)
-# CRITICAL: Increased from 5k to 15k - pump.fun tokens need higher liquidity to survive
-MIN_LIQUIDITY_USD = _get_int("MIN_LIQUIDITY_USD", 15_000)
+# ADJUSTED: Reduced from 15k to 8k - was blocking all pump.fun tokens
+MIN_LIQUIDITY_USD = _get_int("MIN_LIQUIDITY_USD", 8_000)
 
 # Minimum 24h volume required (USD)
-# CRITICAL: Now requiring minimum volume - tokens need activity to be tradeable
-VOL_24H_MIN_FOR_ALERT = _get_int("VOL_24H_MIN_FOR_ALERT", 10_000)
+# ADJUSTED: Reduced from 10k to 2k - new tokens have no volume initially
+VOL_24H_MIN_FOR_ALERT = _get_int("VOL_24H_MIN_FOR_ALERT", 2_000)
 
 # ==============================================
 # SIGNAL BALANCE (Smart Money vs General Cycle)
@@ -219,8 +219,8 @@ MAX_TOP10_CONCENTRATION = _get_int("MAX_TOP10_CONCENTRATION", 18)
 VOL_TO_MCAP_RATIO_MIN = _get_float("VOL_TO_MCAP_RATIO_MIN", 0.60)  # 0 disables
 
 # Momentum gate for tight mode (require at least this 1h change for alert)
-# CRITICAL: Requiring positive momentum - avoid dead/dumping tokens
-REQUIRE_MOMENTUM_1H_MIN_FOR_ALERT = _get_int("REQUIRE_MOMENTUM_1H_MIN_FOR_ALERT", 2)
+# ADJUSTED: Reduced from 2% to 0% - was blocking all new tokens
+REQUIRE_MOMENTUM_1H_MIN_FOR_ALERT = _get_int("REQUIRE_MOMENTUM_1H_MIN_FOR_ALERT", 0)
 
 # Super-high volume threshold to allow momentum leniency in loose mode
 VOL_SUPER_HIGH = _get_int("VOL_SUPER_HIGH", 100_000)
