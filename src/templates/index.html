@@ -271,6 +271,9 @@
 
       <section id="tab-tracked" class="tab">
         <h2>Tracked Alerts</h2>
+        <div class="muted" style="margin-bottom:12px;font-size:13px">
+          💡 <b>Note:</b> New tokens take 15-30 minutes to appear on DexScreener. "pending..." means tracking will start once indexed. This is normal for tokens <5 min old.
+        </div>
         <div class="table-wrap">
         <table id="tracked_table">
           <thead>
@@ -806,26 +809,27 @@
           const rows = Array.isArray(data.rows) ? data.rows : [];
           if (rows.length === 0){
             const tr = document.createElement('tr');
-            tr.innerHTML = `<td colspan="10" class="muted">No tracked data yet</td>`;
+            tr.innerHTML = `<td colspan="10" class="muted" style="text-align:center;padding:20px">No tracked tokens yet. Tokens will appear here after being alerted.</td>`;
             tbody.appendChild(tr);
             return;
           }
           rows.forEach(row=>{
             const tr = document.createElement('tr');
             const isFiniteNum = (v)=> (typeof v === 'number' && isFinite(v));
-            const fmt = (v, d=8)=> (isFiniteNum(v) && v!==0 ? Number(v).toFixed(d) : '-')
-            const fmtMoney = (v)=> (isFiniteNum(v) && v!==0 ? ('$'+Number(v).toLocaleString()) : '-')
+            const fmt = (v, d=8)=> (isFiniteNum(v) && v!==0 ? Number(v).toFixed(d) : '<span class="muted" title="Waiting for price data (token too new)">pending...</span>')
+            const fmtMoney = (v)=> (isFiniteNum(v) && v!==0 ? ('$'+Number(v).toLocaleString()) : '<span class="muted">pending...</span>')
+            const hasPrice = isFiniteNum(row.first_price) || isFiniteNum(row.last_price) || isFiniteNum(row.peak_price);
             tr.innerHTML = `
               <td>${tokenLinks(row.token)}</td>
               <td>${row.alerted_at||'-'}</td>
               <td>${row.final_score??'-'}</td>
               <td>${row.conviction||'-'}</td>
-              <td>${[fmt(row.first_price),fmt(row.last_price),fmt(row.peak_price)].join(' → ')}</td>
-              <td>${row.peak_multiple!=null?('×'+Number(row.peak_multiple).toFixed(2)):'-'}</td>
-              <td>${[fmtMoney(row.first_mcap),fmtMoney(row.last_mcap),fmtMoney(row.peak_mcap)].join(' → ')}</td>
+              <td>${hasPrice ? [fmt(row.first_price),fmt(row.last_price),fmt(row.peak_price)].join(' → ') : '<span class="muted" title="Token too new - waiting 15-30 min for DexScreener indexing">⏳ indexing...</span>'}</td>
+              <td>${row.peak_multiple!=null?('×'+Number(row.peak_multiple).toFixed(2)):'<span class="muted">pending...</span>'}</td>
+              <td>${hasPrice ? [fmtMoney(row.first_mcap),fmtMoney(row.last_mcap),fmtMoney(row.peak_mcap)].join(' → ') : '<span class="muted">⏳ indexing...</span>'}</td>
               <td>${fmtMoney(row.last_liq)}</td>
               <td>${fmtMoney(row.last_vol24)}</td>
-              <td>${row.outcome||'-'}${row.peak_drawdown_pct!=null?(' ('+Number(row.peak_drawdown_pct).toFixed(1)+'%)'):''}</td>
+              <td>${row.outcome||'<span class="muted">tracking...</span>'}${row.peak_drawdown_pct!=null?(' ('+Number(row.peak_drawdown_pct).toFixed(1)+'%)'):''}</td>
             `;
             tbody.appendChild(tr);
           })
