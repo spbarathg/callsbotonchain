@@ -374,7 +374,6 @@ def process_feed_item(tx: dict, is_smart_cycle: bool, session_alerted_tokens: se
 	# If MIN_TOKEN_AGE_MINUTES > 0, require token to be seen earlier than this window
 	if int(MIN_TOKEN_AGE_MINUTES or 0) > 0:
 		try:
-			from datetime import datetime
 			obs = get_recent_token_signals(token_address, 365*24*3600)  # all-time
 			if obs:
 				first_seen = obs[-1]  # oldest due to ORDER BY DESC
