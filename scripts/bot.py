@@ -43,7 +43,7 @@ from app.notify import send_telegram_alert
 from app.storage import (
 	init_db,
 	has_been_alerted,
-	mark_as_alerted,
+	mark_alerted,
 	record_alert_with_metadata,
 	record_token_activity,
 	get_token_velocity,
@@ -569,15 +569,11 @@ def process_feed_item(tx: dict, is_smart_cycle: bool, session_alerted_tokens: se
 	baseline_vol = float(volume_24h or 0)
 	
 	# Legacy mark for backwards compatibility
-	mark_as_alerted(
+	mark_alerted(
 		token_address,
 		score,
 		smart_involved,
-		baseline_price,
-		baseline_mcap,
-		baseline_liq,
-		baseline_vol,
-		conviction_type=conviction_type,
+		conviction_type,
 	)
 	
 	# New comprehensive metadata tracking
