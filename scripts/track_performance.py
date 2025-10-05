@@ -30,12 +30,7 @@ def track_token_performance(token_address: str, retry_count: int = 0) -> bool:
     We handle this gracefully and keep trying.
     """
     try:
-        # Clear cache for fresh data on each tracking cycle
-        from app.analyze_token import _cache_del
-        try:
-            _cache_del(token_address)
-        except:
-            pass
+        # Note: Cache is managed automatically by the get_token_stats function
         
         stats = get_token_stats(token_address)
         
