@@ -21,16 +21,35 @@ from app.analyze_token import get_token_stats
 from app.logger_utils import _out
 
 
-def track_token_performance(token_address: str) -> bool:
+def track_token_performance(token_address: str, retry_count: int = 0) -> bool:
     """
     Fetch current stats for a token and update performance metrics.
     Returns True if successful, False if token no longer exists.
+    
+    For very new pump.fun tokens, they may not appear on DexScreener for 5-30 minutes.
+    We handle this gracefully and keep trying.
     """
     try:
+        # Clear cache for fresh data on each tracking cycle
+        from app.analyze_token import _cache_del
+        try:
+            _cache_del(token_address)
+        except:
+            pass
+        
         stats = get_token_stats(token_address)
         
         if not stats or stats.get('status_code') != 200:
-            _out(f"⚠️  Could not fetch stats for {token_address[:8]}...")
+            # For very new tokens, this is expected - they're not indexed yet
+            # We'll keep trying on subsequent cycles
+            return False
+        
+        # Check if we actually have price data
+        price_data = stats.get('price', {})
+        current_price = price_data.get('price_usd', 0)
+        
+        if not current_price or current_price == 0:
+            # Token exists on API but no price data yet
             return False
         
         # Record snapshot for historical tracking
@@ -40,8 +59,6 @@ def track_token_performance(token_address: str) -> bool:
         update_token_performance(token_address, stats)
         
         # Log significant movements
-        price_data = stats.get('price', {})
-        current_price = price_data.get('price_usd', 0)
         change_1h = price_data.get('price_change_1h', 0)
         
         if abs(change_1h or 0) > 20:
@@ -51,7 +68,9 @@ def track_token_performance(token_address: str) -> bool:
         return True
         
     except Exception as e:
-        _out(f"❌ Error tracking {token_address[:8]}...: {e}")
+        # Only log unexpected errors (not expected API failures)
+        if "404" not in str(e) and "not found" not in str(e).lower():
+            _out(f"❌ Error tracking {token_address[:8]}...: {e}")
         return False
 
 
@@ -126,12 +145,22 @@ def main():
                 _out(f"Tracking {len(tokens)} tokens...")
                 
                 success_count = 0
+                failed_count = 0
                 for token in tokens:
                     if track_token_performance(token):
                         success_count += 1
+                    else:
+                        failed_count += 1
                     time.sleep(1)  # Rate limiting
                 
-                _out(f"✅ Updated {success_count}/{len(tokens)} tokens")
+                if success_count > 0:
+                    _out(f"✅ Updated {success_count}/{len(tokens)} tokens")
+                
+                # Only warn if ALL tokens failed (might indicate API issue)
+                if failed_count == len(tokens) and len(tokens) > 10:
+                    _out(f"⚠️  Warning: 0/{len(tokens)} tokens updated - possible API issue")
+                elif failed_count > 0:
+                    _out(f"ℹ️  {failed_count} tokens not yet indexed (too new for DexScreener)")
             
             # Print summary every 10 cycles (roughly every 10 minutes)
             if cycle % 10 == 0:
