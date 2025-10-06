@@ -30,9 +30,9 @@ def track_token_performance(token_address: str, retry_count: int = 0) -> bool:
     We handle this gracefully and keep trying.
     """
     try:
-        # Note: Cache is managed automatically by the get_token_stats function
+        # Force refresh to get live price data (bypass 15min cache for tracking)
         
-        stats = get_token_stats(token_address)
+        stats = get_token_stats(token_address, force_refresh=True)
         
         if not stats:
             # For very new tokens, this is expected - they're not indexed yet

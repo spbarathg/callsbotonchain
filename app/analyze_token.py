@@ -249,10 +249,10 @@ def _cache_set(token_address: str, data: Dict[str, Any]) -> None:
         _stats_cache[token_address] = (_t.time(), data)
 
 
-def get_token_stats(token_address: str) -> Dict[str, Any]:
+def get_token_stats(token_address: str, force_refresh: bool = False) -> Dict[str, Any]:
     if not token_address:
         return {}
-    cached = _cache_get(token_address)
+    cached = _cache_get(token_address) if not force_refresh else None
     if cached:
         try:
             from app.metrics import cache_hit
