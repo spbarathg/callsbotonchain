@@ -1,63 +1,104 @@
 # CallsBotOnChain Documentation
 
-## 📚 Documentation Index
-
-### 🚀 Quick Start
-- [Main README](../README.md) - Project overview and quick start
-- [Developer Setup](development/README.md) - Complete developer guide
-- [API Reference](api/README.md) - API documentation
-
-### 🏗️ Development
-- [Developer Setup](development/README.md) - Local development setup
-- [Architecture Overview](development/README.md#architecture-overview) - System architecture
-- [Development Workflow](development/README.md#development-workflow) - How to contribute
-
-### 🔧 Operations
-- [Health Check](operations/HEALTH_CHECK.md) - Daily health monitoring
-- [Analysis Guide](operations/ANALYSIS_GUIDE.md) - Performance analysis
-- [Troubleshooting](operations/TROUBLESHOOTING.md) - Issue resolution
-
-### 📊 Monitoring
-- [Monitoring System](monitoring/MONITORING_SYSTEM.md) - Local monitoring setup
-- [Quick Start](monitoring/QUICK_START.md) - Monitoring quick start
-- [Signal Analysis](monitoring/SIGNAL_ANALYSIS.md) - Signal analysis guide
-
-### 📖 Guides
-- [Project Goals](guides/goals.md) - Project objectives
-- [Server Rules](guides/serverrules.md) - Operational rules
-- [Signal Analysis Report](guides/SIGNAL_ANALYSIS_REPORT.md) - Analysis reports
-
-### 🏭 Production
-- [Production Safety](PRODUCTION_SAFETY.md) - System stability
-- [Trading Deployment](TRADING_DEPLOYMENT.md) - Trading setup
-- [Trading Monitoring](TRADING_MONITORING.md) - Trading monitoring
-- [Performance Tracking](PERFORMANCE_TRACKING_SYSTEM.md) - Performance system
-
-## 🎯 Directory Structure
-
-```
-docs/
-├── api/                    # API documentation
-├── development/           # Developer guides
-├── operations/            # Operations guides
-├── monitoring/            # Monitoring guides
-├── guides/                # General guides
-└── README.md              # This file
-```
-
-## 🔗 External Resources
-
-- **Dashboard**: http://64.227.157.221/
-- **Cielo Finance API**: https://feed-api.cielo.finance/
-- **Jupiter Aggregator**: https://station.jup.ag/
-- **Server**: SSH root@64.227.157.221
-
-## 📝 Contributing
-
-For questions or issues, contact the operator or refer to the appropriate documentation section.
+**Complete guide to understanding, operating, and optimizing your trading signal bot.**
 
 ---
 
-**Last Updated**: October 5, 2025  
-**Version**: 2.0  
-**Status**: Production
+## 📚 Documentation Index
+
+### 🚀 Getting Started
+- **[Quick Start Guide](./quickstart/GETTING_STARTED.md)** - Set up and deploy the bot in 15 minutes
+- **[Current Setup Overview](./quickstart/CURRENT_SETUP.md)** - What's running right now (updated Oct 6, 2025)
+- **[Goals & Vision](./quickstart/GOALS.md)** - What this bot aims to achieve
+
+### 🔧 Configuration & Setup
+- **[Bot Configuration Guide](./configuration/BOT_CONFIGURATION.md)** - All settings explained
+- **[Server Rules & Safety](./configuration/SERVER_RULES.md)** - Critical operating procedures
+- **[Environment Variables](./configuration/ENVIRONMENT_VARS.md)** - Complete .env reference
+
+### 📊 Performance & Analysis
+- **[Daily Performance Reports](./performance/DAILY_REPORTS.md)** - How to read and use daily reports
+- **[Signal Analysis](./performance/SIGNAL_ANALYSIS.md)** - Understanding signal quality
+- **[Trading Strategy Guide](./performance/TRADING_STRATEGY.md)** - How to profit from signals
+- **[Performance Tracking](./performance/TRACKING_SYSTEM.md)** - Metrics and KPIs
+
+### 🔍 Monitoring & Operations
+- **[Health Checks](./operations/HEALTH_CHECK.md)** - Monitor bot health
+- **[Troubleshooting Guide](./operations/TROUBLESHOOTING.md)** - Fix common issues
+- **[Analysis Guide](./operations/ANALYSIS_GUIDE.md)** - Analyze bot performance
+
+### 📈 Historical Records
+- **[Fixes Changelog](./history/FIXES_CHANGELOG.md)** - All changes and improvements
+- **[Optimization Summary](./history/OPTIMIZATION_SUMMARY.md)** - Performance improvements
+- **[Verification Reports](./history/VERIFICATION_REPORTS.md)** - System validations
+
+### 🛠️ Development
+- **[Developer Setup](./development/DEVELOPER_SETUP.md)** - Set up dev environment
+- **[API Documentation](./api/README.md)** - REST API reference
+- **[Architecture](./development/ARCHITECTURE.md)** - System design
+
+---
+
+## 🎯 Common Tasks
+
+### Daily Operations
+```bash
+# View daily performance report
+ssh root@64.227.157.221 "/opt/callsbotonchain/run_daily_report.sh"
+
+# Check bot health
+docker ps --filter name=callsbot
+
+# View recent signals
+docker logs callsbot-worker --tail 100 | grep ALERTED
+```
+
+### Troubleshooting
+```bash
+# Check container logs
+docker logs callsbot-worker --tail 100
+docker logs callsbot-tracker --tail 100
+
+# Check configuration
+docker logs callsbot-worker | grep "gates"
+
+# Restart worker
+docker compose restart worker
+```
+
+### Performance Analysis
+```bash
+# Run signal analysis
+cd /opt/callsbotonchain
+python3 docs/monitoring/analyze_signals.py
+
+# View latest metrics
+cat analytics/latest_daily_report.json | jq .
+```
+
+---
+
+## 📖 Quick Reference
+
+### Key Files
+- `var/alerted_tokens.db` - Signal database
+- `var/toggles.json` - Bot toggles
+- `.env` - Configuration
+- `analytics/` - Performance reports
+
+### Key Metrics
+- **Win Rate Target:** 15-20%
+- **Avg Multiplier Target:** 2.5-3.5x
+- **Rug Rate Limit:** <10%
+- **Score Threshold:** 7+
+
+### Support Resources
+- GitHub Issues: https://github.com/spbarathg/callsbotonchain/issues
+- Server: root@64.227.157.221
+- Database: `var/alerted_tokens.db`
+
+---
+
+**Last Updated:** October 6, 2025  
+**Bot Version:** v2.0 (Optimized Configuration)  
+**Status:** 🟢 OPERATIONAL
