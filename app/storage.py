@@ -439,13 +439,13 @@ def get_alerted_tokens_for_tracking() -> List[str]:
     conn = _get_conn()
     c = conn.cursor()
     
-    # Get tokens alerted in last 48 hours that aren't rugged
-    two_days_ago = (datetime.now() - timedelta(hours=48)).timestamp()
+    # Get tokens alerted in last 24 hours that aren't rugged (reduced from 48h to save API credits)
+    one_day_ago = (datetime.now() - timedelta(hours=24)).timestamp()
     c.execute("""
         SELECT token_address FROM alerted_token_stats
         WHERE first_alert_at >= ? AND (is_rug IS NULL OR is_rug = 0)
         ORDER BY first_alert_at DESC
-    """, (two_days_ago,))
+    """, (one_day_ago,))
     
     tokens = [row[0] for row in c.fetchall()]
     conn.close()

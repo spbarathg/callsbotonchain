@@ -30,9 +30,9 @@ def track_token_performance(token_address: str, retry_count: int = 0) -> bool:
     We handle this gracefully and keep trying.
     """
     try:
-        # Force refresh to get live price data (bypass 15min cache for tracking)
-        
-        stats = get_token_stats(token_address, force_refresh=True)
+        # Use cached data (15min cache) to save API credits
+        # Cache is fresh enough for tracking price movements
+        stats = get_token_stats(token_address, force_refresh=False)
         
         if not stats:
             # For very new tokens, this is expected - they're not indexed yet
@@ -122,10 +122,11 @@ def print_summary():
 def main():
     """Main tracking loop"""
     _out("🔍 Starting Price Performance Tracker...")
-    _out("Tracking alerted tokens from last 48 hours...")
-    _out("IMPROVED: Tracking every 30 seconds to capture pump speed data better")
+    _out("Tracking alerted tokens from last 24 hours...")
+    _out("OPTIMIZED: Tracking every 10 minutes using cache to save API credits")
     
     cycle = 0
+    consecutive_failures = 0
     
     while True:
         try:
@@ -145,27 +146,38 @@ def main():
                 for token in tokens:
                     if track_token_performance(token):
                         success_count += 1
+                        consecutive_failures = 0  # Reset on success
                     else:
                         failed_count += 1
-                    time.sleep(1)  # Rate limiting
+                    # Increased delay between tokens to avoid rate limits
+                    time.sleep(5)
                 
                 if success_count > 0:
                     _out(f"✅ Updated {success_count}/{len(tokens)} tokens")
                 
-                # Only warn if ALL tokens failed (might indicate API issue)
+                # Detect persistent API failures and back off
                 if failed_count == len(tokens) and len(tokens) > 10:
-                    _out(f"⚠️  Warning: 0/{len(tokens)} tokens updated - possible API issue")
+                    consecutive_failures += 1
+                    _out(f"⚠️  Warning: 0/{len(tokens)} tokens updated - possible API issue (failure #{consecutive_failures})")
+                    
+                    # If API is persistently failing, increase backoff
+                    if consecutive_failures >= 3:
+                        backoff_time = min(1800, 600 * consecutive_failures)  # Max 30 min
+                        _out(f"🛑 API appears down. Backing off for {backoff_time//60} minutes...")
+                        time.sleep(backoff_time)
+                        consecutive_failures = 0
+                        continue
                 elif failed_count > 0:
                     _out(f"ℹ️  {failed_count} tokens not yet indexed (too new for DexScreener)")
             
-            # Print summary every 20 cycles (roughly every 10 minutes)
-            if cycle % 20 == 0:
+            # Print summary every 6 cycles (roughly every hour)
+            if cycle % 6 == 0:
                 print_summary()
             
-            # IMPROVED: Sleep for 30 seconds instead of 60 to capture timing data better
-            # Analysis showed we were missing 86% of timing data - this will help
-            _out("Sleeping for 30 seconds...")
-            time.sleep(30)
+            # OPTIMIZED: 10 minute interval to save API credits while still capturing movements
+            # Uses cache (15min) so most calls won't hit external APIs
+            _out("Sleeping for 10 minutes...")
+            time.sleep(600)
             
         except KeyboardInterrupt:
             _out("\n👋 Tracker stopped by user")
