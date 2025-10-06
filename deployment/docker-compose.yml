@@ -12,11 +12,14 @@ services:
       - CALLSBOT_LOG_STDOUT=true
       - CALLSBOT_METRICS_ENABLED=true
       - CALLSBOT_FORCE_FALLBACK=false
+      - REDIS_URL=redis://redis:6379/0
     volumes:
       - ./var:/app/var
       - ./data/logs:/app/data/logs
     ports:
       - "9108:9108"
+    depends_on:
+      - redis
     logging:
       driver: json-file
       options:
@@ -77,16 +80,38 @@ services:
       - .env
     environment:
       - CALLSBOT_LOG_STDOUT=true
+      - REDIS_URL=redis://redis:6379/0
     volumes:
       - ./var:/app/var
       - ./data/logs:/app/data/logs
     depends_on:
       - worker
+      - redis
     logging:
       driver: json-file
       options:
         max-size: "10m"
         max-file: "3"
+
+  redis:
+    image: redis:7-alpine
+    container_name: callsbot-redis
+    restart: unless-stopped
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru --save ""
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "2"
 
   caddy:
     image: caddy:2
@@ -110,3 +135,4 @@ services:
 volumes:
   caddy_data:
   caddy_config:
+  redis_data:
