@@ -124,7 +124,8 @@ DRAW_24H_MAJOR = _get_int("DRAW_24H_MAJOR", -80)
 TOP10_CONCERN = _get_int("TOP10_CONCERN", 40)
 
 # Detailed fetch decision thresholds
-PRELIM_DETAILED_MIN = _get_int("PRELIM_DETAILED_MIN", 2)
+# Raised from 2 to 3 to save ~70% of API credits (only fetch stats for promising tokens)
+PRELIM_DETAILED_MIN = _get_int("PRELIM_DETAILED_MIN", 3)
 PRELIM_VELOCITY_MIN_SCORE = _get_int("PRELIM_VELOCITY_MIN_SCORE", 3)
 VELOCITY_REQUIRED = _get_int("VELOCITY_REQUIRED", 5)
 
