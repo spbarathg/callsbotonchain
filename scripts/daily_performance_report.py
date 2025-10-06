@@ -134,8 +134,7 @@ def analyze_signal_performance(conn: sqlite3.Connection, hours: int = 24) -> Dic
             a.final_score,
             a.smart_money_detected,
             s.max_gain_percent,
-            ROUND((s.max_gain_percent / 100.0) + 1, 2) as multiplier,
-            s.time_to_peak_minutes
+            ROUND((s.max_gain_percent / 100.0) + 1, 2) as multiplier
         FROM alerted_tokens a
         JOIN alerted_token_stats s ON a.token_address = s.token_address
         WHERE a.alerted_at >= ?
@@ -150,8 +149,7 @@ def analyze_signal_performance(conn: sqlite3.Connection, hours: int = 24) -> Dic
             "score": row[1],
             "smart_money": bool(row[2]),
             "gain_pct": round(row[3], 2),
-            "multiplier": row[4],
-            "time_to_peak_min": round(row[5], 1) if row[5] else None
+            "multiplier": row[4]
         })
     
     return stats
@@ -331,8 +329,7 @@ def print_report(health: Dict[str, Any], stats: Dict[str, Any], scenarios: Dict[
             print(f"\n🏆 Top Performers:")
             for i, perf in enumerate(stats["top_performers"][:5], 1):
                 sm_tag = " [SM]" if perf["smart_money"] else ""
-                ttp = f" ({perf['time_to_peak_min']:.0f}min to peak)" if perf['time_to_peak_min'] else ""
-                print(f"  {i}. {perf['token']}: {perf['multiplier']:.2f}x (Score {perf['score']}{sm_tag}){ttp}")
+                print(f"  {i}. {perf['token']}: {perf['multiplier']:.2f}x (Score {perf['score']}{sm_tag})")
     
     # Trading Profitability
     if scenarios:
