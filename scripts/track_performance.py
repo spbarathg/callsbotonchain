@@ -123,6 +123,7 @@ def main():
     """Main tracking loop"""
     _out("🔍 Starting Price Performance Tracker...")
     _out("Tracking alerted tokens from last 48 hours...")
+    _out("IMPROVED: Tracking every 30 seconds to capture pump speed data better")
     
     cycle = 0
     
@@ -157,13 +158,14 @@ def main():
                 elif failed_count > 0:
                     _out(f"ℹ️  {failed_count} tokens not yet indexed (too new for DexScreener)")
             
-            # Print summary every 10 cycles (roughly every 10 minutes)
-            if cycle % 10 == 0:
+            # Print summary every 20 cycles (roughly every 10 minutes)
+            if cycle % 20 == 0:
                 print_summary()
             
-            # Sleep for 1 minute between cycles
-            _out("Sleeping for 60 seconds...")
-            time.sleep(60)
+            # IMPROVED: Sleep for 30 seconds instead of 60 to capture timing data better
+            # Analysis showed we were missing 86% of timing data - this will help
+            _out("Sleeping for 30 seconds...")
+            time.sleep(30)
             
         except KeyboardInterrupt:
             _out("\n👋 Tracker stopped by user")

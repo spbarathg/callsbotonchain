@@ -23,8 +23,8 @@ TELEGRAM_ENABLED = bool(TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID)
 # BOT SETTINGS
 # ==============================================
 try:
-    # ADJUSTED: Reduced from 8 to 6 - was blocking all signals
-    HIGH_CONFIDENCE_SCORE = int(os.getenv("HIGH_CONFIDENCE_SCORE", "6"))
+    # ADJUSTED: Set to 7 based on analysis - score 7 had 20% win rate (best consistency)
+    HIGH_CONFIDENCE_SCORE = int(os.getenv("HIGH_CONFIDENCE_SCORE", "7"))
     MIN_USD_VALUE = int(os.getenv("MIN_USD_VALUE", "200"))
     FETCH_INTERVAL = int(os.getenv("FETCH_INTERVAL", "120"))
     # Optional feed scoping
@@ -110,9 +110,11 @@ MCAP_SMALL_MAX = _get_int("MCAP_SMALL_MAX", 1_000_000)
 MCAP_MID_MAX = _get_int("MCAP_MID_MAX", 10_000_000)
 
 # 24h Volume thresholds (USD)
-VOL_VERY_HIGH = _get_int("VOL_VERY_HIGH", 100_000)
-VOL_HIGH = _get_int("VOL_HIGH", 50_000)
-VOL_MED = _get_int("VOL_MED", 10_000)
+# ADJUSTED: Based on analysis - moonshots had median volume of $63k
+# Lowered from 100k/50k/10k to 60k/30k/5k for better signal capture
+VOL_VERY_HIGH = _get_int("VOL_VERY_HIGH", 60_000)
+VOL_HIGH = _get_int("VOL_HIGH", 30_000)
+VOL_MED = _get_int("VOL_MED", 5_000)
 
 # Momentum thresholds (%)
 MOMENTUM_1H_STRONG = _get_int("MOMENTUM_1H_STRONG", 5)
@@ -144,7 +146,9 @@ TELEGRAM_ALERT_MIN_INTERVAL = _get_int("TELEGRAM_ALERT_MIN_INTERVAL", 0)  # seco
 # ==============================================
 # TRACKING SETTINGS
 # ==============================================
-TRACK_INTERVAL_MIN = _get_int("TRACK_INTERVAL_MIN", 60)
+# IMPROVED: Track every 30 seconds instead of 60 to capture pump speed data
+# Analysis showed we were missing 86% of timing data - this will help
+TRACK_INTERVAL_MIN = _get_int("TRACK_INTERVAL_MIN", 30)
 TRACK_BATCH_SIZE = _get_int("TRACK_BATCH_SIZE", 25)
 
 # ==============================================
@@ -176,11 +180,12 @@ LARGE_CAP_MOMENTUM_GATE_1H = _get_int("LARGE_CAP_MOMENTUM_GATE_1H", 15)
 # RISK GATES (STRICT MODE)
 # ==============================================
 # Minimum on-chain liquidity required to alert (USD)
-# ADJUSTED: Reduced from 15k to 8k - was blocking all pump.fun tokens
-MIN_LIQUIDITY_USD = _get_int("MIN_LIQUIDITY_USD", 8_000)
+# ADJUSTED: Based on analysis - moonshots had median liquidity of $117k vs losers $30k
+# Raised from 8k to 30k to filter out low-liquidity rugs
+MIN_LIQUIDITY_USD = _get_int("MIN_LIQUIDITY_USD", 30_000)
 
 # Minimum 24h volume required (USD)
-# ADJUSTED: Reduced from 10k to 2k - new tokens have no volume initially
+# ADJUSTED: Kept low for new tokens, volume builds over time
 VOL_24H_MIN_FOR_ALERT = _get_int("VOL_24H_MIN_FOR_ALERT", 2_000)
 
 # ==============================================
@@ -190,15 +195,18 @@ VOL_24H_MIN_FOR_ALERT = _get_int("VOL_24H_MIN_FOR_ALERT", 2_000)
 # Require smart-money cycle for final alert
 # If True, drops all non-smart-money tokens no matter how high they score
 # Recommendation: Set to FALSE to allow high-quality general cycle tokens
+# ADJUSTED: Based on analysis, non-smart money outperforms (3.03x vs 1.12x)
 REQUIRE_SMART_MONEY_FOR_ALERT = os.getenv("REQUIRE_SMART_MONEY_FOR_ALERT", "false").lower() == "true"
 
-# Score adjustment for smart money tokens
+# Score adjustment for smart money tokens - SET TO 0 (was 2)
+# Analysis shows smart money detection doesn't predict success
 # Smart money tokens get this bonus to their final score
-SMART_MONEY_SCORE_BONUS = _get_int("SMART_MONEY_SCORE_BONUS", 2)
+SMART_MONEY_SCORE_BONUS = _get_int("SMART_MONEY_SCORE_BONUS", 0)
 
 # For general cycle (non-smart money), require higher score
-# This ensures general cycle tokens are extra high quality
-GENERAL_CYCLE_MIN_SCORE = _get_int("GENERAL_CYCLE_MIN_SCORE", 9)
+# ADJUSTED: Reduced from 9 to 7 based on analysis showing score 7 has 20% win rate
+# Score 7 was the most consistent performer in the data
+GENERAL_CYCLE_MIN_SCORE = _get_int("GENERAL_CYCLE_MIN_SCORE", 7)
 
 # Require minimum velocity score for final alert (0 disables)
 REQUIRE_VELOCITY_MIN_SCORE_FOR_ALERT = _get_int("REQUIRE_VELOCITY_MIN_SCORE_FOR_ALERT", 0)
@@ -285,29 +293,30 @@ RUG_MIN_LIQUIDITY_USD = _get_int("RUG_MIN_LIQUIDITY_USD", 1)  # <= this treated 
 # ==============================================
 # GATE MODE (Tiered defaults via env)
 # ==============================================
-# TIER1 (High Confidence): score>=9, liq>=20k, vol24>=50k, mcap<=1.5M
-# TIER2 (Balanced Default): score>=9, liq>=10k, mcap<=1.5M, vol/mcap>=0.6
-# TIER3 (Exploratory/Relax): score>=8, liq>=5k, mcap<=5M, vol/mcap>=0.3
+# ADJUSTED based on analysis: score 7 optimal, liquidity $30k+ critical
+# TIER1 (High Confidence): score>=8, liq>=50k, mcap<=1.5M (strictest)
+# TIER2 (Balanced Default): score>=7, liq>=30k, mcap<=1.5M (moonshot sweet spot)
+# TIER3 (Exploratory/Relax): score>=6, liq>=20k, mcap<=5M (wider net)
 GATE_MODE = (os.getenv("GATE_MODE", "TIER2") or "TIER2").upper()
 
 GATE_PRESETS = {
     "TIER1": {
-        "HIGH_CONFIDENCE_SCORE": 9,
-        "MIN_LIQUIDITY_USD": 20_000,
-        "VOL_24H_MIN_FOR_ALERT": 50_000,
+        "HIGH_CONFIDENCE_SCORE": 8,
+        "MIN_LIQUIDITY_USD": 50_000,
+        "VOL_24H_MIN_FOR_ALERT": 30_000,
         "MAX_MARKET_CAP_FOR_DEFAULT_ALERT": 1_500_000,
-        "VOL_TO_MCAP_RATIO_MIN": 0.60,
+        "VOL_TO_MCAP_RATIO_MIN": 0.50,
     },
     "TIER2": {
-        "HIGH_CONFIDENCE_SCORE": 9,
-        "MIN_LIQUIDITY_USD": 10_000,
+        "HIGH_CONFIDENCE_SCORE": 7,
+        "MIN_LIQUIDITY_USD": 30_000,
         "VOL_24H_MIN_FOR_ALERT": 0,
         "MAX_MARKET_CAP_FOR_DEFAULT_ALERT": 1_500_000,
-        "VOL_TO_MCAP_RATIO_MIN": 0.60,
+        "VOL_TO_MCAP_RATIO_MIN": 0.40,
     },
     "TIER3": {
-        "HIGH_CONFIDENCE_SCORE": 8,
-        "MIN_LIQUIDITY_USD": 5_000,
+        "HIGH_CONFIDENCE_SCORE": 6,
+        "MIN_LIQUIDITY_USD": 20_000,
         "VOL_24H_MIN_FOR_ALERT": 0,
         "MAX_MARKET_CAP_FOR_DEFAULT_ALERT": 5_000_000,
         "VOL_TO_MCAP_RATIO_MIN": 0.30,

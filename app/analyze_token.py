@@ -530,9 +530,9 @@ def calculate_preliminary_score(tx_data: Dict[str, Any], smart_money_detected: b
     """
     score = 0
 
-    # Smart money bonus (highest priority)
-    if smart_money_detected:
-        score += 3  # Baseline bonus
+    # Smart money bonus REMOVED - analysis showed it's anti-predictive
+    # if smart_money_detected:
+    #     score += 3  # Baseline bonus
 
     # USD value indicates serious activity; downweight synthetic fallback items
     usd_value = tx_data.get('usd_value', 0) or 0
@@ -566,10 +566,14 @@ def score_token(stats: Dict[str, Any], smart_money_detected: bool = False, token
     score = 0
     scoring_details: List[str] = []
 
-    # Smart money bonus is part of raw scoring signal
+    # Smart money bonus - REDUCED from +2 to 0 based on analysis
+    # Data shows non-smart money signals outperformed (3.03x vs 1.12x avg)
+    # Smart money detection may be too late or false positives
+    # if smart_money_detected:
+    #     score += 2
+    #     scoring_details.append("Smart Money: +2 (top wallets active!)")
     if smart_money_detected:
-        score += 2
-        scoring_details.append("Smart Money: +2 (top wallets active!)")
+        scoring_details.append("Smart Money: detected (no bonus)")
 
     # Market cap analysis (lower market cap = higher potential)
     market_cap = stats.get('market_cap_usd', 0)

@@ -432,18 +432,19 @@ def process_feed_item(tx: dict, is_smart_cycle: bool, session_alerted_tokens: se
 	# 	except Exception:
 	# 		pass
 	
-	# Smart money bonus
-	try:
-		from config.config import SMART_MONEY_SCORE_BONUS, GENERAL_CYCLE_MIN_SCORE
-	except:
-		SMART_MONEY_SCORE_BONUS, GENERAL_CYCLE_MIN_SCORE = 2, 9
-	
-	if smart_involved and SMART_MONEY_SCORE_BONUS > 0:
-		score = min(score + SMART_MONEY_SCORE_BONUS, 10)
-		try:
-			scoring_details.append(f"Smart Money: +{SMART_MONEY_SCORE_BONUS}")
-		except Exception:
-			pass
+	# Smart money bonus REMOVED - analysis showed it doesn't predict success
+	# Data: non-smart money signals avg 3.03x vs smart money 1.12x
+	# try:
+	# 	from config.config import SMART_MONEY_SCORE_BONUS, GENERAL_CYCLE_MIN_SCORE
+	# except:
+	# 	SMART_MONEY_SCORE_BONUS, GENERAL_CYCLE_MIN_SCORE = 2, 9
+	# 
+	# if smart_involved and SMART_MONEY_SCORE_BONUS > 0:
+	# 	score = min(score + SMART_MONEY_SCORE_BONUS, 10)
+	# 	try:
+	# 		scoring_details.append(f"Smart Money: +{SMART_MONEY_SCORE_BONUS}")
+	# 	except Exception:
+	# 		pass
 	
 	# post-score meta gates
 	if REQUIRE_SMART_MONEY_FOR_ALERT and not smart_involved:
