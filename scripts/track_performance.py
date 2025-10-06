@@ -2,6 +2,11 @@
 """
 Price Performance Tracker for Alerted Tokens
 Runs continuously to track price movements and detect rugs
+
+OPTIMIZED FOR ZERO CREDIT USAGE:
+- Uses only FREE APIs (DexScreener, Jupiter, GeckoTerminal)
+- Never touches Cielo API
+- Perfect for historical performance tracking
 """
 import sys
 import os
@@ -17,8 +22,107 @@ from app.storage import (
     update_token_performance,
     get_performance_summary
 )
-from app.analyze_token import get_token_stats
 from app.logger_utils import _out
+
+
+def get_token_price_free(token_address: str) -> dict:
+    """
+    Get token price using ONLY free APIs (no Cielo credits burned).
+    Tries multiple sources for reliability.
+    
+    Returns dict with price data in the same format as get_token_stats()
+    """
+    from app.http_client import request_json
+    
+    # Try 1: DexScreener (most reliable for Solana)
+    try:
+        url = f"https://api.dexscreener.com/latest/dex/tokens/{token_address}"
+        result = request_json("GET", url, timeout=10)
+        
+        if result.get("status_code") == 200:
+            data = result.get("json") or {}
+            pairs = data.get("pairs") or []
+            
+            if pairs:
+                # Pick the most liquid pair
+                best_pair = max(pairs, key=lambda p: float(p.get("liquidity", {}).get("usd", 0) or 0))
+                
+                price_usd = float(best_pair.get("priceUsd", 0))
+                if price_usd > 0:
+                    price_change = best_pair.get("priceChange") or {}
+                    volume = best_pair.get("volume") or {}
+                    
+                    return {
+                        "price": {
+                            "price_usd": price_usd,
+                            "price_change_1h": float(price_change.get("h1", 0) or 0),
+                            "price_change_6h": float(price_change.get("h6", 0) or 0),
+                            "price_change_24h": float(price_change.get("h24", 0) or 0),
+                        },
+                        "volume": {
+                            "volume_24h": float(volume.get("h24", 0) or 0),
+                        },
+                        "liquidity": {
+                            "liquidity_usd": float(best_pair.get("liquidity", {}).get("usd", 0) or 0),
+                        },
+                        "market_cap_usd": best_pair.get("marketCap"),
+                        "source": "dexscreener_free"
+                    }
+    except Exception as e:
+        _out(f"DexScreener free API failed: {e}")
+    
+    # Try 2: Jupiter Price API (free, no key needed)
+    try:
+        url = f"https://price.jup.ag/v4/price?ids={token_address}"
+        result = request_json("GET", url, timeout=8)
+        
+        if result.get("status_code") == 200:
+            data = result.get("json") or {}
+            price_data = data.get("data", {}).get(token_address)
+            
+            if price_data:
+                price_usd = float(price_data.get("price", 0))
+                if price_usd > 0:
+                    return {
+                        "price": {
+                            "price_usd": price_usd,
+                            "price_change_1h": 0,  # Jupiter doesn't provide historical
+                            "price_change_6h": 0,
+                            "price_change_24h": 0,
+                        },
+                        "source": "jupiter_free"
+                    }
+    except Exception as e:
+        _out(f"Jupiter free API failed: {e}")
+    
+    # Try 3: GeckoTerminal (free, good for trending tokens)
+    try:
+        url = f"https://api.geckoterminal.com/api/v2/networks/solana/tokens/{token_address}"
+        result = request_json("GET", url, timeout=10)
+        
+        if result.get("status_code") == 200:
+            data = result.get("json") or {}
+            attrs = (data.get("data") or {}).get("attributes") or {}
+            
+            price_usd = float(attrs.get("price_usd", 0) or 0)
+            if price_usd > 0:
+                return {
+                    "price": {
+                        "price_usd": price_usd,
+                        "price_change_1h": float(attrs.get("price_change_percentage_1h", 0) or 0),
+                        "price_change_6h": float(attrs.get("price_change_percentage_6h", 0) or 0),
+                        "price_change_24h": float(attrs.get("price_change_percentage_24h", 0) or 0),
+                    },
+                    "volume": {
+                        "volume_24h": float(attrs.get("volume_usd_24h", 0) or 0),
+                    },
+                    "market_cap_usd": attrs.get("market_cap_usd"),
+                    "source": "geckoterminal_free"
+                }
+    except Exception as e:
+        _out(f"GeckoTerminal free API failed: {e}")
+    
+    return {}
 
 
 def track_token_performance(token_address: str, retry_count: int = 0) -> bool:
@@ -30,9 +134,9 @@ def track_token_performance(token_address: str, retry_count: int = 0) -> bool:
     We handle this gracefully and keep trying.
     """
     try:
-        # Use cached data (15min cache) to save API credits
-        # Cache is fresh enough for tracking price movements
-        stats = get_token_stats(token_address, force_refresh=False)
+        # TRACKER OPTIMIZATION: Use ONLY free APIs (no Cielo credits)
+        # This is perfect for historical tracking where we just need basic price data
+        stats = get_token_price_free(token_address)
         
         if not stats:
             # For very new tokens, this is expected - they're not indexed yet
@@ -123,7 +227,8 @@ def main():
     """Main tracking loop"""
     _out("🔍 Starting Price Performance Tracker...")
     _out("Tracking alerted tokens from last 24 hours...")
-    _out("OPTIMIZED: Tracking every 10 minutes using cache to save API credits")
+    _out("✅ ZERO CREDIT MODE: Using only FREE APIs (DexScreener, Jupiter, GeckoTerminal)")
+    _out("⏱️  Checking every 10 minutes for price movements")
     
     cycle = 0
     consecutive_failures = 0
