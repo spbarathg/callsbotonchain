@@ -124,8 +124,9 @@ DRAW_24H_MAJOR = _get_int("DRAW_24H_MAJOR", -80)
 TOP10_CONCERN = _get_int("TOP10_CONCERN", 40)
 
 # Detailed fetch decision thresholds
-# Raised from 2 to 3 to save ~70% of API credits (only fetch stats for promising tokens)
-PRELIM_DETAILED_MIN = _get_int("PRELIM_DETAILED_MIN", 3)
+# CRITICAL FIX: Raised from 3 to 5 to prevent wasting credits on tokens that score 5-6 but need 7+
+# Analysis showed tokens with prelim 3 get detailed score of 5-6, which are then REJECTED
+PRELIM_DETAILED_MIN = _get_int("PRELIM_DETAILED_MIN", 5)
 PRELIM_VELOCITY_MIN_SCORE = _get_int("PRELIM_VELOCITY_MIN_SCORE", 3)
 VELOCITY_REQUIRED = _get_int("VELOCITY_REQUIRED", 5)
 
