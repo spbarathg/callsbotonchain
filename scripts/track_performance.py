@@ -218,12 +218,16 @@ def print_summary():
                 rug_count = data.get('rug_count', 0)
                 
                 # Safe formatting with None checks
-                print(f"    Total: {total if total is not None else 0}")
-                print(f"    Avg Gain: {avg_gain if avg_gain is not None else 0:.1f}%")
-                if total and total > 0:
-                    print(f"    Rugs: {rug_count} ({rug_count/total*100:.1f}%)")
+                total_val = total if total is not None else 0
+                avg_gain_val = avg_gain if avg_gain is not None else 0
+                rug_count_val = rug_count if rug_count is not None else 0
+                
+                print(f"    Total: {total_val}")
+                print(f"    Avg Gain: {avg_gain_val:.1f}%")
+                if total_val and total_val > 0:
+                    print(f"    Rugs: {rug_count_val} ({rug_count_val/total_val*100:.1f}%)")
                 else:
-                    print(f"    Rugs: {rug_count} (0.0%)")
+                    print(f"    Rugs: {rug_count_val} (0.0%)")
         
         print("="*60)
         
