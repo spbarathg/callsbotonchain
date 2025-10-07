@@ -2,7 +2,9 @@ version: '3.8'
 
 services:
   worker:
-    build: .
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile
     container_name: callsbot-worker
     command: ["python", "scripts/bot.py", "run"]
     restart: unless-stopped
@@ -27,7 +29,9 @@ services:
         max-file: "3"
 
   web:
-    build: .
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile
     container_name: callsbot-web
     command: ["gunicorn", "-k", "gthread", "--threads", "4", "-w", "2", "-t", "120", "--graceful-timeout", "30", "-b", "0.0.0.0:8080", "src.server:create_app()"]
     restart: unless-stopped
@@ -51,7 +55,9 @@ services:
         max-file: "3"
 
   trader:
-    build: .
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile
     container_name: callsbot-trader
     command: ["python", "-m", "tradingSystem.cli"]
     restart: unless-stopped
@@ -72,7 +78,9 @@ services:
         max-file: "3"
 
   tracker:
-    build: .
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile
     container_name: callsbot-tracker
     command: ["python", "scripts/track_performance.py"]
     restart: unless-stopped
