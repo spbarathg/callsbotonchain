@@ -213,9 +213,17 @@ def print_summary():
             if key in summary:
                 data = summary[key]
                 print(f"  {feature.replace('_', ' ').title()}:")
-                print(f"    Total: {data['total']}")
-                print(f"    Avg Gain: {data.get('avg_gain', 0):.1f}%")
-                print(f"    Rugs: {data['rug_count']} ({data['rug_count']/data['total']*100:.1f}%)")
+                total = data.get('total', 0)
+                avg_gain = data.get('avg_gain', 0)
+                rug_count = data.get('rug_count', 0)
+                
+                # Safe formatting with None checks
+                print(f"    Total: {total if total is not None else 0}")
+                print(f"    Avg Gain: {avg_gain if avg_gain is not None else 0:.1f}%")
+                if total and total > 0:
+                    print(f"    Rugs: {rug_count} ({rug_count/total*100:.1f}%)")
+                else:
+                    print(f"    Rugs: {rug_count} (0.0%)")
         
         print("="*60)
         

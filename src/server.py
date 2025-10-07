@@ -348,6 +348,39 @@ def create_app() -> Flask:
     except Exception:
         pass
     
+    # Basic Authentication
+    def check_auth(username: str, password: str) -> bool:
+        """Check if username/password combination is valid."""
+        expected_user = os.getenv("DASHBOARD_USERNAME", "admin")
+        expected_pass = os.getenv("DASHBOARD_PASSWORD", "")
+        # If no password is set, disable authentication
+        if not expected_pass:
+            return True
+        return username == expected_user and password == expected_pass
+    
+    def authenticate():
+        """Send 401 response that enables basic auth."""
+        return Response(
+            'Authentication required. Please login.',
+            401,
+            {'WWW-Authenticate': 'Basic realm="CallsBot Dashboard"'}
+        )
+    
+    def requires_auth(f):  # type: ignore
+        """Decorator to require authentication for routes."""
+        from functools import wraps
+        @wraps(f)
+        def decorated(*args, **kwargs):  # type: ignore
+            # Skip auth if disabled
+            if os.getenv("DASHBOARD_AUTH_ENABLED", "true").strip().lower() != "true":
+                return f(*args, **kwargs)
+            
+            auth = request.authorization
+            if not auth or not check_auth(auth.username, auth.password):
+                return authenticate()
+            return f(*args, **kwargs)
+        return decorated
+    
     def _no_cache(resp):  # type: ignore
         try:
             resp.headers["Cache-Control"] = "no-store, max-age=0"
@@ -1376,6 +1409,7 @@ def create_app() -> Flask:
         }, "metrics": metrics})
 
     @app.get("/")
+    @requires_auth
     def index():
         return render_template("index.html")
 
