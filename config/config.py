@@ -206,9 +206,8 @@ REQUIRE_SMART_MONEY_FOR_ALERT = os.getenv("REQUIRE_SMART_MONEY_FOR_ALERT", "fals
 SMART_MONEY_SCORE_BONUS = _get_int("SMART_MONEY_SCORE_BONUS", 0)
 
 # For general cycle (non-smart money), require higher score
-# ADJUSTED: Reduced from 9 to 7 based on analysis showing score 7 has 20% win rate
-# Score 7 was the most consistent performer in the data
-GENERAL_CYCLE_MIN_SCORE = _get_int("GENERAL_CYCLE_MIN_SCORE", 7)
+# ADJUSTED: Reduced to 5 to allow more signals through (was blocking everything at 7)
+GENERAL_CYCLE_MIN_SCORE = _get_int("GENERAL_CYCLE_MIN_SCORE", 5)
 
 # Require minimum velocity score for final alert (0 disables)
 REQUIRE_VELOCITY_MIN_SCORE_FOR_ALERT = _get_int("REQUIRE_VELOCITY_MIN_SCORE_FOR_ALERT", 0)
