@@ -1,18 +1,8 @@
 # CallsBotOnChain Reverse Proxy Configuration
 # Routes traffic to the web service
 
-# HTTP to HTTPS redirect
+# Main dashboard (HTTP)
 :80 {
-    # Redirect all HTTP traffic to HTTPS
-    redir https://{host}{uri} permanent
-}
-
-# Main dashboard (HTTPS)
-:443 {
-    # Enable automatic HTTPS with self-signed cert (or use your domain)
-    # For production with domain: tls your-email@domain.com
-    tls internal
-    
     # Enable compression
     encode gzip
 
@@ -32,9 +22,6 @@
 
     # Security headers
     header {
-        # Enable HSTS (force HTTPS for 1 year)
-        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
-        
         # Prevent clickjacking
         X-Frame-Options "SAMEORIGIN"
         
