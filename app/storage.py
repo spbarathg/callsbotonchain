@@ -441,13 +441,35 @@ def get_alerted_tokens_for_tracking() -> List[str]:
     
     # Get tokens alerted in last 24 hours that aren't rugged (reduced from 48h to save API credits)
     one_day_ago = (datetime.now() - timedelta(hours=24)).timestamp()
+    
+    # Query from alerted_tokens (primary table) and LEFT JOIN with stats
+    # This ensures we track ALL alerted tokens, even those without stats records yet
     c.execute("""
-        SELECT token_address FROM alerted_token_stats
-        WHERE first_alert_at >= ? AND (is_rug IS NULL OR is_rug = 0)
-        ORDER BY first_alert_at DESC
+        SELECT a.token_address, a.alerted_at, a.final_score, a.conviction_type
+        FROM alerted_tokens a
+        LEFT JOIN alerted_token_stats s ON a.token_address = s.token_address
+        WHERE datetime(a.alerted_at) >= datetime(?, 'unixepoch')
+            AND (s.is_rug IS NULL OR s.is_rug = 0)
+        ORDER BY a.alerted_at DESC
     """, (one_day_ago,))
     
-    tokens = [row[0] for row in c.fetchall()]
+    rows = c.fetchall()
+    
+    # Create stats records for tokens that don't have them yet
+    for token_address, alerted_at, final_score, conviction_type in rows:
+        c.execute("SELECT token_address FROM alerted_token_stats WHERE token_address = ?", (token_address,))
+        if not c.fetchone():
+            # Create initial stats record for orphaned token
+            alerted_timestamp = datetime.fromisoformat(alerted_at.replace(' ', 'T')).timestamp() if isinstance(alerted_at, str) else float(alerted_at)
+            c.execute("""
+                INSERT INTO alerted_token_stats (
+                    token_address, first_alert_at, last_checked_at, final_score, conviction_type
+                ) VALUES (?, ?, ?, ?, ?)
+            """, (token_address, alerted_timestamp, alerted_timestamp, final_score, conviction_type))
+    
+    conn.commit()
+    
+    tokens = [row[0] for row in rows]
     conn.close()
     return tokens
 
