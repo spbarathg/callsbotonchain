@@ -23,8 +23,8 @@ TELEGRAM_ENABLED = bool(TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID)
 # BOT SETTINGS
 # ==============================================
 try:
-    # ADJUSTED: Set to 7 based on analysis - score 7 had 20% win rate (best consistency)
-    HIGH_CONFIDENCE_SCORE = int(os.getenv("HIGH_CONFIDENCE_SCORE", "7"))
+    # ADJUSTED: Set to 5 to allow more signals through (was blocking everything at 7)
+    HIGH_CONFIDENCE_SCORE = int(os.getenv("HIGH_CONFIDENCE_SCORE", "5"))
     MIN_USD_VALUE = int(os.getenv("MIN_USD_VALUE", "200"))
     FETCH_INTERVAL = int(os.getenv("FETCH_INTERVAL", "120"))
     # Optional feed scoping
@@ -299,7 +299,7 @@ RUG_MIN_LIQUIDITY_USD = _get_int("RUG_MIN_LIQUIDITY_USD", 1)  # <= this treated 
 # TIER1 (High Confidence): score>=8, liq>=50k, mcap<=1.5M (strictest)
 # TIER2 (Balanced Default): score>=7, liq>=30k, mcap<=1.5M (moonshot sweet spot)
 # TIER3 (Exploratory/Relax): score>=6, liq>=20k, mcap<=5M (wider net)
-GATE_MODE = (os.getenv("GATE_MODE", "TIER2") or "TIER2").upper()
+GATE_MODE = (os.getenv("GATE_MODE", "DISABLED") or "DISABLED").upper()
 
 GATE_PRESETS = {
     "TIER1": {
