@@ -329,6 +329,9 @@ def process_feed_item(tx: dict, is_smart_cycle: bool, session_alerted_tokens: se
 	smart_involved = is_smart_cycle or tx_has_smart_money(tx)
 	if (not token_address) or (usd_value == 0):
 		return "skipped", None, 0, None
+	# Skip native SOL token - wastes API credits
+	if token_address == "native" or token_address == "So11111111111111111111111111111111111111112":
+		return "skipped", None, 0, None
 	if token_address in session_alerted_tokens or has_been_alerted(token_address):
 		return "skipped", None, 0, None
 	# prelim score
