@@ -216,11 +216,13 @@ def record_alert_with_metadata(
     
     now = datetime.now().timestamp()
     
-    # Extract all relevant data
-    price_data = stats.get('price', {})
-    market_data = stats.get('market', {})
+    # Extract all relevant data with fallback to root level
+    # Some APIs return nested structure (stats['price']['price_usd'])
+    # Others return flat structure (stats['price_usd'])
+    price_data = stats.get('price', stats)  # Fallback to root stats if no 'price' key
+    market_data = stats.get('market', stats)  # Fallback to root stats
     security_data = stats.get('security', {})
-    liquidity_data = stats.get('liquidity', {})
+    liquidity_data = stats.get('liquidity', stats)  # Fallback to root stats
     holders_data = stats.get('holders', {})
     metadata = stats.get('metadata', {})
     
@@ -305,9 +307,10 @@ def record_price_snapshot(token_address: str, stats: Dict[str, Any]) -> None:
     c = conn.cursor()
     
     now = datetime.now().timestamp()
-    price_data = stats.get('price', {})
-    market_data = stats.get('market', {})
-    liquidity_data = stats.get('liquidity', {})
+    # Fallback to root stats if nested structure doesn't exist
+    price_data = stats.get('price', stats)
+    market_data = stats.get('market', stats)
+    liquidity_data = stats.get('liquidity', stats)
     holders_data = stats.get('holders', {})
     
     c.execute("""
@@ -338,9 +341,10 @@ def update_token_performance(token_address: str, stats: Dict[str, Any]) -> None:
     c = conn.cursor()
     
     now = datetime.now().timestamp()
-    price_data = stats.get('price', {})
-    market_data = stats.get('market', {})
-    liquidity_data = stats.get('liquidity', {})
+    # Fallback to root stats if nested structure doesn't exist
+    price_data = stats.get('price', stats)
+    market_data = stats.get('market', stats)
+    liquidity_data = stats.get('liquidity', stats)
     
     # Get first price to calculate gains/losses
     c.execute("SELECT first_price_usd, peak_price_usd FROM alerted_token_stats WHERE token_address = ?", (token_address,))
