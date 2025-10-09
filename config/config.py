@@ -20,6 +20,32 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 TELEGRAM_ENABLED = bool(TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID)
 
 # ==============================================
+# TELETHON GROUP NOTIFICATIONS (optional)
+# ==============================================
+# Telethon allows sending messages from a user account (not bot)
+# to Telegram groups, channels, or users.
+try:
+    TELEGRAM_USER_API_ID = int(os.getenv("TELEGRAM_USER_API_ID", "0"))
+except (ValueError, TypeError):
+    TELEGRAM_USER_API_ID = 0
+
+TELEGRAM_USER_API_HASH = os.getenv("TELEGRAM_USER_API_HASH", "")
+TELEGRAM_USER_SESSION_FILE = os.getenv("TELEGRAM_USER_SESSION_FILE", "")
+
+try:
+    TELEGRAM_GROUP_CHAT_ID = int(os.getenv("TELEGRAM_GROUP_CHAT_ID", "0"))
+except (ValueError, TypeError):
+    TELEGRAM_GROUP_CHAT_ID = 0
+
+# Enable Telethon only if all required fields are present
+TELETHON_ENABLED = bool(
+    TELEGRAM_USER_API_ID 
+    and TELEGRAM_USER_API_HASH 
+    and TELEGRAM_USER_SESSION_FILE 
+    and TELEGRAM_GROUP_CHAT_ID
+)
+
+# ==============================================
 # BOT SETTINGS
 # ==============================================
 try:

@@ -12,7 +12,7 @@ from typing import Optional, Dict
 
 import requests
 
-from .watcher import follow_decisions
+from .watcher import follow_signals_redis
 from .paper_trader import PaperTrader
 from .strategy_optimized import decide_trade
 from app.toggles import trading_enabled
@@ -172,7 +172,9 @@ def run() -> None:
     last_health_log = time.time()
 
     try:
-        for ev in follow_decisions(start_at_end=True):
+        # Use Redis-based signal streaming (real-time)
+        print(f"📡 Connecting to Redis signal stream...")
+        for signal in follow_signals_redis(block_timeout=5):
             try:
                 signals_processed += 1
                 
@@ -199,8 +201,7 @@ def run() -> None:
                     time.sleep(5)
                     continue
                 
-                token = ev.get("ca")
-                event_type = ev.get("type")
+                token = signal.get("ca")
                 
                 if not token:
                     continue
@@ -214,15 +215,32 @@ def run() -> None:
                     signals_filtered += 1
                     continue
                 
-                # Fetch real-time stats
-                stats = _fetch_real_stats(token)
-                if not stats:
+                # Extract signal data directly from Redis payload
+                signal_score = int(signal.get("score", 7))
+                conviction_type = signal.get("conviction_type", "High Confidence (Strict)")
+                price = float(signal.get("price", 0))
+                liquidity = float(signal.get("liquidity", 0))
+                market_cap = float(signal.get("market_cap", 0))
+                volume_24h = float(signal.get("volume_24h", 0))
+                change_1h = float(signal.get("change_1h", 0))
+                
+                # Validate we have minimum required data
+                if price == 0 or liquidity == 0:
+                    print(f"[PAPER] ⚠️ Skipping {token[:8]}... - missing price/liquidity data")
                     signals_filtered += 1
                     continue
                 
-                # Get signal score and conviction
-                signal_score = int(stats.get("final_score", 7))
-                conviction_type = stats.get("conviction_type", "High Confidence (Strict)")
+                # Build stats dict for strategy decision
+                stats = {
+                    "final_score": signal_score,
+                    "conviction_type": conviction_type,
+                    "price": price,
+                    "liquidity_usd": liquidity,
+                    "market_cap_usd": market_cap,
+                    "vol24_usd": volume_24h,
+                    "change_1h": change_1h,
+                    "ratio": volume_24h / max(market_cap, 1) if market_cap > 0 else 0,
+                }
                 
                 # Make trade decision using optimized strategy
                 plan = decide_trade(stats, signal_score, conviction_type)
@@ -236,9 +254,9 @@ def run() -> None:
                     'score': signal_score,
                     'conviction_type': conviction_type,
                     'strategy': plan['strategy'],
-                    'price': stats.get('price', 0),
-                    'liquidity_usd': stats.get('liquidity_usd', 30000),
-                    'change_1h': stats.get('change_1h', 0),
+                    'price': price,
+                    'liquidity_usd': liquidity,
+                    'change_1h': change_1h,
                 }
                 
                 # Try to open position
@@ -250,7 +268,7 @@ def run() -> None:
                     print(f"\n[PAPER] 📈 OPENED Position #{pos_id}")
                     print(f"  Token: {token[:8]}...")
                     print(f"  Score: {signal_score}/10 | {conviction_type}")
-                    print(f"  Entry: ${stats.get('price', 0):.8f}")
+                    print(f"  Entry: ${price:.8f}")
                     print(f"  Size: ${plan['usd_size']:.2f}")
                     print(f"  Trail: {plan['trail_pct']:.0f}%")
                     print(f"  Capital Remaining: ${stats_current['current_capital']:.2f}")

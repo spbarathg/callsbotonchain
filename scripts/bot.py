@@ -39,7 +39,8 @@ from app.analyze_token import (
 	check_junior_strict,
 	check_junior_nuanced,
 )
-from app.notify import send_telegram_alert
+from app.notify import send_telegram_alert, push_signal_to_redis
+from app.telethon_notifier import send_group_message
 from app.storage import (
 	init_db,
 	has_been_alerted,
@@ -561,6 +562,16 @@ def process_feed_item(tx: dict, is_smart_cycle: bool, session_alerted_tokens: se
 			telegram_ok = send_telegram_alert(message)
 	except Exception:
 		telegram_ok = False
+	
+	# Send to Telegram group via Telethon (user client)
+	group_ok = False
+	try:
+		if os.getenv('DRY_RUN', 'false').strip().lower() != 'true':
+			group_ok = send_group_message(message)
+	except Exception as e:
+		_out(f"⚠️ Failed to send group message: {e}")
+		group_ok = False
+	
 	# mark and log with comprehensive metadata
 	baseline_price = float(price or 0)
 	baseline_mcap = float(market_cap or 0)
@@ -628,6 +639,29 @@ def process_feed_item(tx: dict, is_smart_cycle: bool, session_alerted_tokens: se
 		except Exception:
 			pass
 	_out(f"Alert for token {token_address} (Final: {score}/10, Prelim: {preliminary_score}/10, telegram_ok={telegram_ok})")
+	
+	# Push signal to Redis for real-time trader consumption
+	try:
+		signal_payload = {
+			"token": token_address,
+			"name": name,
+			"symbol": symbol,
+			"score": score,
+			"prelim_score": preliminary_score,
+			"conviction_type": conviction_type,
+			"price": float(price),
+			"market_cap": market_cap,
+			"liquidity": liquidity,
+			"volume_24h": volume_24h,
+			"change_1h": change_1h,
+			"change_24h": change_24h,
+			"smart_money_detected": bool(smart_involved),
+			"timestamp": time.time(),
+		}
+		push_signal_to_redis(signal_payload)
+	except Exception as e:
+		_out(f"⚠️ Redis signal push failed: {e}")
+	
 	try:
 		log_process({
 			"type": "alert_sent",
