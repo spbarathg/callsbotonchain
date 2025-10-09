@@ -6,6 +6,7 @@ services:
       context: ..
       dockerfile: deployment/Dockerfile
     container_name: callsbot-worker
+    user: root
     command: ["python", "scripts/bot.py", "run"]
     restart: unless-stopped
     env_file:
@@ -54,13 +55,40 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  # Paper Trading - Runs automatically to simulate trading with $500
+  paper_trader:
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile
+    container_name: callsbot-paper-trader
+    user: root
+    command: ["python", "-m", "tradingSystem.cli_paper", "--capital", "500"]
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - CALLSBOT_LOG_STDOUT=true
+    volumes:
+      - ./var:/app/var
+      - ./data/logs:/app/data/logs
+    depends_on:
+      - worker
+      - web
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Real Trader - Uses optimized system (currently disabled, use paper_trader instead)
   trader:
     build:
       context: ..
       dockerfile: deployment/Dockerfile
     container_name: callsbot-trader
-    command: ["python", "-m", "tradingSystem.cli"]
-    restart: unless-stopped
+    user: root
+    command: ["python", "-m", "tradingSystem.cli_optimized"]
+    restart: "no"  # Disabled by default - enable when ready for live trading
     env_file:
       - .env
     environment:
@@ -82,6 +110,7 @@ services:
       context: ..
       dockerfile: deployment/Dockerfile
     container_name: callsbot-tracker
+    user: root
     command: ["python", "scripts/track_performance.py"]
     restart: unless-stopped
     env_file:
