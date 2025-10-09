@@ -1427,23 +1427,31 @@ def _signals_metrics(db_path: str) -> Dict[str, Any]:
         # 24h alerts
         cur.execute("SELECT COUNT(1) FROM alerted_tokens WHERE alerted_at >= datetime('now','-1 day')")
         out["alerts_24h"] = int(cur.fetchone()[0])
-        # Success rates (>=2x and >=5x), denominator considers rows with valid first_price
+        # Success rates (>=2x, >=5x, >=10x), denominator considers rows with valid first_price
+        # Using max_gain_percent: 2x=100%, 5x=400%, 10x=900%
         cur.execute(
             """
             SELECT
-              SUM(CASE WHEN first_price_usd>0 AND peak_price_usd/first_price_usd >= 2.0 THEN 1 ELSE 0 END) AS ge2x,
-              SUM(CASE WHEN first_price_usd>0 AND peak_price_usd/first_price_usd >= 5.0 THEN 1 ELSE 0 END) AS ge5x,
+              SUM(CASE WHEN first_price_usd>0 AND max_gain_percent >= 100.0 THEN 1 ELSE 0 END) AS ge2x,
+              SUM(CASE WHEN first_price_usd>0 AND max_gain_percent >= 400.0 THEN 1 ELSE 0 END) AS ge5x,
+              SUM(CASE WHEN first_price_usd>0 AND max_gain_percent >= 900.0 THEN 1 ELSE 0 END) AS ge10x,
               SUM(CASE WHEN first_price_usd>0 THEN 1 ELSE 0 END) AS denom_pos,
-              SUM(CASE WHEN first_price_usd>0 AND peak_price_usd/first_price_usd < 2.0 THEN 1 ELSE 0 END) AS lt2x
+              SUM(CASE WHEN first_price_usd>0 AND max_gain_percent < 100.0 THEN 1 ELSE 0 END) AS lt2x
             FROM alerted_token_stats
             """
         )
         row = cur.fetchone()
-        ge2x, ge5x, denom_pos, lt2x = (row or (0, 0, 0, 0))
+        ge2x, ge5x, ge10x, denom_pos, lt2x = (row or (0, 0, 0, 0, 0))
         denom_pos = float(denom_pos or 0)
         out["rate_ge_2x"] = (float(ge2x) / denom_pos) if denom_pos else 0.0
         out["rate_ge_5x"] = (float(ge5x) / denom_pos) if denom_pos else 0.0
+        out["rate_ge_10x"] = (float(ge10x) / denom_pos) if denom_pos else 0.0
         out["sub_2x_rate"] = (float(lt2x) / denom_pos) if denom_pos else 0.0
+        # Count actual winners and losers
+        out["count_2x_plus"] = int(ge2x)
+        out["count_5x_plus"] = int(ge5x)
+        out["count_10x_plus"] = int(ge10x)
+        out["count_tracked"] = int(denom_pos)
         # Rug rate
         cur.execute("SELECT SUM(CASE WHEN outcome='rug' THEN 1 ELSE 0 END), COUNT(1) FROM alerted_token_stats")
         r = cur.fetchone(); rugs, n = (r or (0, 0))

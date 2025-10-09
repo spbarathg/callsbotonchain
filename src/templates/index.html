@@ -72,6 +72,10 @@
           <div class="value" id="rate_5x">-</div>
         </div>
         <div class="card">
+          <div class="label">10x Rate</div>
+          <div class="value" id="rate_10x">-</div>
+        </div>
+        <div class="card">
           <div class="label">Sub‑2x Rate</div>
           <div class="value" id="rate_sub2x">-</div>
         </div>
@@ -400,6 +404,7 @@
         const trad = data.trading_summary || {};
         document.getElementById('rate_2x').textContent = sig2.rate_ge_2x != null ? (sig2.rate_ge_2x * 100).toFixed(1) + '%' : '-';
         document.getElementById('rate_5x').textContent = sig2.rate_ge_5x != null ? (sig2.rate_ge_5x * 100).toFixed(1) + '%' : '-';
+        document.getElementById('rate_10x').textContent = sig2.rate_ge_10x != null ? (sig2.rate_ge_10x * 100).toFixed(1) + '%' : '-';
         document.getElementById('rate_sub2x').textContent = sig2.sub_2x_rate != null ? (sig2.sub_2x_rate * 100).toFixed(1) + '%' : '-';
         document.getElementById('rug_rate').textContent = sig2.rug_rate != null ? (sig2.rug_rate * 100).toFixed(1) + '%' : '-';
         document.getElementById('median_ttp').textContent = sig2.median_ttp_price_s != null ? sig2.median_ttp_price_s : '-';
