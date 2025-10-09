@@ -104,6 +104,11 @@ class CircuitBreaker:
         self.trip_reason = ""
         self.last_reset = datetime.now().date()
     
+    def is_tripped(self) -> bool:
+        """Check if circuit breaker is tripped"""
+        self.check_and_reset()
+        return self.tripped
+    
     def check_and_reset(self):
         today = datetime.now().date()
         if today > self.last_reset:
