@@ -111,7 +111,22 @@ def send_group_message(message: str) -> bool:
         True if sent successfully, False otherwise
     """
     try:
-        return asyncio.run(send_group_message_async(message))
+        # Try to get existing event loop, otherwise create a new one
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # If loop is already running, we need to use nest_asyncio or run_until_complete won't work
+                # Instead, create a new event loop in a thread
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    future = executor.submit(asyncio.run, send_group_message_async(message))
+                    return future.result(timeout=30)
+            else:
+                # Loop exists but not running, safe to use run_until_complete
+                return loop.run_until_complete(send_group_message_async(message))
+        except RuntimeError:
+            # No event loop exists, create one with asyncio.run
+            return asyncio.run(send_group_message_async(message))
     except Exception as e:
         print(f"❌ Telethon sync wrapper error: {e}")
         return False

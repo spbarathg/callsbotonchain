@@ -10,15 +10,26 @@ from app.http_client import request_json
 # Redis client for signal passing (optional, graceful fallback if not available)
 _REDIS_URL = os.getenv("REDIS_URL") or os.getenv("CALLSBOT_REDIS_URL") or ""
 _redis_client = None
+_redis_status = "not_configured"
+
 if _REDIS_URL:
     try:
         import redis  # type: ignore
         _redis_client = redis.from_url(_REDIS_URL, decode_responses=True)
         # Test connection
         _redis_client.ping()
+        _redis_status = "connected"
+        print(f"✅ Redis client connected successfully: {_REDIS_URL}")
     except Exception as e:
         print(f"⚠️ Redis not available for signal passing: {e}")
         _redis_client = None
+        _redis_status = f"failed: {str(e)}"
+else:
+    print("⚠️ REDIS_URL not configured, signal passing to paper trader disabled")
+
+def get_redis_status() -> str:
+    """Return current Redis connection status."""
+    return _redis_status
 
 
 def push_signal_to_redis(signal_data: dict) -> bool:
@@ -31,6 +42,7 @@ def push_signal_to_redis(signal_data: dict) -> bool:
         True if pushed successfully, False otherwise
     """
     if _redis_client is None:
+        print(f"⚠️ Cannot push signal to Redis: client not connected (status: {_redis_status})")
         return False
     
     try:
@@ -39,6 +51,7 @@ def push_signal_to_redis(signal_data: dict) -> bool:
         _redis_client.lpush("trading_signals", payload)
         # Trim list to last 1000 signals to prevent unbounded growth
         _redis_client.ltrim("trading_signals", 0, 999)
+        print(f"✅ Signal pushed to Redis: {signal_data.get('token', 'unknown')} (score: {signal_data.get('score', 0)})")
         return True
     except Exception as e:
         print(f"⚠️ Failed to push signal to Redis: {e}")

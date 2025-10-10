@@ -83,6 +83,9 @@ logs/
 *.tmp
 *.temp
 
+# ML/Analysis data
+docs/ml_analysis/*.csv
+
 # Docker
 .dockerignore
 

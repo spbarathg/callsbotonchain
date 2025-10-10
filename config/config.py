@@ -205,12 +205,26 @@ MAX_MARKET_CAP_FOR_DEFAULT_ALERT = _get_int("MAX_MARKET_CAP_FOR_DEFAULT_ALERT", 
 LARGE_CAP_MOMENTUM_GATE_1H = _get_int("LARGE_CAP_MOMENTUM_GATE_1H", 15)
 
 # ==============================================
-# RISK GATES (STRICT MODE)
+# RISK GATES (STRICT MODE) - ANALYST OPTIMIZED
 # ==============================================
+# CRITICAL FINDING: Liquidity is THE #1 predictor of winners (not score!)
+# Winner median liquidity: $17,811 | Loser median: $0
+# Data: 75th percentile = $15,668, 90th percentile = $42,174
+
 # Minimum on-chain liquidity required to alert (USD)
-# ADJUSTED: Based on analysis - moonshots had median liquidity of $117k vs losers $30k
-# Raised from 8k to 30k to filter out low-liquidity rugs
-MIN_LIQUIDITY_USD = _get_int("MIN_LIQUIDITY_USD", 30_000)
+# ANALYST RECOMMENDATION: $15k threshold (75th percentile) for optimal win rate
+# Expected impact: Win rate 14% → 30-40%, fewer but higher quality signals
+MIN_LIQUIDITY_USD = _get_int("MIN_LIQUIDITY_USD", 15_000)
+
+# Excellent liquidity threshold (high confidence signals)
+EXCELLENT_LIQUIDITY_USD = _get_int("EXCELLENT_LIQUIDITY_USD", 50_000)
+
+# Enable/disable liquidity filter (for A/B testing)
+USE_LIQUIDITY_FILTER = os.getenv("USE_LIQUIDITY_FILTER", "true").lower() == "true"
+
+# Minimum volume-to-liquidity ratio (from analyst findings)
+# Recommendation: >= 10 for quality signals
+MIN_VOLUME_TO_LIQUIDITY_RATIO = _get_float("MIN_VOLUME_TO_LIQUIDITY_RATIO", 0.0)  # 0 = disabled initially
 
 # Minimum 24h volume required (USD)
 # ADJUSTED: Kept low for new tokens, volume builds over time

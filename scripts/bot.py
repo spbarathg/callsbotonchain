@@ -405,6 +405,40 @@ def process_feed_item(tx: dict, is_smart_cycle: bool, session_alerted_tokens: se
 	if not stats:
 		return "skipped", None, 0, None
 
+	# === CRITICAL: LIQUIDITY PRE-FILTER (ANALYST FINDING #1) ===
+	# Finding: Liquidity is THE #1 predictor of winners (not score!)
+	# Winner median: $17,811 | Loser median: $0
+	# Expected impact: Win rate 14% → 30-40%
+	try:
+		from config.config import MIN_LIQUIDITY_USD, USE_LIQUIDITY_FILTER, EXCELLENT_LIQUIDITY_USD
+		
+		if USE_LIQUIDITY_FILTER:
+			# Extract liquidity (handle multiple possible structures)
+			liquidity = (
+				stats.get('liquidity_usd') or 
+				(stats.get('liquidity', {}) or {}).get('usd') or 
+				(stats.get('liquidity', {}) or {}).get('liquidity_usd') or 
+				0
+			)
+			
+			# Hard reject: Zero or near-zero liquidity
+			if liquidity <= 0:
+				_out(f"❌ REJECTED (ZERO LIQUIDITY): {token_address} - Liquidity: ${liquidity:,.0f}")
+				return "skipped", None, 0, None
+			
+			# Reject: Below minimum threshold ($15k recommended)
+			if liquidity < MIN_LIQUIDITY_USD:
+				_out(f"❌ REJECTED (LOW LIQUIDITY): {token_address} - ${liquidity:,.0f} < ${MIN_LIQUIDITY_USD:,.0f} (minimum)")
+				return "skipped", None, 0, None
+			
+			# Log quality tier for monitoring
+			liquidity_quality = "EXCELLENT" if liquidity >= EXCELLENT_LIQUIDITY_USD else "GOOD"
+			_out(f"✅ LIQUIDITY CHECK PASSED: {token_address} - ${liquidity:,.0f} ({liquidity_quality})")
+	except Exception as e:
+		_out(f"⚠️ Liquidity filter error: {e}")
+		pass
+	# === END LIQUIDITY PRE-FILTER ===
+
 	# Phase 2: Quick security hard gate before expensive scoring paths
 	try:
 		from config.config import REQUIRE_LP_LOCKED, REQUIRE_MINT_REVOKED, ALLOW_UNKNOWN_SECURITY
@@ -643,6 +677,7 @@ def process_feed_item(tx: dict, is_smart_cycle: bool, session_alerted_tokens: se
 	# Push signal to Redis for real-time trader consumption
 	try:
 		signal_payload = {
+			"ca": token_address,  # Paper trader expects "ca" field
 			"token": token_address,
 			"name": name,
 			"symbol": symbol,
@@ -652,6 +687,7 @@ def process_feed_item(tx: dict, is_smart_cycle: bool, session_alerted_tokens: se
 			"price": float(price),
 			"market_cap": market_cap,
 			"liquidity": liquidity,
+			"liquidity_usd": liquidity,  # Duplicate for compatibility
 			"volume_24h": volume_24h,
 			"change_1h": change_1h,
 			"change_24h": change_24h,

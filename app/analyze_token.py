@@ -591,6 +591,34 @@ def score_token(stats: Dict[str, Any], smart_money_detected: bool = False, token
         score = min(score + 1, 10)
         scoring_details.append(f"Microcap Sweet Spot: +1 (${market_cap:,.0f})")
 
+    # === LIQUIDITY ANALYSIS (ANALYST FINDING: #1 PREDICTOR OF WINNERS!) ===
+    # Winner median liquidity: $17,811 | Loser median: $0
+    # This is THE most important factor - weight it heavily
+    liquidity_usd = (
+        stats.get('liquidity_usd') or 
+        (stats.get('liquidity', {}) or {}).get('usd') or 
+        (stats.get('liquidity', {}) or {}).get('liquidity_usd') or 
+        0
+    )
+    
+    # Liquidity scoring tiers (based on analyst percentiles)
+    if liquidity_usd >= 50_000:  # 90th percentile - EXCELLENT
+        score += 3
+        scoring_details.append(f"✅ Liquidity: +3 (${liquidity_usd:,.0f} - EXCELLENT)")
+    elif liquidity_usd >= 15_000:  # 75th percentile - GOOD (minimum threshold)
+        score += 2
+        scoring_details.append(f"✅ Liquidity: +2 (${liquidity_usd:,.0f} - GOOD)")
+    elif liquidity_usd >= 5_000:  # Below threshold but not terrible
+        score += 1
+        scoring_details.append(f"⚠️ Liquidity: +1 (${liquidity_usd:,.0f} - FAIR)")
+    elif liquidity_usd > 0:  # Has some liquidity but very risky
+        # No points, but acknowledge it exists
+        scoring_details.append(f"❌ Liquidity: +0 (${liquidity_usd:,.0f} - TOO LOW)")
+    else:  # Zero liquidity - will be filtered out by pre-filter
+        score -= 2
+        scoring_details.append(f"❌ Liquidity: -2 (${liquidity_usd:,.0f} - ZERO/RUG RISK)")
+    # === END LIQUIDITY ANALYSIS ===
+
     # Volume analysis (24h volume indicates activity)
     volume_24h = stats.get('volume', {}).get('24h', {}).get('volume_usd', 0)
     if (volume_24h or 0) > VOL_VERY_HIGH:
@@ -602,6 +630,19 @@ def score_token(stats: Dict[str, Any], smart_money_detected: bool = False, token
     elif (volume_24h or 0) > VOL_MED:
         score += 1
         scoring_details.append(f"Volume: +1 (${volume_24h:,.0f} - moderate activity)")
+    
+    # === VOLUME-TO-LIQUIDITY RATIO (ANALYST FINDING: Top 3 Predictor) ===
+    # High ratio = good trading activity relative to liquidity
+    if liquidity_usd > 0 and volume_24h > 0:
+        vol_to_liq_ratio = volume_24h / liquidity_usd
+        if vol_to_liq_ratio >= 48:  # High precision rule from analyst
+            score += 1
+            scoring_details.append(f"⚡ Vol/Liq Ratio: +1 ({vol_to_liq_ratio:.1f} - EXCELLENT)")
+        elif vol_to_liq_ratio >= 10:  # Good threshold
+            scoring_details.append(f"✅ Vol/Liq Ratio: ({vol_to_liq_ratio:.1f} - GOOD)")
+        else:
+            scoring_details.append(f"Vol/Liq Ratio: ({vol_to_liq_ratio:.1f})")
+    # === END VOLUME-TO-LIQUIDITY RATIO ===
 
     # Unique trader analysis (indicates community engagement)
     unique_buyers_24h = stats.get('volume', {}).get('24h', {}).get('unique_buyers', 0)

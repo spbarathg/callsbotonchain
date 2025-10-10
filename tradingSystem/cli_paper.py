@@ -210,10 +210,12 @@ def run() -> None:
                 if token in trader.positions:
                     continue
                 
-                # FILTER: Only pump.fun tokens
-                if not token.endswith("pump"):
-                    signals_filtered += 1
-                    continue
+                # FILTER: Only pump.fun tokens (REMOVED - too restrictive)
+                # Most Solana tokens don't end with "pump", only pump.fun vanity addresses do
+                # Commenting out to allow all tokens through
+                # if not token.endswith("pump"):
+                #     signals_filtered += 1
+                #     continue
                 
                 # Extract signal data directly from Redis payload
                 signal_score = int(signal.get("score", 7))
