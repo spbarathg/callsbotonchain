@@ -86,8 +86,12 @@ logs/
 # ML/Analysis data
 docs/ml_analysis/*.csv
 
-# Docker
+# Docker (except in deployment directory)
 .dockerignore
+/Caddyfile
+/Dockerfile
+/docker-compose.yml
+/docker-compose.*.yml
 
 # Jupyter Notebook
 .ipynb_checkpoints
