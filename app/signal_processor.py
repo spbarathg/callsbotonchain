@@ -368,6 +368,14 @@ class SignalProcessor:
         """Check liquidity requirements"""
         liquidity = stats.liquidity_usd or 0
         
+        # CRITICAL FIX: Handle NaN/inf values (NaN comparisons always False!)
+        if not (liquidity == liquidity):  # NaN check
+            self._log(f"❌ REJECTED (INVALID LIQUIDITY - NaN): {stats.token_address}")
+            return False
+        if liquidity == float('inf') or liquidity == float('-inf'):
+            self._log(f"❌ REJECTED (INVALID LIQUIDITY - inf): {stats.token_address}")
+            return False
+        
         if liquidity <= 0:
             self._log(f"❌ REJECTED (ZERO LIQUIDITY): {stats.token_address}")
             return False
