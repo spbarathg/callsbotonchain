@@ -452,6 +452,23 @@ def update_token_performance(token_address: str, stats: Dict[str, Any]) -> None:
         current_peak = row[1] or 0
         current_price = price_data.get('price_usd', 0)
         
+        # FIX: If first_price is missing, set it now (critical for ML training)
+        if first_price == 0 and current_price > 0:
+            first_price = current_price
+            # Also set first_market_cap and first_liquidity
+            c.execute("""
+                UPDATE alerted_token_stats SET
+                    first_price_usd = ?,
+                    first_market_cap_usd = ?,
+                    first_liquidity_usd = ?
+                WHERE token_address = ? AND first_price_usd IS NULL
+            """, (
+                current_price,
+                _select_valid_number(market_data.get('market_cap_usd'), None),
+                _select_valid_number(liquidity_data.get('liquidity_usd'), None),
+                token_address
+            ))
+        
         # Calculate performance metrics
         if first_price > 0:
             gain_percent = ((current_price - first_price) / first_price) * 100
