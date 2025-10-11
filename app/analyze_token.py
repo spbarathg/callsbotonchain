@@ -786,7 +786,14 @@ def _extract_liquidity_usd(stats: Dict[str, Any]) -> float:
     liq_obj = stats.get('liquidity') or {}
     liq_usd = stats.get('liquidity_usd') or liq_obj.get('usd') or 0
     try:
-        return float(liq_usd or 0)
+        value = float(liq_usd or 0)
+        # CRITICAL FIX: NaN comparisons always return False, allowing bad tokens through!
+        # If liquidity is NaN or infinite, treat as 0 to properly fail the liquidity check
+        if not (value == value):  # NaN check (NaN != NaN in Python)
+            return 0.0
+        if value == float('inf') or value == float('-inf'):
+            return 0.0
+        return value
     except Exception:
         return 0.0
 
