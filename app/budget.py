@@ -2,7 +2,7 @@ import json
 import os
 import time
 from typing import Dict, Optional
-from contextlib import contextmanager
+from app.file_lock import file_lock
 
 
 class BudgetManager:
@@ -32,52 +32,6 @@ class BudgetManager:
         }
         self._load()
 
-    # ---------- cross-process file lock ----------
-    @staticmethod
-    @contextmanager
-    def _lock_file(path: str):
-        """Best-effort cross-process advisory lock using a sidecar .lock file.
-        Works on POSIX (fcntl) and Windows (msvcrt)."""
-        lock_path = f"{path}.lock"
-        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-        f = open(lock_path, "a+b")
-        locked = False
-        try:
-            try:
-                import fcntl  # type: ignore
-                try:
-                    fcntl.flock(f.fileno(), fcntl.LOCK_EX)
-                    locked = True
-                except Exception:
-                    locked = False
-            except ImportError:
-                try:
-                    import msvcrt  # type: ignore
-                    f.seek(0)
-                    msvcrt.locking(f.fileno(), msvcrt.LK_LOCK, 1)
-                    locked = True
-                except Exception:
-                    locked = False
-            yield
-        finally:
-            try:
-                if locked:
-                    try:
-                        import fcntl  # type: ignore
-                        fcntl.flock(f.fileno(), fcntl.LOCK_UN)
-                    except Exception:
-                        try:
-                            import msvcrt  # type: ignore
-                            f.seek(0)
-                            msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
-                        except Exception:
-                            pass
-            except Exception:
-                pass
-            try:
-                f.close()
-            except Exception:
-                pass
 
     # ---------- persistence ----------
     def _ensure_dir(self) -> None:
@@ -98,7 +52,7 @@ class BudgetManager:
 
     def _load(self) -> None:
         try:
-            with self._lock_file(self.storage_path):
+            with file_lock(self.storage_path):
                 self._load_unlocked()
         except Exception:
             pass
@@ -115,7 +69,7 @@ class BudgetManager:
 
     def _save(self) -> None:
         try:
-            with self._lock_file(self.storage_path):
+            with file_lock(self.storage_path):
                 self._save_unlocked()
         except Exception:
             pass
@@ -145,7 +99,7 @@ class BudgetManager:
     # ---------- API ----------
     def remaining_minute(self) -> int:
         # Reload under lock to reflect external updates
-        with self._lock_file(self.storage_path):
+        with file_lock(self.storage_path):
             self._load_unlocked()
             self._roll_windows()
         if self.per_minute_max <= 0:
@@ -153,7 +107,7 @@ class BudgetManager:
         return max(0, self.per_minute_max - self._state["minute_count"])
 
     def remaining_day(self) -> int:
-        with self._lock_file(self.storage_path):
+        with file_lock(self.storage_path):
             self._load_unlocked()
             self._roll_windows()
         if self.per_day_max <= 0:
@@ -169,7 +123,7 @@ class BudgetManager:
 
     def can_spend(self, kind: str = "stats", cost: Optional[int] = None) -> bool:
         c = int(cost if cost is not None else self._cost_for_kind(kind))
-        with self._lock_file(self.storage_path):
+        with file_lock(self.storage_path):
             self._load_unlocked()
             self._roll_windows()
             min_left = self.per_minute_max if self.per_minute_max <= 0 else max(
@@ -178,15 +132,22 @@ class BudgetManager:
                 0, self.per_day_max - self._state["day_count"])
             return (min_left >= c) and (day_left >= c)
 
-    def spend(self, kind: str = "stats", cost: Optional[int] = None) -> None:
+    def spend(self, kind: str = "stats", cost: Optional[int] = None) -> bool:
+        """Atomically check and spend credits. Returns True if spent."""
         c = int(cost if cost is not None else self._cost_for_kind(kind))
-        with self._lock_file(self.storage_path):
-            # Refresh state to avoid lost updates without nesting locks
+        with file_lock(self.storage_path):
             self._load_unlocked()
             self._roll_windows()
+            min_left = self.per_minute_max if self.per_minute_max <= 0 else max(
+                0, self.per_minute_max - self._state["minute_count"])
+            day_left = self.per_day_max if self.per_day_max <= 0 else max(
+                0, self.per_day_max - self._state["day_count"])
+            if not ((min_left >= c) and (day_left >= c)):
+                return False
             self._state["minute_count"] += c
             self._state["day_count"] += c
             self._save_unlocked()
+            return True
 
 
 _budget_singleton: Optional[BudgetManager] = None

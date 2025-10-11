@@ -1,7 +1,7 @@
 import json
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 from hashlib import sha256
 import urllib.request
@@ -52,14 +52,19 @@ def _sanitize_obj(obj: Any) -> Any:
             out: Dict[str, Any] = {}
             for k, v in obj.items():
                 lk = str(k).lower()
-                # Determine if key should be redacted
+                # Determine if key should be redacted (comprehensive patterns)
                 redact = False
-                if lk in ("authorization", "x-api-key", "x-callsbot-admin-key", "api_key", "apikey", "password", "secret"):
+                lk_norm = lk.replace("-", "_")
+                secret_keys = {
+                    "api_key", "apikey", "x_api_key", "x_callsbot_admin_key", "authorization",
+                    "access_token", "refresh_token", "bearer_token", "session_token", "auth_token",
+                    "private_key", "secret_key", "wallet_secret", "mnemonic", "seed_phrase",
+                    "password", "passwd", "pwd"
+                }
+                if any(sk in lk_norm for sk in secret_keys):
                     redact = True
-                if ("authorization" in lk) or ("api-key" in lk) or ("admin-key" in lk):
-                    redact = True
-                # Generic *_token secrets, but do NOT redact plain 'token' fields or 'token_address'
-                if (lk.endswith("_token") or lk.endswith("-token")) and lk not in ("token", "token_address"):
+                # Generic *_token secrets, but allow on-chain address fields
+                if (lk_norm.endswith("_token")) and (lk_norm not in ("token", "token_address", "contract_address", "wallet_address")):
                     redact = True
                 if redact:
                     out[k] = mask_secret(str(v) if v is not None else "")
@@ -80,7 +85,7 @@ def write_jsonl(filename: str, record: Dict[str, Any]) -> None:
     rec.setdefault("level", "info")
     rec.setdefault("component", filename.replace(".jsonl", ""))
     record = _sanitize_obj(rec)
-    record["ts"] = record.get("ts") or datetime.utcnow().isoformat()
+    record["ts"] = record.get("ts") or datetime.now(timezone.utc).isoformat()
     line = json.dumps(record, ensure_ascii=False) + "\n"
     data = line.encode("utf-8")
     # Atomic-ish append: single os.write call under a lock to avoid partial interleaving

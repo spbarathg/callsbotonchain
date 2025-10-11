@@ -12,18 +12,48 @@ _REDIS_URL = os.getenv("REDIS_URL") or os.getenv("CALLSBOT_REDIS_URL") or ""
 _redis_client = None
 _redis_status = "not_configured"
 
-if _REDIS_URL:
+def _create_redis_client():
     try:
+        import socket
         import redis  # type: ignore
-        _redis_client = redis.from_url(_REDIS_URL, decode_responses=True)
-        # Test connection
-        _redis_client.ping()
-        _redis_status = "connected"
-        print(f"✅ Redis client connected successfully: {_REDIS_URL}")
+        from redis.retry import Retry  # type: ignore
+        from redis.backoff import ExponentialBackoff  # type: ignore
+        from redis.connection import ConnectionPool  # type: ignore
+        retry = Retry(ExponentialBackoff(), 3)
+        pool = ConnectionPool.from_url(
+            _REDIS_URL,
+            decode_responses=True,
+            max_connections=10,
+            socket_keepalive=True,
+            socket_keepalive_options={
+                getattr(socket, 'TCP_KEEPIDLE', 3): 60,
+                getattr(socket, 'TCP_KEEPINTVL', 4): 10,
+                getattr(socket, 'TCP_KEEPCNT', 6): 3,
+            },
+            retry=retry,
+        )
+        return redis.Redis(connection_pool=pool)
     except Exception as e:
-        print(f"⚠️ Redis not available for signal passing: {e}")
-        _redis_client = None
-        _redis_status = f"failed: {str(e)}"
+        print(f"⚠️ Redis client creation failed: {e}")
+        return None
+
+if _REDIS_URL:
+    _redis_client = _create_redis_client()
+    if _redis_client is not None:
+        try:
+            _redis_client.ping()
+            _redis_status = "connected"
+            # Avoid logging full URL which may include credentials
+            try:
+                from urllib.parse import urlparse
+                _host = urlparse(_REDIS_URL).hostname or "redis"
+                print(f"✅ Redis client connected successfully (host={_host})")
+            except Exception:
+                print("✅ Redis client connected successfully")
+        except Exception as e:
+            print(f"⚠️ Redis not available for signal passing: {e}")
+            _redis_client = None
+            _redis_status = f"failed"
 else:
     print("⚠️ REDIS_URL not configured, signal passing to paper trader disabled")
 
@@ -46,15 +76,25 @@ def push_signal_to_redis(signal_data: dict) -> bool:
         return False
     
     try:
-        # Push to Redis list with 1 hour expiration
+        # Push to Redis list with bounded size
         payload = json.dumps(signal_data)
         _redis_client.lpush("trading_signals", payload)
-        # Trim list to last 1000 signals to prevent unbounded growth
         _redis_client.ltrim("trading_signals", 0, 999)
-        print(f"✅ Signal pushed to Redis: {signal_data.get('token', 'unknown')} (score: {signal_data.get('score', 0)})")
         return True
     except Exception as e:
-        print(f"⚠️ Failed to push signal to Redis: {e}")
+        # Retry basic reconnect once
+        try:
+            print(f"⚠️ Redis push failed, attempting reconnect: {e}")
+            client = _create_redis_client()
+            if client is not None:
+                globals()["_redis_client"] = client
+                client.ping()
+                payload = json.dumps(signal_data)
+                client.lpush("trading_signals", payload)
+                client.ltrim("trading_signals", 0, 999)
+                return True
+        except Exception as e2:
+            print(f"⚠️ Failed to push signal to Redis after reconnect: {e2}")
         return False
 
 

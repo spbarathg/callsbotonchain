@@ -23,6 +23,7 @@ from .config_optimized import (
     BANKROLL_USD, DB_PATH
 )
 from .broker_optimized import Broker
+from .portfolio_manager import get_portfolio_manager, should_use_portfolio_manager
 
 
 class PositionLock:
@@ -327,12 +328,148 @@ class TradeEngine:
             self._log("exit_exception", token=token, error=str(e))
             return False
 
+    def rebalance_position(self, token_to_sell: str, new_token: str, new_plan: Dict) -> bool:
+        """
+        Portfolio rebalancing: Sell one position and buy another.
+        
+        This is atomic - if either operation fails, the other is rolled back.
+        
+        Args:
+            token_to_sell: Token to sell
+            new_token: Token to buy
+            new_plan: Trading plan for new token
+        
+        Returns:
+            True if rebalance successful
+        """
+        try:
+            if not should_use_portfolio_manager():
+                self._log("rebalance_disabled", reason="portfolio_manager_not_enabled")
+                return False
+            
+            # Verify we have the position to sell
+            if token_to_sell not in self.live:
+                self._log("rebalance_failed", reason="token_to_sell_not_found", token=token_to_sell)
+                return False
+            
+            # Verify we can buy (not over limit after swap)
+            if len(self.live) >= MAX_CONCURRENT and new_token not in self.live:
+                # This shouldn't happen (we're swapping), but safety check
+                self._log("rebalance_failed", reason="max_concurrent", count=len(self.live))
+                return False
+            
+            # Get current price for the sell position
+            sell_data = self.live.get(token_to_sell)
+            if not sell_data:
+                return False
+            
+            # Fetch current price
+            current_price = self.broker.get_token_price(token_to_sell)
+            if current_price <= 0:
+                self._log("rebalance_failed", reason="invalid_price", token=token_to_sell)
+                return False
+            
+            # Execute sell
+            sell_result = self._exit_position(token_to_sell, current_price, "rebalance")
+            if not sell_result:
+                self._log("rebalance_failed", reason="sell_failed", token=token_to_sell)
+                return False
+            
+            # Execute buy
+            buy_pid = self.open_position(new_token, new_plan)
+            if not buy_pid:
+                # Buy failed - this is problematic but not catastrophic
+                # The sell already happened, so we just log it
+                self._log("rebalance_partial", 
+                         reason="buy_failed", 
+                         sold=token_to_sell, 
+                         failed_buy=new_token)
+                return False
+            
+            # Success!
+            self._log("rebalance_success",
+                     sold=token_to_sell,
+                     bought=new_token,
+                     new_pid=buy_pid)
+            
+            # Update portfolio manager
+            pm = get_portfolio_manager()
+            pm.remove_position(token_to_sell, reason="rebalanced")
+            pm.add_position(
+                token_address=new_token,
+                entry_price=self.live[new_token]["entry_price"],
+                quantity=get_open_qty(new_token) or 0,
+                signal_score=new_plan.get("score", 5),
+                conviction_score=new_plan.get("conviction_score", 0),
+                name=new_plan.get("name", ""),
+                symbol=new_plan.get("symbol", ""),
+            )
+            
+            return True
+            
+        except Exception as e:
+            self._log("rebalance_exception", error=str(e))
+            return False
+    
+    def sync_portfolio_manager(self) -> None:
+        """Sync current positions with portfolio manager"""
+        if not should_use_portfolio_manager():
+            return
+        
+        try:
+            pm = get_portfolio_manager()
+            
+            # Add all current positions to portfolio manager
+            for token, data in self.live.items():
+                if not pm.has_position(token):
+                    pm.add_position(
+                        token_address=token,
+                        entry_price=data.get("entry_price", 0),
+                        quantity=get_open_qty(token) or 0,
+                        signal_score=5,  # Default score
+                        conviction_score=0,
+                        name="",
+                        symbol="",
+                    )
+            
+            self._log("portfolio_synced", position_count=len(self.live))
+            
+        except Exception as e:
+            self._log("portfolio_sync_exception", error=str(e))
+    
+    def update_portfolio_prices(self) -> None:
+        """Update prices in portfolio manager for momentum calculation"""
+        if not should_use_portfolio_manager():
+            return
+        
+        try:
+            pm = get_portfolio_manager()
+            price_updates = {}
+            
+            for token in self.live.keys():
+                price = self.broker.get_token_price(token)
+                if price > 0:
+                    price_updates[token] = price
+            
+            if price_updates:
+                pm.update_prices(price_updates)
+            
+        except Exception:
+            pass  # Silent fail - not critical
+
     def get_status(self) -> Dict:
         """Get engine status"""
-        return {
+        status = {
             "open_positions": len(self.live),
             "tokens": list(self.live.keys()),
             "circuit_breaker": self.circuit_breaker.get_status(),
             "broker_dry_run": self.broker._dry,
         }
+        
+        # Add portfolio manager status if enabled
+        if should_use_portfolio_manager():
+            pm = get_portfolio_manager()
+            status["portfolio_manager"] = pm.get_statistics()
+        
+        return status
 

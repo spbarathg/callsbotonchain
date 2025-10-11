@@ -19,6 +19,8 @@ from .strategy_optimized import decide_trade, get_expected_win_rate, get_expecte
 from .trader_optimized import TradeEngine
 from app.toggles import trading_enabled
 from .db import get_open_position_id_by_token
+from .config_optimized import MAX_CONCURRENT
+from .portfolio_manager import get_portfolio_manager, should_use_portfolio_manager
 
 
 def _get_last_price_usd(token: str) -> float:
@@ -122,8 +124,9 @@ def _is_stale_signal(stats: Dict, max_age_seconds: int = 300) -> bool:
 
 
 def _exit_loop(engine: TradeEngine, stop_event: threading.Event) -> None:
-    """Background thread to check exits"""
+    """Background thread to check exits and maintain portfolio"""
     last_status_log = 0
+    last_portfolio_sync = 0
     
     while not stop_event.is_set():
         try:
@@ -133,6 +136,21 @@ def _exit_loop(engine: TradeEngine, stop_event: threading.Event) -> None:
                 status = engine.get_status()
                 engine._log("status_check", **status)
                 last_status_log = now
+            
+            # Sync portfolio manager every minute
+            if should_use_portfolio_manager() and (now - last_portfolio_sync > 60):
+                try:
+                    engine.sync_portfolio_manager()
+                    engine.update_portfolio_prices()
+                    
+                    # Log portfolio snapshot
+                    pm = get_portfolio_manager()
+                    snapshot = pm.get_portfolio_snapshot()
+                    engine._log("portfolio_snapshot", **snapshot)
+                    
+                    last_portfolio_sync = now
+                except Exception as e:
+                    engine._log("portfolio_sync_error", error=str(e))
             
             # Check circuit breaker
             if engine.circuit_breaker.is_tripped():
@@ -216,6 +234,95 @@ def run() -> None:
                 
                 # Skip if already have position
                 if engine.has_position(token):
+                    continue
+                
+                # Check if portfolio is full - evaluate rebalancing
+                if should_use_portfolio_manager() and len(engine.live) >= MAX_CONCURRENT:
+                    signals_filtered += 1
+                    
+                    # Update current prices for accurate momentum calculation
+                    pm = get_portfolio_manager()
+                    price_updates = {}
+                    for open_token in list(engine.live.keys()):
+                        try:
+                            open_price = _get_last_price_usd(open_token)
+                            if open_price > 0:
+                                price_updates[open_token] = open_price
+                        except Exception:
+                            pass
+                    
+                    if price_updates:
+                        pm.update_prices(price_updates)
+                    
+                    # Get stats and make plan first (need for evaluation)
+                    stats = _fetch_real_stats(token)
+                    if not stats:
+                        engine._log("rebalance_skipped", token=token, reason="stats_fetch_failed")
+                        continue
+                    
+                    # Check if signal is stale
+                    if _is_stale_signal(stats):
+                        engine._log("rebalance_skipped", token=token, reason="signal_stale")
+                        continue
+                    
+                    # Get signal score and conviction
+                    signal_score = int(stats.get("final_score", 7))
+                    conviction_type = stats.get("conviction_type", "High Confidence (Strict)")
+                    
+                    # Prepare signal for evaluation
+                    current_price = _get_last_price_usd(token)
+                    if current_price <= 0:
+                        current_price = float(stats.get("price", 0))
+                    
+                    new_signal = {
+                        "token": token,
+                        "score": signal_score,
+                        "conviction_type": conviction_type,
+                        "price": current_price,
+                        "quantity": 0,  # Will be calculated in plan
+                        "prelim_score": signal_score,
+                        "name": stats.get("name", ""),
+                        "symbol": stats.get("symbol", ""),
+                    }
+                    
+                    # Evaluate rebalancing opportunity
+                    should_rebalance, token_to_replace, reason = pm.evaluate_rebalance(new_signal)
+                    
+                    if should_rebalance:
+                        # Make trade decision
+                        plan = decide_trade(stats, signal_score, conviction_type)
+                        
+                        if plan:
+                            engine._log("rebalance_attempt", 
+                                       old_token=token_to_replace[:8],
+                                       new_token=token[:8],
+                                       new_score=signal_score,
+                                       reason=reason)
+                            
+                            # Execute atomic rebalance
+                            success = engine.rebalance_position(token_to_replace, token, plan)
+                            
+                            if success:
+                                positions_opened += 1
+                                engine._log("rebalance_success",
+                                           sold=token_to_replace[:8],
+                                           bought=token[:8],
+                                           total_rebalances=positions_opened)
+                            else:
+                                engine._log("rebalance_failed",
+                                           old_token=token_to_replace[:8],
+                                           new_token=token[:8])
+                        else:
+                            engine._log("rebalance_skipped", 
+                                       token=token[:8],
+                                       reason="plan_failed")
+                    else:
+                        engine._log("rebalance_rejected", 
+                                   token=token[:8],
+                                   score=signal_score,
+                                   reason=reason)
+                    
+                    # Continue to next signal after rebalancing attempt
                     continue
                 
                 # FILTER: Only pump.fun tokens (bot generates these)

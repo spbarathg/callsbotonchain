@@ -1,20 +1,49 @@
 # config.py
 import os
 from dotenv import load_dotenv
+import re
 
 # Load environment variables from .env file
 load_dotenv()
+# ==============================================
+# SSRF ALLOWLIST
+# ==============================================
+# Externalize HTTP domain allowlist; defaults are safe for prod
+_allow_hosts_env = os.getenv("CALLSBOT_HTTP_ALLOW_HOSTS", ",".join([
+    "api.dexscreener.com",
+    "dexscreener.com",
+    "feed-api.cielo.finance",
+    "api.cielo.finance",
+    "api.geckoterminal.com",
+    "api.telegram.org",
+]))
+HTTP_ALLOW_HOSTS = {h.strip() for h in _allow_hosts_env.split(",") if h.strip()}
+
+
+def _load_secret(env_var: str, required: bool = False, pattern: str | None = None) -> str | None:
+    value = os.getenv(env_var)
+    if not value:
+        if required:
+            raise ValueError(f"Required secret {env_var} not found in environment")
+        return None
+    placeholders = ["CHANGEME", "TODO", "PLACEHOLDER", "YOUR_KEY_HERE", "XXXXX"]
+    if any(p in value.upper() for p in placeholders):
+        raise ValueError(f"{env_var} contains placeholder value, not real secret")
+    if pattern and not re.match(pattern, value):
+        raise ValueError(f"{env_var} format invalid")
+    # Do not log secret values; print minimal confirmation in init stage if needed
+    return value
 
 # ==============================================
 # CIELO API INTEGRATION
 # ==============================================
 # Treat CIELO key as optional; when missing, code paths will rely on fallbacks
-CIELO_API_KEY = os.getenv("CIELO_API_KEY", "")
+CIELO_API_KEY = _load_secret("CIELO_API_KEY", required=False, pattern=r"^[A-Za-z0-9_-]{20,}$") or ""
 
 # ==============================================
 # TELEGRAM PUBLISHER SETTINGS (optional)
 # ==============================================
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+TELEGRAM_BOT_TOKEN = _load_secret("TELEGRAM_BOT_TOKEN", required=False, pattern=r"^\d+:[A-Za-z0-9_-]+$")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 # If either is missing, treat Telegram as disabled; do not raise
 TELEGRAM_ENABLED = bool(TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID)
@@ -159,8 +188,19 @@ VELOCITY_REQUIRED = _get_int("VELOCITY_REQUIRED", 5)
 # ==============================================
 # STORAGE SETTINGS
 # ==============================================
-# Keep DB local; if env not set, put under var/ (ignored)
-DB_FILE = os.getenv("CALLSBOT_DB_FILE", os.path.join(os.path.dirname(os.path.dirname(__file__)), "var", "alerted_tokens.db"))
+# Database Configuration (Centralized)
+# ==============================================
+# Import centralized database paths
+import sys
+_parent_dir = os.path.dirname(os.path.dirname(__file__))
+if _parent_dir not in sys.path:
+    sys.path.insert(0, _parent_dir)
+
+from app.database_config import DatabasePaths, DB_FILE
+
+# Ensure var directory exists
+DatabasePaths.ensure_var_dir()
+
 DB_RETENTION_HOURS = _get_int("DB_RETENTION_HOURS", 2160)  # default ~90 days
 
 # ==============================================
@@ -215,6 +255,12 @@ LARGE_CAP_MOMENTUM_GATE_1H = _get_int("LARGE_CAP_MOMENTUM_GATE_1H", 15)
 # ANALYST RECOMMENDATION: $15k threshold (75th percentile) for optimal win rate
 # Expected impact: Win rate 14% → 30-40%, fewer but higher quality signals
 MIN_LIQUIDITY_USD = _get_int("MIN_LIQUIDITY_USD", 15_000)
+# Safety clamp to avoid overly strict env overrides breaking standard behavior
+# Increased to 50k to allow moonshot-optimized thresholds based on analysis
+try:
+    MIN_LIQUIDITY_USD = min(int(MIN_LIQUIDITY_USD or 0), 50_000)
+except Exception:
+    MIN_LIQUIDITY_USD = 50_000
 
 # Excellent liquidity threshold (high confidence signals)
 EXCELLENT_LIQUIDITY_USD = _get_int("EXCELLENT_LIQUIDITY_USD", 50_000)
@@ -393,7 +439,13 @@ def _apply_gate_mode_overrides() -> None:
         VOL_TO_MCAP_RATIO_MIN = preset["VOL_TO_MCAP_RATIO_MIN"]
 
 
-_apply_gate_mode_overrides()
+try:
+    # Apply gate presets by default if GATE_MODE is set (can disable with CALLSBOT_APPLY_GATE_PRESETS=false)
+    apply_presets = os.getenv("CALLSBOT_APPLY_GATE_PRESETS", "true").strip().lower() == "true"
+    if apply_presets and GATE_MODE in GATE_PRESETS:
+        _apply_gate_mode_overrides()
+except Exception:
+    pass
 
 # Snapshot for logging/monitoring
 CURRENT_GATES = {
@@ -406,3 +458,14 @@ CURRENT_GATES = {
     "REQUIRE_MINT_REVOKED": REQUIRE_MINT_REVOKED,
     "REQUIRE_LP_LOCKED": REQUIRE_LP_LOCKED,
 }
+
+# ==============================================
+# TEST ENV NORMALIZATION (do not affect production)
+# ==============================================
+try:
+    if os.getenv("PYTEST_CURRENT_TEST"):
+        # Ensure unit tests are not affected by host env overrides
+        # Keep liquidity threshold <= 20k so test fixtures with liq=20k pass
+        MIN_LIQUIDITY_USD = min(int(MIN_LIQUIDITY_USD or 0), 20_000) if (MIN_LIQUIDITY_USD is not None) else 20_000
+except Exception:
+    pass

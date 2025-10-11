@@ -34,14 +34,27 @@ def _read_alerts_file(limit: int = 1000) -> List[Dict]:
     alerts = []
     alerts_path = "data/logs/alerts.jsonl"
     try:
-        with open(alerts_path, 'r') as f:
+        with open(alerts_path, 'r', encoding='utf-8') as f:
             lines = f.readlines()
             for line in reversed(lines[-limit:]):
                 try:
-                    # Replace NaN with null for valid JSON
-                    line_clean = line.strip().replace(': NaN', ': null')
-                    alerts.append(json.loads(line_clean))
-                except Exception as e:
+                    obj = json.loads(line.strip())
+                    # Sanitize NaN/Infinity recursively
+                    def _sanitize(x):
+                        try:
+                            if isinstance(x, float):
+                                if (x != x) or (x == float('inf')) or (x == float('-inf')):
+                                    return None
+                                return x
+                            if isinstance(x, dict):
+                                return {k: _sanitize(v) for k, v in x.items()}
+                            if isinstance(x, list):
+                                return [_sanitize(v) for v in x]
+                            return x
+                        except Exception:
+                            return x
+                    alerts.append(_sanitize(obj))
+                except Exception:
                     continue
     except Exception as e:
         pass

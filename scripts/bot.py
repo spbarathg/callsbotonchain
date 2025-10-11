@@ -20,14 +20,12 @@ try:
 except Exception:
     pass
 
-try:
-    from tools.relay import relay_contract_address_sync, relay_enabled
-except Exception:
-    def relay_enabled() -> bool:
-        return False
+# Relay functionality removed - not currently used
+def relay_enabled() -> bool:
+    return False
 
-    def relay_contract_address_sync(*_args, **_kwargs) -> bool:
-        return False
+def relay_contract_address_sync(*_args, **_kwargs) -> bool:
+    return False
 from app.logger_utils import log_alert, log_tracking, log_process, log_heartbeat, mirror_stdout_line
 import html
 from app.toggles import signals_enabled
@@ -54,7 +52,12 @@ from app.storage import (
 METRICS_ENABLED = (os.getenv("CALLSBOT_METRICS_ENABLED", "false").strip().lower() == "true")
 METRICS_PORT_ENV = os.getenv("CALLSBOT_METRICS_PORT")
 _metrics = {"enabled": False}
-if METRICS_ENABLED or METRICS_PORT_ENV:
+_metrics_server_started = False
+
+# Don't start metrics server during tests (pytest sets PYTEST_CURRENT_TEST)
+IS_TESTING = "PYTEST_CURRENT_TEST" in os.environ
+
+if (METRICS_ENABLED or METRICS_PORT_ENV) and not IS_TESTING:
     try:
         from prometheus_client import Counter, Gauge, start_http_server
         _port = 9108
@@ -65,6 +68,7 @@ if METRICS_ENABLED or METRICS_PORT_ENV:
             _port = 9108
         _addr = os.getenv("CALLSBOT_METRICS_ADDR", "127.0.0.1")
         start_http_server(port=_port, addr=_addr)
+        _metrics_server_started = True
         _metrics["processed_total"] = Counter("callsbot_processed_total", "Total processed transactions")
         _metrics["alerts_total"] = Counter("callsbot_alerts_total", "Total alerts sent")
         _metrics["feed_items"] = Gauge("callsbot_feed_items", "Items received in last feed cycle")
@@ -157,6 +161,31 @@ def acquire_singleton_lock() -> bool:
         pass
     lock_path = os.path.join(PROJECT_ROOT, "var", "bot.lock")
     os.makedirs(os.path.dirname(lock_path), exist_ok=True)
+
+    # Clean up stale lock if process is dead
+    try:
+        if os.path.exists(lock_path):
+            with open(lock_path, "r", encoding="utf-8", errors="ignore") as f_old:
+                content = f_old.read().strip()
+                if "@" in content:
+                    pid_str = content.split("@")[0].strip()
+                    try:
+                        old_pid = int(pid_str)
+                        # Check if process alive
+                        try:
+                            import psutil  # type: ignore
+                            alive = psutil.Process(old_pid).is_running()
+                        except Exception:
+                            alive = True  # best effort; if psutil missing, skip removal
+                        if not alive:
+                            try:
+                                os.remove(lock_path)
+                            except Exception:
+                                pass
+                    except Exception:
+                        pass
+    except Exception:
+        pass
 
     # Open or create the lock file in binary mode
     f = open(lock_path, "a+b")
@@ -472,17 +501,6 @@ def process_feed_item(tx: dict, is_smart_cycle: bool, session_alerted_tokens: se
 	
 	# Smart money bonus REMOVED - analysis showed it doesn't predict success
 	# Data: non-smart money signals avg 3.03x vs smart money 1.12x
-	# try:
-	# 	from config.config import SMART_MONEY_SCORE_BONUS, GENERAL_CYCLE_MIN_SCORE
-	# except:
-	# 	SMART_MONEY_SCORE_BONUS, GENERAL_CYCLE_MIN_SCORE = 2, 9
-	# 
-	# if smart_involved and SMART_MONEY_SCORE_BONUS > 0:
-	# 	score = min(score + SMART_MONEY_SCORE_BONUS, 10)
-	# 	try:
-	# 		scoring_details.append(f"Smart Money: +{SMART_MONEY_SCORE_BONUS}")
-	# 	except Exception:
-	# 		pass
 	
 	# post-score meta gates
 	if REQUIRE_SMART_MONEY_FOR_ALERT and not smart_involved:
@@ -520,6 +538,23 @@ def process_feed_item(tx: dict, is_smart_cycle: bool, session_alerted_tokens: se
 			else:
 				_out(f"REJECTED (Nuanced Debate): {token_address}")
 				return "skipped", None, 0, None
+	
+	# 🤖 ML Enhancement (optional - requires trained models)
+	# Applied AFTER conviction_type is determined
+	try:
+		from app.ml_scorer import get_ml_scorer
+		ml_scorer = get_ml_scorer()
+		if ml_scorer.is_available():
+			enhanced_score, ml_reason = ml_scorer.enhance_score(
+				score, stats, smart_involved, conviction_type
+			)
+			if enhanced_score != score:
+				_out(f"  🤖 ML Adjustment: {score} → {enhanced_score} ({ml_reason})")
+				scoring_details.append(f"ML: {ml_reason}")
+				score = enhanced_score
+	except Exception as e:
+		# ML is optional, don't break on errors
+		pass
 	# send alert
 	price = stats.get('price_usd', 0)
 	change_1h = stats.get('change', {}).get('1h', 0)
@@ -945,16 +980,34 @@ def run_bot():
                         pass
             
             for tx in feed.get("transactions", []):
-                if shutdown_flag:
-                    break
-                status, last_alert_time_delta, api_saved_delta, alerted = process_feed_item(tx, is_smart_cycle, session_alerted_tokens, last_alert_time)
-                if alerted:
-                    session_alerted_tokens.add(alerted)
-                    alert_count += 1
-                if last_alert_time_delta is not None:
-                    last_alert_time = last_alert_time_delta
-                if api_saved_delta:
-                    api_calls_saved += api_saved_delta
+                try:
+                    if shutdown_flag:
+                        break
+                    status, last_alert_time_delta, api_saved_delta, alerted = process_feed_item(tx, is_smart_cycle, session_alerted_tokens, last_alert_time)
+                    # Count each processed tx regardless of outcome
+                    try:
+                        processed_count += 1
+                    except Exception:
+                        processed_count = processed_count + 1
+                    if alerted:
+                        session_alerted_tokens.add(alerted)
+                        alert_count += 1
+                    if last_alert_time_delta is not None:
+                        last_alert_time = last_alert_time_delta
+                    if api_saved_delta:
+                        api_calls_saved += api_saved_delta
+                except Exception as e:
+                    # Don't let one bad transaction crash the entire loop
+                    _out(f"Error processing transaction: {e}")
+                    try:
+                        log_process({
+                            "type": "transaction_error",
+                            "error": str(e),
+                            "token": tx.get("token1_address") or tx.get("token0_address") or "unknown",
+                        })
+                    except Exception:
+                        pass
+                    continue
 
             # Periodic maintenance and tracking
             last_track_time = run_periodic_tasks(last_track_time)
@@ -1005,7 +1058,7 @@ if __name__ == "__main__":
             app = create_app()
             app.run(host=args.host, port=args.port, debug=False)
         elif cmd == "trade":
-            from tradingSystem.cli import run as trade_run
+            from tradingSystem.cli_optimized import run as trade_run
             trade_run()
         else:
             run_bot()

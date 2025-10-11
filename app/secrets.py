@@ -19,6 +19,10 @@ def require_secret(name: str) -> str:
 
 
 def hmac_sign(message: str, *, key_env: str = "CALLSBOT_HMAC_KEY") -> str:
-    key = get_env_secret(key_env) or ""
+    key = get_env_secret(key_env)
+    if not key:
+        # In production, require a non-empty HMAC key; return empty to signal missing signature
+        # Callers should handle empty signature as unavailable
+        return ""
     digest = hmac.new(key.encode("utf-8"), message.encode("utf-8"), hashlib.sha256).hexdigest()
     return digest

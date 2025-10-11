@@ -101,6 +101,14 @@ LOG_TEXT_PATH = os.getenv("TS_LOG_TEXT", "data/logs/trading.log")
 # ==================== MODE ====================
 DRY_RUN = _get_bool("TS_DRY_RUN", True)
 
+# ==================== PORTFOLIO REBALANCING ====================
+# "Circle Strategy" - Dynamic portfolio management
+PORTFOLIO_REBALANCING_ENABLED = _get_bool("PORTFOLIO_REBALANCING_ENABLED", False)
+PORTFOLIO_MAX_POSITIONS = _get_int("PORTFOLIO_MAX_POSITIONS", 5)  # Circle size
+PORTFOLIO_MIN_MOMENTUM_ADVANTAGE = _get_float("PORTFOLIO_MIN_MOMENTUM_ADVANTAGE", 15.0)  # Minimum advantage to swap
+PORTFOLIO_REBALANCE_COOLDOWN = _get_int("PORTFOLIO_REBALANCE_COOLDOWN", 300)  # 5 min between rebalances
+PORTFOLIO_MIN_POSITION_AGE = _get_int("PORTFOLIO_MIN_POSITION_AGE", 600)  # 10 min before can be replaced
+
 
 # ==================== HELPER FUNCTIONS ====================
 def get_position_size(score: int, conviction_type: str) -> float:
@@ -132,8 +140,20 @@ def get_position_size(score: int, conviction_type: str) -> float:
     else:
         multiplier = SCORE_7_MULT
     
-    # Calculate final size
+    # Calculate final size using 1/4 Kelly overlay as ceiling
     size = base * multiplier
+    try:
+        # Lazy import to avoid circulars at module import time
+        from .strategy_optimized import get_expected_win_rate, get_expected_avg_gain, get_kelly_fraction
+        win_rate = get_expected_win_rate(score, conviction_type)
+        avg_gain = get_expected_avg_gain(score, conviction_type)
+        kelly = get_kelly_fraction(win_rate, avg_gain)
+        fractional_kelly = max(0.0, min(kelly * 0.25, 0.25))
+        kelly_size = BANKROLL_USD * fractional_kelly
+        # Use the minimum of heuristic size and Kelly ceiling for safety
+        size = min(size, kelly_size)
+    except Exception:
+        pass
     
     # Cap at max
     size = min(size, MAX_POSITION_SIZE_USD)

@@ -1,4 +1,19 @@
-﻿# Python
+﻿# Sessions and secrets (never commit)
+*.session
+var/*.session
+
+# Local state and logs
+data/logs/*.log
+data/logs/*.jsonl
+var/*.db
+var/*.json
+var/*.lock
+
+# Python
+__pycache__/
+*.pyc
+
+# Python
 __pycache__/
 *.py[cod]
 *$py.class

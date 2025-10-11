@@ -4,6 +4,7 @@ import os
 import json
 import threading
 from typing import Dict, Tuple, List, Any, Optional
+from app.file_lock import file_lock
 from config.config import (
     CIELO_API_KEY,
     CIELO_DISABLE_STATS,
@@ -136,8 +137,11 @@ def _get_token_stats_dexscreener(token_address: str) -> Dict[str, Any]:
 
 
 _DENY_STATE_FILE = os.getenv("CALLSBOT_DENY_FILE", os.path.join("var", "stats_deny.json"))
-_deny_cache = {"stats_denied": False}
+# Updated: Use time-boxed denial with TTL instead of permanent flag
+_deny_cache = {"stats_denied_until": 0}  # Unix timestamp
 _deny_lock = threading.Lock()
+# Default TTL: 15 minutes (configurable via env)
+_DENY_TTL_SECONDS = int(os.getenv("CALLSBOT_DENY_TTL_SEC", "900"))  # 15 min default
 
 
 def _deny_load_unlocked() -> None:
@@ -146,11 +150,21 @@ def _deny_load_unlocked() -> None:
             return
         if not os.path.exists(os.path.dirname(_DENY_STATE_FILE) or "."):
             os.makedirs(os.path.dirname(_DENY_STATE_FILE) or ".", exist_ok=True)
-        if os.path.exists(_DENY_STATE_FILE):
-            with open(_DENY_STATE_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                if isinstance(data, dict) and isinstance(data.get("stats_denied"), bool):
-                    _deny_cache["stats_denied"] = bool(data["stats_denied"])
+        with file_lock(_DENY_STATE_FILE):
+            if os.path.exists(_DENY_STATE_FILE):
+                with open(_DENY_STATE_FILE, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    if isinstance(data, dict):
+                        # Support legacy bool format for migration
+                        if isinstance(data.get("stats_denied"), bool):
+                            if data["stats_denied"]:
+                                # Convert legacy permanent deny to TTL
+                                _deny_cache["stats_denied_until"] = time.time() + _DENY_TTL_SECONDS
+                            else:
+                                _deny_cache["stats_denied_until"] = 0
+                        # New TTL format
+                        elif "stats_denied_until" in data:
+                            _deny_cache["stats_denied_until"] = float(data["stats_denied_until"])
     except Exception as e:
         try:
             log_process({"type": "deny_state_load_error", "error": str(e)})
@@ -163,10 +177,11 @@ def _deny_save_unlocked() -> None:
         if not _DENY_STATE_FILE:
             return
         os.makedirs(os.path.dirname(_DENY_STATE_FILE) or ".", exist_ok=True)
-        tmp = _DENY_STATE_FILE + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(_deny_cache, f, ensure_ascii=False)
-        os.replace(tmp, _DENY_STATE_FILE)
+        with file_lock(_DENY_STATE_FILE):
+            tmp = _DENY_STATE_FILE + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(_deny_cache, f, ensure_ascii=False)
+            os.replace(tmp, _DENY_STATE_FILE)
     except Exception as e:
         try:
             log_process({"type": "deny_state_save_error", "error": str(e)})
@@ -175,15 +190,67 @@ def _deny_save_unlocked() -> None:
 
 
 def deny_is_denied() -> bool:
+    """Check if stats API is currently denied (with TTL expiry)"""
     with _deny_lock:
         _deny_load_unlocked()
-        return bool(_deny_cache.get("stats_denied"))
+        denied_until = float(_deny_cache.get("stats_denied_until", 0))
+        now = time.time()
+        
+        # Auto-clear expired denials
+        if denied_until > 0 and now >= denied_until:
+            try:
+                log_process({
+                    "type": "deny_expired",
+                    "denied_until": denied_until,
+                    "now": now,
+                })
+            except Exception:
+                pass
+            _deny_cache["stats_denied_until"] = 0
+            _deny_save_unlocked()
+            return False
+        
+        return denied_until > now
 
 
-def deny_mark_denied(value: bool = True) -> None:
+def deny_mark_denied(duration_sec: Optional[int] = None) -> None:
+    """
+    Mark stats API as denied for a time-boxed duration.
+    
+    Args:
+        duration_sec: Duration in seconds (default: 15 minutes from env)
+    """
+    duration = duration_sec if duration_sec is not None else _DENY_TTL_SECONDS
     with _deny_lock:
-        _deny_cache["stats_denied"] = bool(value)
+        denied_until = time.time() + duration
+        _deny_cache["stats_denied_until"] = denied_until
         _deny_save_unlocked()
+        try:
+            log_process({
+                "type": "deny_marked",
+                "duration_sec": duration,
+                "denied_until": denied_until,
+            })
+        except Exception:
+            pass
+
+
+def deny_clear() -> None:
+    """Manually clear the deny state"""
+    with _deny_lock:
+        _deny_cache["stats_denied_until"] = 0
+        _deny_save_unlocked()
+
+
+def deny_get_remaining_sec() -> int:
+    """Get remaining deny duration in seconds"""
+    with _deny_lock:
+        _deny_load_unlocked()
+        denied_until = float(_deny_cache.get("stats_denied_until", 0))
+        now = time.time()
+        if denied_until <= now:
+            return 0
+        return int(denied_until - now)
 
 
 _stats_cache: Dict[str, Tuple[float, Dict[str, Any]]] = {}
@@ -323,7 +390,16 @@ def get_token_stats(token_address: str, force_refresh: bool = False) -> Dict[str
         last_status = result.get("status_code")
         if last_status == 200:
             try:
-                get_budget().spend("stats")
+                budget = get_budget()
+                if not budget.spend("stats"):
+                    try:
+                        log_process({
+                            "type": "budget_spend_failed",
+                            "token": token_address,
+                            "reason": "budget_exhausted",
+                        })
+                    except Exception:
+                        pass
                 try:
                     from app.metrics import add_stats_budget_used
                     add_stats_budget_used(1)
@@ -422,7 +498,8 @@ def get_token_stats(token_address: str, force_refresh: bool = False) -> Dict[str
                 retry_after = base_delay + jitter
             time.sleep(min(30, retry_after))
             if idx >= len(combos) - 1:
-                deny_mark_denied(True)
+                # Use default TTL to avoid accidental 1s deny due to bool->int cast
+                deny_mark_denied()
             continue
         elif last_status == 404:
             try:
@@ -444,7 +521,8 @@ def get_token_stats(token_address: str, force_refresh: bool = False) -> Dict[str
             continue
 
     if last_status in (401, 403):
-        deny_mark_denied(True)
+        # Use default TTL to avoid accidental short deny
+        deny_mark_denied()
         try:
             log_process({"type": "token_stats_denied_variants", "provider": "cielo", "fallback": "dexscreener"})
         except Exception:

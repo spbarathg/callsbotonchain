@@ -3,9 +3,8 @@ Telethon-based Telegram Group Notifier
 Sends trading signals to a Telegram group using user account (not bot).
 """
 import asyncio
-from typing import Optional
-from telethon import TelegramClient
-from telethon.errors import FloodWaitError, ChatWriteForbiddenError
+import os
+from typing import Optional, TYPE_CHECKING
 from config.config import (
     TELEGRAM_USER_API_ID as API_ID,
     TELEGRAM_USER_API_HASH as API_HASH,
@@ -14,17 +13,26 @@ from config.config import (
     TELETHON_ENABLED,
 )
 
+# Lazy imports for Telethon (expensive imports, only load when needed)
+if TYPE_CHECKING:
+    from telethon import TelegramClient
+    from telethon.errors import FloodWaitError, ChatWriteForbiddenError
+
 # Global client instance (initialized on first use)
-_client: Optional[TelegramClient] = None
+_client = None  # type: Optional[TelegramClient]
 _client_lock = asyncio.Lock()
+IS_TESTING = "PYTEST_CURRENT_TEST" in os.environ
 
 
-async def _get_client() -> Optional[TelegramClient]:
+async def _get_client():  # -> Optional[TelegramClient] but can't annotate due to lazy import
     """Get or create the Telethon client (singleton pattern)."""
     global _client
     
     if not TELETHON_ENABLED:
         return None
+    
+    # Lazy import Telethon only when actually needed
+    from telethon import TelegramClient
     
     async with _client_lock:
         if _client is None:
@@ -66,12 +74,16 @@ async def send_group_message_async(message: str) -> bool:
         True if sent successfully, False otherwise
     """
     if not TELETHON_ENABLED:
-        print("⚠️  Telethon not enabled (missing credentials)")
+        if not IS_TESTING:
+            print("⚠️  Telethon not enabled (missing credentials)")
         return False
     
     if not message or not message.strip():
         print("❌ Telethon: Empty message provided")
         return False
+    
+    # Lazy import Telethon errors only when actually needed
+    from telethon.errors import FloodWaitError, ChatWriteForbiddenError
     
     try:
         client = await _get_client()
@@ -132,9 +144,10 @@ def send_group_message(message: str) -> bool:
         return False
 
 
-# Module initialization check
-if TELETHON_ENABLED:
-    print(f"📱 Telethon notifier enabled for group {TARGET_CHAT_ID}")
-else:
-    print("⚠️  Telethon notifier disabled (check environment variables)")
+# Module initialization check (skip during tests to avoid noise)
+if not IS_TESTING:
+    if TELETHON_ENABLED:
+        print(f"📱 Telethon notifier enabled for group {TARGET_CHAT_ID}")
+    else:
+        print("⚠️  Telethon notifier disabled (check environment variables)")
 

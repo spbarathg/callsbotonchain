@@ -4,6 +4,7 @@ import math
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List
 from config.config import DB_FILE, DB_RETENTION_HOURS
+from app.alert_cache import get_alert_cache
 
 
 def _get_conn() -> sqlite3.Connection:
@@ -19,7 +20,42 @@ def _get_conn() -> sqlite3.Connection:
     return conn
 
 
+def _is_valid_number(value: Any) -> bool:
+    """Return True if value can be coerced to a finite float."""
+    try:
+        f = float(value)
+        return not (math.isnan(f) or math.isinf(f))
+    except Exception:
+        return False
+
+
+def _select_valid_number(primary: Any, fallback: Any) -> float:
+    """Select first valid numeric from primary or fallback, else 0.0."""
+    if _is_valid_number(primary):
+        return float(primary)
+    if _is_valid_number(fallback):
+        return float(fallback)
+    return 0.0
+
+
 def init_db():
+    """
+    Initialize database schema and run migrations.
+    
+    Creates base tables if they don't exist, then runs any pending migrations
+    to bring the schema up to the latest version.
+    """
+    # First, run migrations
+    try:
+        from app.migrations import get_signals_migrations
+        runner = get_signals_migrations()
+        current_version, applied = runner.run()
+        if applied > 0:
+            print(f"Applied {applied} database migration(s). Current version: {current_version}")
+    except Exception as e:
+        print(f"Warning: Migration system error: {e}")
+        # Continue with legacy init_db logic as fallback
+    
     conn = _get_conn()
     c = conn.cursor()
 
@@ -168,27 +204,85 @@ def init_db():
         ("rug_detected_at", "REAL"),
     ]
     
+    # Hardened: validate column names against allowlist before ALTER TABLE
+    allowed_columns = {name for name, _ in new_columns}
     for col_name, col_type in new_columns:
         if col_name not in existing_columns:
+            if col_name not in allowed_columns:
+                raise ValueError(f"Invalid column name in migration: {col_name}")
             try:
                 c.execute(f"ALTER TABLE alerted_token_stats ADD COLUMN {col_name} {col_type}")
             except sqlite3.OperationalError:
-                pass  # Column already exists
+                # Column already exists or other benign race condition
+                pass
 
     conn.commit()
+    # Idempotent schema version table and basic migrations (example)
+    try:
+        c.execute("CREATE TABLE IF NOT EXISTS schema_version (version INTEGER PRIMARY KEY, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
+        conn.commit()
+    except Exception:
+        pass
+    # Example migration sequence (extend as needed)
+    def _get_schema_version() -> int:
+        try:
+            row = c.execute("SELECT MAX(version) FROM schema_version").fetchone()
+            return int(row[0] or 0)
+        except Exception:
+            return 0
+    current_version = _get_schema_version()
+    migrations: List[tuple[int, str]] = []  # no-op placeholder; add future migrations here
+    for version, sql in migrations:
+        if version <= current_version:
+            continue
+        try:
+            c.execute(sql)
+            c.execute("INSERT INTO schema_version (version) VALUES (?)", (version,))
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
     conn.close()
 
 
 def has_been_alerted(token_address: str) -> bool:
+    """
+    Check if a token has been alerted before.
+    
+    Uses in-memory cache to avoid repeated database queries.
+    
+    Args:
+        token_address: Token address to check
+        
+    Returns:
+        True if token has been alerted, False otherwise
+    """
+    # Check cache first (fast path)
+    cache = get_alert_cache()
+    if cache.contains(token_address):
+        return True
+    
+    # Cache miss - check database
     conn = _get_conn()
     c = conn.cursor()
     c.execute("SELECT 1 FROM alerted_tokens WHERE token_address = ? LIMIT 1", (token_address,))
     row = c.fetchone()
     conn.close()
-    return row is not None
+    
+    # If found in DB, add to cache for next time
+    if row is not None:
+        cache.add(token_address)
+        return True
+    
+    return False
 
 
 def mark_alerted(token_address: str, final_score: int, smart_money_detected: bool, conviction_type: str) -> None:
+    """
+    Mark a token as alerted.
+    
+    Also updates the cache for subsequent lookups.
+    """
     conn = _get_conn()
     c = conn.cursor()
     c.execute("""
@@ -197,6 +291,9 @@ def mark_alerted(token_address: str, final_score: int, smart_money_detected: boo
     """, (token_address, final_score, smart_money_detected, conviction_type))
     conn.commit()
     conn.close()
+    
+    # Update cache
+    get_alert_cache().add(token_address)
 
 
 def record_alert_with_metadata(
@@ -266,11 +363,11 @@ def record_alert_with_metadata(
         final_score,
         conviction_type,
         price_data.get('price_usd'),
-        market_data.get('market_cap_usd') if not isinstance(market_data.get('market_cap_usd'), float) or not math.isnan(market_data.get('market_cap_usd')) else stats.get('market_cap_usd'),
-        liquidity_data.get('liquidity_usd') if not isinstance(liquidity_data.get('liquidity_usd'), float) or not math.isnan(liquidity_data.get('liquidity_usd')) else stats.get('liquidity_usd'),
+        _select_valid_number(market_data.get('market_cap_usd'), stats.get('market_cap_usd')),
+        _select_valid_number(liquidity_data.get('liquidity_usd'), stats.get('liquidity_usd')),
         price_data.get('price_usd'),
-        market_data.get('market_cap_usd') if not isinstance(market_data.get('market_cap_usd'), float) or not math.isnan(market_data.get('market_cap_usd')) else stats.get('market_cap_usd'),
-        liquidity_data.get('liquidity_usd') if not isinstance(liquidity_data.get('liquidity_usd'), float) or not math.isnan(liquidity_data.get('liquidity_usd')) else stats.get('liquidity_usd'),
+        _select_valid_number(market_data.get('market_cap_usd'), stats.get('market_cap_usd')),
+        _select_valid_number(liquidity_data.get('liquidity_usd'), stats.get('liquidity_usd')),
         (market_data.get('volume', {}) or {}).get('24h_usd') or market_data.get('volume_24h_usd') or stats.get('volume', {}).get('24h', {}).get('volume_usd'),
         metadata.get('name') or stats.get('name'),
         metadata.get('symbol') or stats.get('symbol'),
@@ -323,8 +420,8 @@ def record_price_snapshot(token_address: str, stats: Dict[str, Any]) -> None:
         token_address,
         now,
         price_data.get('price_usd'),
-        market_data.get('market_cap_usd'),
-        liquidity_data.get('liquidity_usd'),
+        _select_valid_number(market_data.get('market_cap_usd'), None),
+        _select_valid_number(liquidity_data.get('liquidity_usd'), None),
         market_data.get('volume_24h_usd'),
         holders_data.get('holder_count'),
         price_data.get('price_change_1h'),
@@ -410,8 +507,8 @@ def update_token_performance(token_address: str, stats: Dict[str, Any]) -> None:
         params = [
             now,
             current_price,
-            market_data.get('market_cap_usd'),
-            liquidity_data.get('liquidity_usd'),
+            _select_valid_number(market_data.get('market_cap_usd'), None),
+            _select_valid_number(liquidity_data.get('liquidity_usd'), None),
             market_data.get('volume_24h_usd'),
             new_peak_price,
             max_gain,
@@ -425,9 +522,12 @@ def update_token_performance(token_address: str, stats: Dict[str, Any]) -> None:
             update_sql += ", peak_price_at = ?"
             params.append(peak_price_at)
         
-        if is_rug and not row:  # Only set rug flag once
-            update_sql += ", is_rug = 1, rug_detected_at = ?"
-            params.extend([rug_at])
+        # Set rug flag if newly detected; only set once if not previously marked
+        if is_rug:
+            update_sql += ", is_rug = CASE WHEN (is_rug IS NULL OR is_rug = 0) THEN 1 ELSE is_rug END"
+            if rug_at:
+                update_sql += ", rug_detected_at = COALESCE(rug_detected_at, ?)"
+                params.extend([rug_at])
         
         update_sql += " WHERE token_address = ?"
         params.append(token_address)

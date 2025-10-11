@@ -13,7 +13,7 @@ import json
 import time
 from typing import Dict, Optional, Tuple
 
-import requests
+from app.http_client import request_json
 from solana.rpc.api import Client as SolanaClient
 from solana.rpc.types import TxOpts
 from solders.keypair import Keypair
@@ -71,6 +71,15 @@ class Broker:
         except Exception as e:
             raise RuntimeError(f"Invalid TS_WALLET_SECRET: {e}")
 
+    def _is_valid_solana_address(self, address: str) -> bool:
+        try:
+            if not address or len(address) < 32 or len(address) > 44:
+                return False
+            decoded = b58.b58decode(address)
+            return len(decoded) == 32
+        except Exception:
+            return False
+
     def _get_decimals(self, mint: str) -> int:
         """Get token decimals with retry"""
         if mint in self._token_meta:
@@ -78,9 +87,11 @@ class Broker:
         
         for attempt in range(3):
             try:
-                resp = requests.get("https://token.jup.ag/all", timeout=10)
-                resp.raise_for_status()
-                for item in resp.json():
+                r = request_json("GET", "https://token.jup.ag/all", timeout=10.0)
+                if r.get("status_code") != 200:
+                    raise RuntimeError(f"token meta fetch failed: {r.get('status_code')}")
+                payload = r.get("json") or []
+                for item in payload:
                     if item.get("address") == mint:
                         dec = int(item.get("decimals") or 6)
                         self._token_meta[mint] = dec
@@ -109,22 +120,26 @@ class Broker:
                 )
                 sig_str = str(sig)
                 
-                # Wait for confirmation (30s)
+                # Wait for confirmation (30s) with failure detection
                 confirmed = False
-                for _ in range(15):
+                for attempt in range(15):
                     try:
-                        status = self._rpc.get_signature_statuses([sig])
-                        if status and status.value and status.value[0]:
+                        result = self._rpc.get_signature_statuses([sig])
+                        if result and result.value and result.value[0]:
+                            tx_status = result.value[0]
+                            # solders RpcResponse has .err attr; handle failure explicitly
+                            if hasattr(tx_status, 'err') and tx_status.err is not None:
+                                return sig_str, f"Transaction failed: {tx_status.err}"
                             confirmed = True
                             break
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        if attempt == 14:
+                            return sig_str, f"RPC error: {str(e)}"
                     time.sleep(2)
-                
+
                 if confirmed:
                     return sig_str, None
-                else:
-                    return sig_str, "Transaction sent but not confirmed within 30s"
+                return sig_str, "Transaction not confirmed within 30s (may still succeed later)"
                 
             except Exception as e:
                 if attempt == max_retries - 1:
@@ -143,13 +158,12 @@ class Broker:
                     "amount": str(in_amount),
                     "slippageBps": str(int(SLIPPAGE_BPS)),
                 }
-                resp = requests.get("https://quote-api.jup.ag/v6/quote", params=params, timeout=10)
-                resp.raise_for_status()
-                quote = resp.json()
-                
+                r = request_json("GET", "https://quote-api.jup.ag/v6/quote", params=params, timeout=10.0)
+                if r.get("status_code") != 200:
+                    raise RuntimeError(f"quote fetch failed: {r.get('status_code')}")
+                quote = r.get("json") or {}
                 if not quote.get("outAmount"):
                     raise BrokerError("Quote missing outAmount")
-                
                 return quote
             except Exception as e:
                 if attempt == retries - 1:
@@ -169,14 +183,13 @@ class Broker:
                     "computeUnitPriceMicroLamports": int(PRIORITY_FEE_MICROLAMPORTS or 0),
                     "dynamicComputeUnitLimit": True,
                 }
-                resp = requests.post("https://quote-api.jup.ag/v6/swap", json=payload, timeout=15)
-                resp.raise_for_status()
-                data = resp.json()
+                r = request_json("POST", "https://quote-api.jup.ag/v6/swap", json=payload, timeout=15.0)
+                if r.get("status_code") != 200:
+                    raise RuntimeError(f"swap tx fetch failed: {r.get('status_code')}")
+                data = r.get("json") or {}
                 swap_tx = data.get("swapTransaction")
-                
                 if not swap_tx:
                     raise BrokerError("Swap response missing swapTransaction")
-                
                 return swap_tx
             except Exception as e:
                 if attempt == retries - 1:
@@ -192,7 +205,7 @@ class Broker:
             if usd_size <= 0:
                 return Fill(price=0.0, qty=0.0, usd=0.0, success=False, error="Invalid USD size")
             
-            if not token or len(token) < 32:
+            if not token or not self._is_valid_solana_address(token):
                 return Fill(price=0.0, qty=0.0, usd=0.0, success=False, error="Invalid token address")
             
             base_dec = self._get_decimals(BASE_MINT)
@@ -206,7 +219,9 @@ class Broker:
             
             # Calculate expected fill
             out_amt = float(quote.get("outAmount") or 0) / (10 ** token_dec)
-            expected_price = usd_size / max(out_amt, 1e-9)
+            if out_amt <= 0:
+                return Fill(price=0.0, qty=0.0, usd=0.0, success=False, error="Invalid quote: zero output amount")
+            expected_price = usd_size / out_amt
             
             # Check price impact
             price_impact = abs(float(quote.get("priceImpactPct") or 0))
@@ -243,7 +258,7 @@ class Broker:
             if qty <= 0:
                 return Fill(price=0.0, qty=0.0, usd=0.0, success=False, error="Invalid quantity")
             
-            if not token or len(token) < 32:
+            if not token or not self._is_valid_solana_address(token):
                 return Fill(price=0.0, qty=0.0, usd=0.0, success=False, error="Invalid token address")
             
             dec = self._get_decimals(token)
@@ -260,7 +275,9 @@ class Broker:
             # Calculate expected fill
             base_dec = self._get_decimals(BASE_MINT)
             out_usd = float(quote.get("outAmount") or 0) / (10 ** base_dec)
-            expected_price = out_usd / max(float(qty), 1e-9)
+            if float(qty) <= 0:
+                return Fill(price=0.0, qty=0.0, usd=0.0, success=False, error="Invalid quantity for price calc")
+            expected_price = out_usd / float(qty)
             
             # Check price impact
             price_impact = abs(float(quote.get("priceImpactPct") or 0))

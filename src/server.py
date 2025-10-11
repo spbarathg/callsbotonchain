@@ -101,6 +101,7 @@ except Exception:
         return _Dummy()
 import time
 from app.toggles import get_toggles, set_toggles
+from app.notify import get_redis_status
 import socket
 import math
 
@@ -350,12 +351,18 @@ def create_app() -> Flask:
     
     # Basic Authentication
     def check_auth(username: str, password: str) -> bool:
-        """Check if username/password combination is valid."""
+        """Check if username/password combination is valid.
+
+        Security: In production, a non-empty DASHBOARD_PASSWORD is required.
+        When missing, authentication always fails to prevent unauthenticated access.
+        """
         expected_user = os.getenv("DASHBOARD_USERNAME", "admin")
         expected_pass = os.getenv("DASHBOARD_PASSWORD", "")
-        # If no password is set, disable authentication
         if not expected_pass:
-            return True
+            # Auth disabled is only allowed when DASHBOARD_AUTH_ENABLED=false
+            # Otherwise, treat missing password as authentication failure
+            if os.getenv("DASHBOARD_AUTH_ENABLED", "true").strip().lower() == "true":
+                return False
         return username == expected_user and password == expected_pass
     
     def authenticate():
@@ -657,19 +664,20 @@ def create_app() -> Flask:
         # Redis check (optional)
         try:
             redis_url = os.getenv("REDIS_URL") or os.getenv("CALLSBOT_REDIS_URL")
+            redis_status = get_redis_status()
             if redis_url:
                 try:
                     import redis  # type: ignore
                     r = redis.from_url(redis_url, decode_responses=False)
                     r.ping()
-                    checks["redis"] = {"ok": True}
+                    checks["redis"] = {"ok": True, "status": redis_status}
                 except Exception as e:
                     ok = False
-                    checks["redis"] = {"ok": False, "error": str(e)}
+                    checks["redis"] = {"ok": False, "error": str(e), "status": redis_status}
             else:
-                checks["redis"] = {"ok": True, "skipped": True}
+                checks["redis"] = {"ok": True, "skipped": True, "status": "not_configured"}
         except Exception:
-            checks["redis"] = {"ok": True, "skipped": True}
+            checks["redis"] = {"ok": True, "skipped": True, "status": "not_configured"}
         # Last heartbeat recency
         try:
             process = _read_jsonl(process_path, limit=200)
@@ -1352,18 +1360,34 @@ def create_app() -> Flask:
         try:
             ro_uri = f"file:{path}?mode=ro"
             con = sqlite3.connect(ro_uri, timeout=10, uri=True)
+            # Abort long-running queries using progress handler
+            try:
+                timeout_ms = int(os.getenv("CALLSBOT_SQL_TIMEOUT_MS", "500"))
+            except Exception:
+                timeout_ms = 500
+            start_ts = time.time()
+            try:
+                con.set_progress_handler(lambda: 1 if ((time.time() - start_ts) * 1000.0) > float(timeout_ms) else 0, 1000)
+            except Exception:
+                pass
             cur = con.cursor()
             cur.execute("PRAGMA busy_timeout=5000")
             cur.execute(query)
             cols = [d[0] for d in (cur.description or [])]
             fetched = cur.fetchall() or []
+            # Enforce a maximum number of rows returned
+            try:
+                max_rows = int(os.getenv("CALLSBOT_SQL_MAX_ROWS", "1000"))
+            except Exception:
+                max_rows = 1000
+            fetched = fetched[:max_rows]
             rows = [
                 {cols[i]: val for i, val in enumerate(r)} if cols else {}
                 for r in fetched
             ]
             cur.close(); con.close()
             _admin_audit("/api/sql", True, {"query": query[:200], "target": target, "db": path})
-            return jsonify({"ok": True, "columns": cols, "rows": rows, "db": path})
+            return jsonify({"ok": True, "columns": cols, "rows": rows, "db": path, "truncated": len(fetched) >= max_rows})
         except Exception as e:
             try:
                 con.close()  # type: ignore
