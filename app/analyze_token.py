@@ -745,6 +745,8 @@ def score_token(stats: Dict[str, Any], smart_money_detected: bool = False, token
     # Price momentum analysis (positive short-term trend)
     change_1h = stats.get('change', {}).get('1h', 0)
     change_24h = stats.get('change', {}).get('24h', 0)
+    
+    # EARLY MOMENTUM DETECTION (ideal entry zone: 5-50% in 24h)
     if (change_1h or 0) > max(MOMENTUM_1H_STRONG, MOMENTUM_1H_PUMPER):
         score += 2
         scoring_details.append(f"Momentum: +2 ({(change_1h or 0):.1f}% - strong pump)")
@@ -752,10 +754,17 @@ def score_token(stats: Dict[str, Any], smart_money_detected: bool = False, token
         score += 1
         scoring_details.append(f"Momentum: +1 ({(change_1h or 0):.1f}% - positive)")
 
-    # Penalize if 24h is extremely negative (might be dump) and add security/composition penalties
+    # Penalize if 24h is extremely negative (might be dump)
     if (change_24h or 0) < DRAW_24H_MAJOR:
         score -= 1
         scoring_details.append(f"Risk: -1 ({(change_24h or 0):.1f}% - major dump risk)")
+    
+    # ANTI-FOMO PENALTY: Penalize tokens that already pumped too much (late entry!)
+    # This ensures we catch tokens EARLY, not after they've mooned
+    # Note: Final rejection happens in gating, this just reduces score
+    if (change_24h or 0) > 150:  # Already pumped >150% in 24h
+        score -= 2
+        scoring_details.append(f"⚠️ Late Entry Risk: -2 ({(change_24h or 0):.1f}% already pumped in 24h)")
 
     # Diminishing returns: if smart money but community is low, cap total bonus
     if smart_money_detected and community_bonus == 0:

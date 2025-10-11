@@ -175,6 +175,12 @@ VOL_MED = _get_int("VOL_MED", 5_000)
 MOMENTUM_1H_STRONG = _get_int("MOMENTUM_1H_STRONG", 5)
 DRAW_24H_MAJOR = _get_int("DRAW_24H_MAJOR", -80)
 
+# ANTI-FOMO FILTER: Reject tokens that already pumped (late entry risk)
+# CRITICAL: Catch tokens BEFORE they moon, not after!
+# Target: 5-50% early momentum, reject >50-100% (already pumped)
+MAX_24H_CHANGE_FOR_ALERT = _get_float("MAX_24H_CHANGE_FOR_ALERT", 100.0)  # Reject if >100% in 24h
+MAX_1H_CHANGE_FOR_ALERT = _get_float("MAX_1H_CHANGE_FOR_ALERT", 300.0)   # Reject if >300% in 1h
+
 # Holder concentration threshold (%)
 TOP10_CONCERN = _get_int("TOP10_CONCERN", 40)
 

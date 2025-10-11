@@ -201,6 +201,15 @@ class SignalProcessor:
                     error_message="Liquidity check failed"
                 )
         
+        # ANTI-FOMO FILTER: Reject tokens that already pumped (late entry!)
+        if not self._check_fomo_filter(stats, token_address):
+            return ProcessResult(
+                status="skipped",
+                token_address=token_address,
+                preliminary_score=preliminary_score,
+                error_message="Already pumped - late entry rejected"
+            )
+        
         # Quick security gate
         if not self._check_quick_security(stats, REQUIRE_LP_LOCKED, REQUIRE_MINT_REVOKED, ALLOW_UNKNOWN_SECURITY):
             return ProcessResult(
@@ -367,7 +376,7 @@ class SignalProcessor:
     def _check_liquidity(self, stats: TokenStats, min_liq: float, excellent_liq: float) -> bool:
         """Check liquidity requirements"""
         liquidity = stats.liquidity_usd or 0
-        
+
         # CRITICAL FIX: Handle NaN/inf values (NaN comparisons always False!)
         if not (liquidity == liquidity):  # NaN check
             self._log(f"❌ REJECTED (INVALID LIQUIDITY - NaN): {stats.token_address}")
@@ -375,17 +384,57 @@ class SignalProcessor:
         if liquidity == float('inf') or liquidity == float('-inf'):
             self._log(f"❌ REJECTED (INVALID LIQUIDITY - inf): {stats.token_address}")
             return False
-        
+
         if liquidity <= 0:
             self._log(f"❌ REJECTED (ZERO LIQUIDITY): {stats.token_address}")
             return False
-        
+
         if liquidity < min_liq:
             self._log(f"❌ REJECTED (LOW LIQUIDITY): {stats.token_address} - ${liquidity:,.0f} < ${min_liq:,.0f}")
             return False
-        
+
         quality = "EXCELLENT" if liquidity >= excellent_liq else "GOOD"
         self._log(f"✅ LIQUIDITY CHECK PASSED: {stats.token_address} - ${liquidity:,.0f} ({quality})")
+        return True
+    
+    def _check_fomo_filter(self, stats: TokenStats, token_address: str) -> bool:
+        """
+        ANTI-FOMO FILTER: Reject tokens that already pumped too much.
+        
+        Goal: Catch tokens BEFORE they moon (5-50% momentum), not AFTER (>100% pump)
+        
+        Returns:
+            True if token passes (early momentum), False if rejected (late entry)
+        """
+        from app.config_unified import MAX_24H_CHANGE_FOR_ALERT, MAX_1H_CHANGE_FOR_ALERT
+        
+        change_1h = stats.change_1h or 0
+        change_24h = stats.change_24h or 0
+        
+        # Handle NaN values
+        if not (change_1h == change_1h):
+            change_1h = 0
+        if not (change_24h == change_24h):
+            change_24h = 0
+        
+        # Reject if already pumped >100% in 24h (late entry!)
+        if change_24h > MAX_24H_CHANGE_FOR_ALERT:
+            self._log(f"❌ REJECTED (LATE ENTRY - 24H PUMP): {token_address} - {change_24h:.1f}% > {MAX_24H_CHANGE_FOR_ALERT:.0f}% (already mooned!)")
+            return False
+        
+        # Reject if already pumped >300% in 1h (extreme late entry!)
+        if change_1h > MAX_1H_CHANGE_FOR_ALERT:
+            self._log(f"❌ REJECTED (LATE ENTRY - 1H PUMP): {token_address} - {change_1h:.1f}% > {MAX_1H_CHANGE_FOR_ALERT:.0f}% (extreme pump!)")
+            return False
+        
+        # Log entry type for monitoring
+        if 5 <= change_24h <= 50:
+            self._log(f"✅ EARLY MOMENTUM: {token_address} - {change_24h:.1f}% (ideal entry zone!)")
+        elif change_24h > 50:
+            self._log(f"⚠️  MODERATE PUMP: {token_address} - {change_24h:.1f}% (getting late, but within limits)")
+        else:
+            self._log(f"✅ FOMO CHECK PASSED: {token_address} - {change_24h:.1f}% in 24h")
+        
         return True
     
     def _check_quick_security(self, stats: TokenStats, require_lp: bool, require_mint: bool, allow_unknown: bool) -> bool:
