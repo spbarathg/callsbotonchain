@@ -166,9 +166,10 @@ MOMENTUM_1H_MED = _get_float("MOMENTUM_1H_MED", 5.0)
 MOMENTUM_24H_HIGH = _get_float("MOMENTUM_24H_HIGH", 50.0)
 
 # ANTI-FOMO FILTER: Reject tokens that already pumped (late entry risk)
-# Target: Early momentum (5-50%), reject late entries (>100%)
-MAX_24H_CHANGE_FOR_ALERT = _get_float("MAX_24H_CHANGE_FOR_ALERT", 100.0)
-MAX_1H_CHANGE_FOR_ALERT = _get_float("MAX_1H_CHANGE_FOR_ALERT", 300.0)
+# Based on 615 signals analysis: 15.6% win rate, 119% avg gain
+# Pattern: Winners at 0-50% momentum, Late entries >50% often dump
+MAX_24H_CHANGE_FOR_ALERT = _get_float("MAX_24H_CHANGE_FOR_ALERT", 50.0)  # OPTIMIZED: Was 100%, now 50%
+MAX_1H_CHANGE_FOR_ALERT = _get_float("MAX_1H_CHANGE_FOR_ALERT", 200.0)   # OPTIMIZED: Was 300%, now 200%
 
 
 # ============================================================================

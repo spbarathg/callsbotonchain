@@ -762,7 +762,12 @@ def score_token(stats: Dict[str, Any], smart_money_detected: bool = False, token
     # ANTI-FOMO PENALTY: Penalize tokens that already pumped too much (late entry!)
     # This ensures we catch tokens EARLY, not after they've mooned
     # Note: Final rejection happens in gating, this just reduces score
-    if (change_24h or 0) > 150:  # Already pumped >150% in 24h
+    
+    # CRITICAL: Dump-after-pump detection (already peaked, now declining)
+    if (change_24h or 0) > 30 and (change_1h or 0) < -5:
+        score -= 3
+        scoring_details.append(f"🚨 DUMP AFTER PUMP: +{(change_24h or 0):.1f}% (24h) but {(change_1h or 0):.1f}% (1h) - Already peaked! -3 pts")
+    elif (change_24h or 0) > 50:  # Already pumped >50% in 24h
         score -= 2
         scoring_details.append(f"⚠️ Late Entry Risk: -2 ({(change_24h or 0):.1f}% already pumped in 24h)")
 

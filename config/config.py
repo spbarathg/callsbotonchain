@@ -177,9 +177,10 @@ DRAW_24H_MAJOR = _get_int("DRAW_24H_MAJOR", -80)
 
 # ANTI-FOMO FILTER: Reject tokens that already pumped (late entry risk)
 # CRITICAL: Catch tokens BEFORE they moon, not after!
-# Target: 5-50% early momentum, reject >50-100% (already pumped)
-MAX_24H_CHANGE_FOR_ALERT = _get_float("MAX_24H_CHANGE_FOR_ALERT", 100.0)  # Reject if >100% in 24h
-MAX_1H_CHANGE_FOR_ALERT = _get_float("MAX_1H_CHANGE_FOR_ALERT", 300.0)   # Reject if >300% in 1h
+# Based on 615 signals: 15.6% win rate, 119% avg gain
+# Pattern: Winners have 0-50% 24h momentum, Losers have >100%
+MAX_24H_CHANGE_FOR_ALERT = _get_float("MAX_24H_CHANGE_FOR_ALERT", 50.0)  # Reject if >50% in 24h (OPTIMIZED from 100%)
+MAX_1H_CHANGE_FOR_ALERT = _get_float("MAX_1H_CHANGE_FOR_ALERT", 200.0)   # Reject if >200% in 1h (spike rejection)
 
 # Holder concentration threshold (%)
 TOP10_CONCERN = _get_int("TOP10_CONCERN", 40)
