@@ -31,32 +31,45 @@ def train_gain_predictor(df: pd.DataFrame, features: list) -> Tuple[object, Dict
     print("🎯 TRAINING GAIN PREDICTOR (Regression)")
     print("="*60)
     
-    X = df[features].fillna(0)
-    y = df['target_gain']
+    # CRITICAL FIX: Remove rugs from training data (they're not tradeable!)
+    df_clean = df[df['is_rug'] == 0].copy()
+    print(f"📊 Removed {len(df) - len(df_clean)} rugs from training data")
+    print(f"   Clean samples: {len(df_clean)}/{len(df)} ({100*len(df_clean)/len(df):.1f}%)")
+    
+    if len(df_clean) < 50:
+        print(f"⚠️  ERROR: Not enough clean samples ({len(df_clean)} < 50)")
+        print("   Wait for more non-rug signals to accumulate")
+        # Fall back to full dataset if not enough clean data
+        df_clean = df
+        print("   Using full dataset (including rugs) as fallback")
+    
+    X = df_clean[features].fillna(0)
+    y = df_clean['target_gain']
     
     # Split data
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=0.2, random_state=42
     )
     
-    print(f"Train samples: {len(X_train)}")
+    print(f"\nTrain samples: {len(X_train)}")
     print(f"Test samples: {len(X_test)}")
     
-    # Train model
+    # IMPROVED MODEL: Stronger regularization to prevent overfitting
     model = GradientBoostingRegressor(
-        n_estimators=150,
-        max_depth=6,
-        learning_rate=0.05,
-        min_samples_split=10,
-        min_samples_leaf=5,
-        subsample=0.8,
+        n_estimators=100,          # Reduced from 150 (less complex)
+        max_depth=3,               # Reduced from 6 (prevent overfitting!)
+        learning_rate=0.1,         # Increased from 0.05 (faster, more stable)
+        min_samples_split=20,      # Increased from 10 (more conservative)
+        min_samples_leaf=10,       # Increased from 5 (prevent overfitting)
+        subsample=0.7,             # Reduced from 0.8 (more regularization)
+        max_features='sqrt',       # Add feature sampling (prevent overfitting)
         random_state=42
     )
     
-    print("\nTraining...")
+    print("\nTraining with stronger regularization...")
     model.fit(X_train, y_train)
     
-    # Evaluate
+    # Evaluate on test set
     train_pred = model.predict(X_train)
     test_pred = model.predict(X_test)
     
@@ -65,11 +78,26 @@ def train_gain_predictor(df: pd.DataFrame, features: list) -> Tuple[object, Dict
     train_rmse = np.sqrt(mean_squared_error(y_train, train_pred))
     test_rmse = np.sqrt(mean_squared_error(y_test, test_pred))
     
+    # Cross-validation to check generalization
+    print("\nRunning 5-fold cross-validation...")
+    cv_scores = cross_val_score(model, X, y, cv=5, scoring='r2', n_jobs=-1)
+    cv_r2_mean = cv_scores.mean()
+    cv_r2_std = cv_scores.std()
+    
     print(f"\n📊 Results:")
     print(f"  Train R²: {train_r2:.3f}")
     print(f"  Test R²:  {test_r2:.3f}")
+    print(f"  CV R² (5-fold): {cv_r2_mean:.3f} ± {cv_r2_std:.3f}")
     print(f"  Train RMSE: {train_rmse:.1f}%")
     print(f"  Test RMSE:  {test_rmse:.1f}%")
+    
+    # Check for overfitting
+    if train_r2 - test_r2 > 0.2:
+        print(f"  ⚠️  WARNING: Overfitting detected! (Train-Test gap: {train_r2 - test_r2:.3f})")
+    elif test_r2 > 0.3:
+        print(f"  ✅ Good generalization!")
+    else:
+        print(f"  ⚠️  Poor predictive power (Test R² < 0.3)")
     
     # Feature importance
     importance = dict(zip(features, model.feature_importances_))
@@ -80,11 +108,14 @@ def train_gain_predictor(df: pd.DataFrame, features: list) -> Tuple[object, Dict
     metrics = {
         'train_r2': train_r2,
         'test_r2': test_r2,
+        'cv_r2_mean': cv_r2_mean,
+        'cv_r2_std': cv_r2_std,
         'train_rmse': train_rmse,
         'test_rmse': test_rmse,
         'feature_importance': importance,
         'trained_at': datetime.now().isoformat(),
-        'samples': len(df)
+        'samples': len(df_clean),
+        'rugs_removed': len(df) - len(df_clean)
     }
     
     return model, metrics
@@ -103,6 +134,16 @@ def train_winner_classifier(df: pd.DataFrame, features: list, threshold='2x') ->
     print(f"🎯 TRAINING WINNER CLASSIFIER ({threshold}+)")
     print("="*60)
     
+    # CRITICAL FIX: Remove rugs from training data
+    df_clean = df[df['is_rug'] == 0].copy()
+    print(f"📊 Removed {len(df) - len(df_clean)} rugs from training data")
+    print(f"   Clean samples: {len(df_clean)}/{len(df)} ({100*len(df_clean)/len(df):.1f}%)")
+    
+    if len(df_clean) < 50:
+        print(f"⚠️  ERROR: Not enough clean samples ({len(df_clean)} < 50)")
+        df_clean = df
+        print("   Using full dataset (including rugs) as fallback")
+    
     target_map = {
         '1.5x': 'is_winner_1.5x',
         '2x': 'is_winner_2x',
@@ -110,12 +151,12 @@ def train_winner_classifier(df: pd.DataFrame, features: list, threshold='2x') ->
         '10x': 'is_winner_10x'
     }
     
-    X = df[features].fillna(0)
-    y = df[target_map[threshold]]
+    X = df_clean[features].fillna(0)
+    y = df_clean[target_map[threshold]]
     
     # Check class balance
     pos_rate = y.mean()
-    print(f"Positive rate: {pos_rate:.1%}")
+    print(f"\nPositive rate: {pos_rate:.1%}")
     
     if pos_rate < 0.05 or pos_rate > 0.95:
         print("⚠️  Warning: Highly imbalanced dataset")
@@ -128,18 +169,19 @@ def train_winner_classifier(df: pd.DataFrame, features: list, threshold='2x') ->
     print(f"Train samples: {len(X_train)} (positive: {y_train.sum()})")
     print(f"Test samples: {len(X_test)} (positive: {y_test.sum()})")
     
-    # Train model
+    # IMPROVED MODEL: Stronger regularization + balanced weighting
     model = RandomForestClassifier(
-        n_estimators=150,
-        max_depth=12,
-        min_samples_split=15,
-        min_samples_leaf=5,
-        class_weight='balanced',  # Handle imbalanced data
+        n_estimators=100,            # Reduced from 150 (less complex)
+        max_depth=5,                 # Reduced from 12 (prevent overfitting!)
+        min_samples_split=25,        # Increased from 15 (more conservative)
+        min_samples_leaf=10,         # Increased from 5 (prevent overfitting)
+        max_features='sqrt',         # Feature sampling (prevent overfitting)
+        class_weight='balanced',     # Handle imbalanced data
         random_state=42,
         n_jobs=-1
     )
     
-    print("\nTraining...")
+    print("\nTraining with stronger regularization...")
     model.fit(X_train, y_train)
     
     # Evaluate
@@ -151,9 +193,24 @@ def train_winner_classifier(df: pd.DataFrame, features: list, threshold='2x') ->
     train_acc = accuracy_score(y_train, train_pred)
     test_acc = accuracy_score(y_test, test_pred)
     
+    # Cross-validation to check generalization
+    print("\nRunning 5-fold cross-validation...")
+    cv_scores = cross_val_score(model, X, y, cv=5, scoring='accuracy', n_jobs=-1)
+    cv_acc_mean = cv_scores.mean()
+    cv_acc_std = cv_scores.std()
+    
     print(f"\n📊 Results:")
     print(f"  Train Accuracy: {train_acc:.3f}")
     print(f"  Test Accuracy:  {test_acc:.3f}")
+    print(f"  CV Accuracy (5-fold): {cv_acc_mean:.3f} ± {cv_acc_std:.3f}")
+    
+    # Check for overfitting
+    if train_acc - test_acc > 0.15:
+        print(f"  ⚠️  WARNING: Overfitting detected! (Train-Test gap: {train_acc - test_acc:.3f})")
+    elif test_acc > 0.75:
+        print(f"  ✅ Good generalization!")
+    else:
+        print(f"  ⚠️  Poor predictive power (Test Acc < 0.75)")
     
     print(f"\n📋 Test Set Classification Report:")
     print(classification_report(y_test, test_pred, target_names=['Loser', 'Winner']))
@@ -161,10 +218,13 @@ def train_winner_classifier(df: pd.DataFrame, features: list, threshold='2x') ->
     metrics = {
         'train_accuracy': train_acc,
         'test_accuracy': test_acc,
+        'cv_accuracy_mean': cv_acc_mean,
+        'cv_accuracy_std': cv_acc_std,
         'threshold': threshold,
         'positive_rate': pos_rate,
         'trained_at': datetime.now().isoformat(),
-        'samples': len(df)
+        'samples': len(df_clean),
+        'rugs_removed': len(df) - len(df_clean)
     }
     
     return model, metrics
