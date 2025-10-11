@@ -165,6 +165,11 @@ MOMENTUM_1H_HIGH = _get_float("MOMENTUM_1H_HIGH", 10.0)
 MOMENTUM_1H_MED = _get_float("MOMENTUM_1H_MED", 5.0)
 MOMENTUM_24H_HIGH = _get_float("MOMENTUM_24H_HIGH", 50.0)
 
+# ANTI-FOMO FILTER: Reject tokens that already pumped (late entry risk)
+# Target: Early momentum (5-50%), reject late entries (>100%)
+MAX_24H_CHANGE_FOR_ALERT = _get_float("MAX_24H_CHANGE_FOR_ALERT", 100.0)
+MAX_1H_CHANGE_FOR_ALERT = _get_float("MAX_1H_CHANGE_FOR_ALERT", 300.0)
+
 
 # ============================================================================
 # DATABASE & STORAGE
