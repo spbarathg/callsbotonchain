@@ -252,9 +252,9 @@ LARGE_CAP_MOMENTUM_GATE_1H = _get_int("LARGE_CAP_MOMENTUM_GATE_1H", 15)
 # Data: 75th percentile = $15,668, 90th percentile = $42,174
 
 # Minimum on-chain liquidity required to alert (USD)
-# ANALYST RECOMMENDATION: $15k threshold (75th percentile) for optimal win rate
-# Expected impact: Win rate 14% → 30-40%, fewer but higher quality signals
-MIN_LIQUIDITY_USD = _get_int("MIN_LIQUIDITY_USD", 15_000)
+# ADJUSTED: $25k threshold to balance quality and signal flow
+# Was $30k (too strict, 7 hours no signals), now $25k for better flow
+MIN_LIQUIDITY_USD = _get_int("MIN_LIQUIDITY_USD", 25_000)
 # Safety clamp to avoid overly strict env overrides breaking standard behavior
 # Increased to 50k to allow moonshot-optimized thresholds based on analysis
 try:
@@ -292,8 +292,8 @@ REQUIRE_SMART_MONEY_FOR_ALERT = os.getenv("REQUIRE_SMART_MONEY_FOR_ALERT", "fals
 SMART_MONEY_SCORE_BONUS = _get_int("SMART_MONEY_SCORE_BONUS", 0)
 
 # For general cycle (non-smart money), require higher score
-# ADJUSTED: Reduced to 5 to allow more signals through (was blocking everything at 7)
-GENERAL_CYCLE_MIN_SCORE = _get_int("GENERAL_CYCLE_MIN_SCORE", 5)
+# ADJUSTED: Reduced to 6 to allow more signals through (was 7, then 5 too low)
+GENERAL_CYCLE_MIN_SCORE = _get_int("GENERAL_CYCLE_MIN_SCORE", 6)
 
 # Require minimum velocity score for final alert (0 disables)
 REQUIRE_VELOCITY_MIN_SCORE_FOR_ALERT = _get_int("REQUIRE_VELOCITY_MIN_SCORE_FOR_ALERT", 0)
