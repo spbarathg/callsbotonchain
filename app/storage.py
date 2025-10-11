@@ -475,7 +475,11 @@ def update_token_performance(token_address: str, stats: Dict[str, Any]) -> None:
             max_gain = max(gain_percent, ((current_peak - first_price) / first_price) * 100) if current_peak else gain_percent
             max_drawdown = min(0, gain_percent)  # Track worst drop from entry
         else:
-            gain_percent = max_gain = max_drawdown = 0
+            # FIX: Even if first_price is 0, we should still set max_gain to 0 (not NULL)
+            # This ensures tokens have outcome data for ML training
+            gain_percent = 0.0
+            max_gain = 0.0
+            max_drawdown = 0.0
         
         # Update peak if current price is higher
         new_peak_price = max(current_peak, current_price) if current_peak else current_price
@@ -565,11 +569,12 @@ def get_alerted_tokens_for_tracking() -> List[str]:
     
     # Query from alerted_tokens (primary table) and LEFT JOIN with stats
     # This ensures we track ALL alerted tokens, even those without stats records yet
+    # FIX: Use timestamp comparison, not datetime() function (alerted_at is Unix timestamp)
     c.execute("""
         SELECT a.token_address, a.alerted_at, a.final_score, a.conviction_type
         FROM alerted_tokens a
         LEFT JOIN alerted_token_stats s ON a.token_address = s.token_address
-        WHERE datetime(a.alerted_at) >= datetime(?, 'unixepoch')
+        WHERE a.alerted_at >= ?
             AND (s.is_rug IS NULL OR s.is_rug = 0)
         ORDER BY a.alerted_at DESC
     """, (one_day_ago,))
