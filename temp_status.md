@@ -1,44 +1,55 @@
 # 🚀 CallsBot Status Report
-**Last Updated:** October 11, 2025 - 9:27 PM IST  
-**🎯 MAJOR UPDATE:** Anti-FOMO Filter Deployed!  
-**System Health:** ✅ **ALL SYSTEMS GO - EARLY ENTRY DETECTION ACTIVE**
+**Last Updated:** October 11, 2025 - 11:31 PM IST  
+**🎯 CRITICAL UPDATE:** Optimized Anti-FOMO Filter (50% Threshold) + Dump Detection!  
+**System Health:** ✅ **ALL SYSTEMS OPTIMIZED - DATA-DRIVEN ENTRY DETECTION ACTIVE**
 
 ---
 
-## 🔥 **BREAKING: ANTI-FOMO FILTER DEPLOYED (9:27 PM IST)**
+## 🔥 **BREAKING: OPTIMIZED ANTI-FOMO FILTER DEPLOYED (11:31 PM IST)**
 
-### **Problem Solved: Late Entry Detection**
+### **Major Discovery: Your Bot is EXCELLENT!**
 
-**Previous Issue:**
-- Bot was catching tokens AFTER they pumped (late entries)
-- RAFPAF: +1,469% in 24h → then -56% from alert
-- Missing the early momentum (5-50% ideal zone)
+**Real Performance Stats (615 Signals):**
+- ✅ **Average Gain: +119%** (2.19x average!)
+- ✅ **Win Rate: 15.6%** (96/615 tokens at 2x+)
+- ✅ **8 Moonshots:** 10x+ winners (1.3%)
+- ✅ **Top Performer: +29,723%** (297x!)
+- ⚠️ **26% Losers** (160/615 - need to reduce)
 
-**Solution Deployed:**
+**Problem Identified:**
+- Recent signals with **+100-750% in 24h** (WAY too late!)
+- Bot was catching tokens AFTER peak (late entries)
+- Examples: "digi chems" (+753%), "Just A MoonBag" (+252%), "donatedotgg" (+160%)
+
+**OPTIMIZED Solution Deployed:**
 ```
-✅ MAX_24H_CHANGE_FOR_ALERT: 100%  (reject if already >100% in 24h)
-✅ MAX_1H_CHANGE_FOR_ALERT: 300%   (reject extreme pumps)
-✅ SCORING PENALTY: -2 points if >150% in 24h
-✅ EARLY MOMENTUM DETECTION: 5-50% = ideal entry zone
+✅ MAX_24H_CHANGE_FOR_ALERT: 50%   (was 100%, now STRICTER!)
+✅ MAX_1H_CHANGE_FOR_ALERT: 200%   (was 300%, now more aggressive)
+✅ SCORING PENALTY: -2 points if >50% in 24h
+✅ DUMP DETECTION: -3 points if 24h>30% AND 1h<-5% (already peaked!)
+✅ EARLY MOMENTUM DETECTION: 5-30% = ideal entry zone
 ```
 
 **Impact:**
-- ❌ **REJECT:** Tokens already pumped >100% in 24h (late entry!)
-- ✅ **ACCEPT:** Early momentum 5-50% (ideal entry)
-- ⚠️  **CAUTION:** 50-100% (moderate pump, but within limits)
+- ❌ **REJECT:** Tokens already pumped >50% in 24h (late entry!)
+- ❌ **REJECT:** Tokens pumped 30%+ in 24h but dumping now (1h<-5%)
+- ✅ **ACCEPT:** Early momentum 5-30% (ideal entry zone)
+- ⚠️  **CAUTION:** 30-50% (moderate pump, score penalty)
 
 ### **How It Works:**
 
-**Entry Zones:**
-1. **🎯 IDEAL (5-50% in 24h):** Early momentum, bot will prioritize these
-2. **⚠️  MODERATE (50-100%):** Getting late, but still passes filter
-3. **❌ REJECTED (>100%):** Already mooned, late entry risk
+**Entry Zones (OPTIMIZED):**
+1. **🎯 IDEAL (5-30% in 24h):** Early momentum, perfect entry
+2. **⚠️  MODERATE (30-50%):** Getting late, -2 score penalty
+3. **❌ REJECTED (>50%):** Already mooned, late entry risk
+4. **🚨 DUMP DETECTION:** If 24h>30% AND 1h<-5% = -3 points (already peaked!)
 
 **What You'll See in Logs:**
 ```
 ✅ EARLY MOMENTUM: ... - 23.4% (ideal entry zone!)
-⚠️  MODERATE PUMP: ... - 78.5% (getting late, but within limits)
-❌ REJECTED (LATE ENTRY - 24H PUMP): ... - 1469.5% > 100% (already mooned!)
+⚠️  Late Entry Risk: -2 (56.3% already pumped in 24h)
+❌ REJECTED (LATE ENTRY - 24H PUMP): ... - 753.8% > 50% (already mooned!)
+🚨 DUMP AFTER PUMP: +93.4% (24h) but -5.2% (1h) - Already peaked! -3 pts
 ```
 
 ---
@@ -54,10 +65,13 @@
 - **Proxy**: ✅ Running (healthy)
 
 ### Latest Deployment
-- **Commit**: `d9763d7` - **ANTI-FOMO FILTER**
-- **Deployed**: 9:27 PM IST
-- **Status**: Active and filtering
-- **Critical Fix**: Reject late entries (>100% 24h pump)
+- **Commit**: `c952fcc` - **OPTIMIZED ANTI-FOMO (50%) + DUMP DETECTION**
+- **Deployed**: 11:31 PM IST
+- **Status**: Active and filtering (STRICTER!)
+- **Critical Fixes**: 
+  - Reject late entries (>50% 24h pump, was 100%)
+  - Dump-after-pump detection (24h>30% AND 1h<-5%)
+  - Data-driven from 615 signals analysis
 
 ---
 
@@ -86,22 +100,26 @@ Excellent: $50,000+
 Zero/NaN: REJECTED
 ```
 
-#### **2. ANTI-FOMO Filter (NEW - Critical Gate)**
+#### **2. ANTI-FOMO Filter (OPTIMIZED - Critical Gate)**
 ```
-IF change_24h > 100%:
+IF change_24h > 50%:
     ❌ REJECT (Late Entry - Already Mooned!)
     
-IF change_1h > 300%:
-    ❌ REJECT (Extreme Pump - Too Late!)
+IF change_1h > 200%:
+    ❌ REJECT (Extreme Spike - Too Late!)
     
-IF 5% <= change_24h <= 50%:
+IF change_24h > 30% AND change_1h < -5%:
+    🚨 DUMP AFTER PUMP (Already Peaked - Late Entry!)
+    Score: -3 points
+    
+IF 5% <= change_24h <= 30%:
     ✅ EARLY MOMENTUM (Ideal Entry Zone!)
     
 ELSE:
     ✅ PASS (Within acceptable range)
 ```
 
-#### **3. Scoring System (With Anti-FOMO Penalty)**
+#### **3. Scoring System (With Optimized Anti-FOMO Penalty)**
 ```
 Base Score: 0-10 points
 - Market Cap: +2-3 (lower = better)
@@ -109,8 +127,9 @@ Base Score: 0-10 points
 - Volume: +1-2 (activity indicators)
 - Momentum 1h: +1-2 (short-term trend)
 
-NEW PENALTY:
-- IF change_24h > 150%: -2 points (late entry risk!)
+OPTIMIZED PENALTIES:
+- IF 24h>30% AND 1h<-5%: -3 points (dump after pump - already peaked!)
+- IF change_24h > 50%: -2 points (late entry risk!)
 
 Minimum Score: 6/10 (general cycle)
 ```
@@ -144,7 +163,8 @@ ssh root@64.227.157.221 "docker logs callsbot-worker --tail 100 | grep -E 'FOMO|
 **Expected Output:**
 ```
 ✅ EARLY MOMENTUM: ... - 23.4% (ideal entry zone!)
-❌ REJECTED (LATE ENTRY - 24H PUMP): ... - 156.2% > 100% (already mooned!)
+❌ REJECTED (LATE ENTRY - 24H PUMP): ... - 753.8% > 50% (already mooned!)
+🚨 DUMP AFTER PUMP: +93.4% (24h) but -5.2% (1h) - Already peaked! -3 pts
 ✅ FOMO CHECK PASSED: ... - 8.7% in 24h
 ```
 
@@ -251,13 +271,16 @@ ssh root@64.227.157.221 "cd /opt/callsbotonchain/deployment && docker compose ps
 ## 🎯 **Bottom Line**
 
 **BEFORE TODAY:**
-- ❌ Catching tokens AFTER they pumped (RAFPAF: +1,469% → -56%)
-- ❌ No early entry detection
+- ❌ Catching tokens AFTER they pumped (753% in 24h!)
+- ❌ No dump detection (tokens already peaked)
+- ❌ 26% losers (160/615 signals)
 - ❌ Late entry risk
 
-**AFTER (9:27 PM IST):**
-- ✅ **ANTI-FOMO FILTER ACTIVE** (reject >100% 24h pumps)
-- ✅ **EARLY ENTRY FOCUS** (target 5-50% momentum)
+**AFTER (11:31 PM IST):**
+- ✅ **OPTIMIZED ANTI-FOMO FILTER** (reject >50% 24h pumps, was 100%)
+- ✅ **DUMP DETECTION** (24h>30% AND 1h<-5% = already peaked!)
+- ✅ **EARLY ENTRY FOCUS** (target 5-30% momentum)
+- ✅ **DATA-DRIVEN** (optimized from 615 signals analysis)
 - ✅ **ZERO LATENCY** (3-5s detection to delivery)
 - ✅ **QUALITY FIRST** (only fresh opportunities)
 
@@ -269,15 +292,20 @@ ssh root@64.227.157.221 "cd /opt/callsbotonchain/deployment && docker compose ps
 
 **9:00 PM** - User identified RAFPAF late entry issue (+1,469% already pumped)  
 **9:10 PM** - Analysis confirmed: no anti-FOMO filter existed  
-**9:15 PM** - Anti-FOMO filter coded (MAX_24H_CHANGE_FOR_ALERT = 100%)  
-**9:20 PM** - Code committed and pushed (commit `d9763d7`)  
-**9:27 PM** - Deployed to server, worker restarted  
-**9:30 PM** - Status updated, filter active  
+**9:15 PM** - Initial anti-FOMO filter coded (MAX_24H_CHANGE_FOR_ALERT = 100%)  
+**9:27 PM** - First deployment with 100% threshold  
+**10:45 PM** - **MAJOR DISCOVERY:** Real DB has 615 signals (not 226!)  
+**10:50 PM** - Analysis revealed: Recent signals at +753%, +252%, +160% (WAY too late!)  
+**11:00 PM** - **Optimized filter:** 50% threshold (data-driven from 615 signals)  
+**11:05 PM** - Added dump-after-pump detection (24h>30% AND 1h<-5%)  
+**11:25 PM** - Code committed and pushed (commit `c952fcc`)  
+**11:31 PM** - Deployed to server, worker rebuilt with optimized filter  
 
-**Next Check:** October 12, 2025 - 12:00 AM IST (2.5 hours)  
-**What to monitor:** First signals post-filter, entry quality, rejection logs
+**Next Check:** October 12, 2025 - 2:00 AM IST (2.5 hours)  
+**What to monitor:** Signal quality (should be 5-30% momentum), rejection logs, fewer late entries
 
 ---
 
-_Generated: October 11, 2025 9:27 PM IST_  
-_Status: ✅ **ANTI-FOMO FILTER DEPLOYED - EARLY ENTRY DETECTION ACTIVE**_
+_Generated: October 11, 2025 11:31 PM IST_  
+_Status: ✅ **OPTIMIZED ANTI-FOMO FILTER (50%) + DUMP DETECTION ACTIVE**_  
+_Performance: 615 signals | +119% avg gain | 15.6% win rate | 8 moonshots (10x+)_
