@@ -213,10 +213,10 @@ MAX_MARKET_CAP_USD = _get_float("MAX_MARKET_CAP_USD", 50_000_000.0)
 # RISK GATES (Data-Driven)
 # ============================================================================
 
-# Liquidity Gate - CRITICAL FINDING: $15k threshold, 87% win rate
+# Liquidity Gate - ADJUSTED: $25k threshold for better signal flow
 USE_LIQUIDITY_FILTER = _get_bool("USE_LIQUIDITY_FILTER", True)
 MIN_LIQUIDITY_USD = _get_float("MIN_LIQUIDITY_USD", min(
-    max(_get_float("MIN_LIQUIDITY_USD_RAW", 15000.0), 15000.0),
+    max(_get_float("MIN_LIQUIDITY_USD_RAW", 25000.0), 25000.0),
     50000.0
 ))
 EXCELLENT_LIQUIDITY_USD = _get_float("EXCELLENT_LIQUIDITY_USD", 50000.0)
@@ -251,7 +251,7 @@ REQUIRE_VELOCITY_MIN_SCORE_FOR_ALERT = _get_int("REQUIRE_VELOCITY_MIN_SCORE_FOR_
 
 # Cycle Balance
 SMART_CYCLE_MIN_SCORE = _get_int("SMART_CYCLE_MIN_SCORE", 5)
-GENERAL_CYCLE_MIN_SCORE = _get_int("GENERAL_CYCLE_MIN_SCORE", 5)  # ADJUSTED
+GENERAL_CYCLE_MIN_SCORE = _get_int("GENERAL_CYCLE_MIN_SCORE", 6)  # ADJUSTED for better flow
 
 # Multi-signal Confirmation
 REQUIRE_MULTI_SIGNAL = _get_bool("REQUIRE_MULTI_SIGNAL", False)
