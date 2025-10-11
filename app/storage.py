@@ -202,6 +202,11 @@ def init_db():
         ("max_drawdown_percent", "REAL"),
         ("is_rug", "BOOLEAN DEFAULT 0"),
         ("rug_detected_at", "REAL"),
+        # Realistic returns tracking (with trailing stops)
+        ("realistic_exit_price", "REAL"),
+        ("realistic_gain_percent", "REAL"),
+        ("trailing_stop_pct", "REAL DEFAULT 15.0"),
+        ("would_have_exited_at", "REAL"),
     ]
     
     # Hardened: validate column names against allowlist before ALTER TABLE
@@ -485,6 +490,37 @@ def update_token_performance(token_address: str, stats: Dict[str, Any]) -> None:
         new_peak_price = max(current_peak, current_price) if current_peak else current_price
         peak_price_at = now if new_peak_price > (current_peak or 0) else None
         
+        # REALISTIC RETURNS: Calculate trailing stop exit
+        # Get current trailing stop settings
+        c.execute("SELECT realistic_exit_price, trailing_stop_pct, would_have_exited_at FROM alerted_token_stats WHERE token_address = ?", (token_address,))
+        trailing_data = c.fetchone()
+        
+        realistic_exit_price = trailing_data[0] if trailing_data else None
+        trailing_stop_pct = trailing_data[1] if trailing_data else 15.0  # Default 15% trailing stop
+        already_exited_at = trailing_data[2] if trailing_data else None
+        
+        # If we haven't exited yet, check if trailing stop hit
+        if not already_exited_at and new_peak_price and first_price > 0:
+            # Calculate trailing stop level (e.g., 15% below peak)
+            trailing_stop_price = new_peak_price * (1 - trailing_stop_pct / 100.0)
+            
+            # Check if current price dropped below trailing stop
+            if current_peak and current_price < trailing_stop_price and new_peak_price > first_price * 1.10:
+                # We would have exited here! Lock in the realistic exit
+                realistic_exit_price = trailing_stop_price
+                already_exited_at = now
+        
+        # Calculate realistic gain (what you'd actually get with trailing stop)
+        realistic_gain_percent = None
+        if first_price > 0:
+            if already_exited_at and realistic_exit_price:
+                # Already exited with trailing stop
+                realistic_gain_percent = ((realistic_exit_price - first_price) / first_price) * 100
+            elif new_peak_price > first_price * 1.10:  # Only track if >10% gain (to avoid false positives)
+                # Still holding, show what we'd get if we exit at trailing stop now
+                current_trailing_stop = new_peak_price * (1 - trailing_stop_pct / 100.0)
+                realistic_gain_percent = ((current_trailing_stop - first_price) / first_price) * 100
+        
         # Detect rug pull: >80% drop from peak or liquidity removed
         is_rug = False
         rug_at = None
@@ -522,7 +558,9 @@ def update_token_performance(token_address: str, stats: Dict[str, Any]) -> None:
                 max_drawdown_percent = ?,
                 price_change_1h = ?,
                 price_change_6h = ?,
-                price_change_24h = ?
+                price_change_24h = ?,
+                realistic_gain_percent = ?,
+                trailing_stop_pct = ?
         """
         
         params = [
@@ -537,11 +575,18 @@ def update_token_performance(token_address: str, stats: Dict[str, Any]) -> None:
             change_1h,
             change_6h,
             change_24h,
+            realistic_gain_percent,
+            trailing_stop_pct,
         ]
         
         if peak_price_at:
             update_sql += ", peak_price_at = ?"
             params.append(peak_price_at)
+        
+        # Update realistic exit data if trailing stop was hit
+        if already_exited_at and realistic_exit_price and not trailing_data[2]:
+            update_sql += ", realistic_exit_price = ?, would_have_exited_at = ?"
+            params.extend([realistic_exit_price, already_exited_at])
         
         # Set rug flag if newly detected; only set once if not previously marked
         if is_rug:
