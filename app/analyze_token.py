@@ -564,13 +564,20 @@ def _normalize_stats_schema(d: Dict[str, Any]) -> Dict[str, Any]:
         if liq_usd is None:
             liq_usd = liq_obj.get("usd")
         if liq_usd is None:
-            out["liquidity_usd"] = float("nan")
+            # CRITICAL FIX: Use 0.0 instead of NaN (NaN comparisons always False!)
+            out["liquidity_usd"] = 0.0
             out["liquidity_unknown"] = True
         else:
-            out["liquidity_usd"] = float(liq_usd)
-            out["liquidity_unknown"] = False
+            value = float(liq_usd)
+            # Handle NaN/inf from API responses
+            if not (value == value) or value == float('inf') or value == float('-inf'):
+                out["liquidity_usd"] = 0.0
+                out["liquidity_unknown"] = True
+            else:
+                out["liquidity_usd"] = value
+                out["liquidity_unknown"] = False
     except Exception:
-        out["liquidity_usd"] = float("nan")
+        out["liquidity_usd"] = 0.0
         out["liquidity_unknown"] = True
     # Volume
     v = (out.get("volume") or {})
