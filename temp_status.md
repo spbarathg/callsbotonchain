@@ -143,13 +143,15 @@ Minimum Score: 6/10 (general cycle)
 
 ### **Key Differences (Before vs After):**
 
-| Aspect | Before | After (Oct 11, 9:27 PM IST) |
+| Aspect | Before | After (Oct 11, 11:31 PM IST) |
 |--------|---------|------------------------------|
-| **Late Entry Detection** | ❌ None | ✅ Reject >100% in 24h |
-| **Entry Target** | Any positive momentum | 5-50% ideal zone |
-| **Scoring Logic** | Reward all gains | Penalize excessive pumps |
-| **Risk Management** | Post-entry only | Pre-entry filtering |
-| **Result** | Mixed (late + early) | **Early entries only** |
+| **Late Entry Detection** | ❌ None (100% threshold) | ✅ Reject >50% in 24h (OPTIMIZED!) |
+| **Dump Detection** | ❌ None | ✅ 24h>30% AND 1h<-5% = -3 pts |
+| **Entry Target** | Any positive momentum | 5-30% ideal zone |
+| **Scoring Logic** | Reward all gains | Penalize late entries & dumps |
+| **Risk Management** | Post-entry only | Pre-entry filtering (strict) |
+| **Data-Driven** | ❌ No analysis | ✅ Based on 615 signals |
+| **Result** | 26% losers, late entries | **Early entries only** |
 
 ---
 
