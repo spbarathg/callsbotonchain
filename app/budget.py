@@ -157,7 +157,7 @@ def get_budget() -> BudgetManager:
     global _budget_singleton
     if _budget_singleton is not None:
         return _budget_singleton
-    from config.config import (
+    from app.config_unified import (
         BUDGET_ENABLED,
         BUDGET_PER_MINUTE_MAX,
         BUDGET_PER_DAY_MAX,

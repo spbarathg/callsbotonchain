@@ -5,7 +5,7 @@ Sends trading signals to a Telegram group using user account (not bot).
 import asyncio
 import os
 from typing import Optional, TYPE_CHECKING
-from config.config import (
+from app.config_unified import (
     TELEGRAM_USER_API_ID as API_ID,
     TELEGRAM_USER_API_HASH as API_HASH,
     TELEGRAM_USER_SESSION_FILE as SESSION_FILE,

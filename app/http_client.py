@@ -4,8 +4,8 @@ from datetime import datetime, timedelta
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
-from config.config import HTTP_MAX_RETRIES, HTTP_BACKOFF_FACTOR
-from config.config import HTTP_ALLOW_HOSTS
+from app.config_unified import HTTP_MAX_RETRIES, HTTP_BACKOFF_FACTOR
+from app.config_unified import HTTP_ALLOW_HOSTS
 from app.metrics import inc_api_call
 from app.http_headers import merge_headers
 

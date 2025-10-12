@@ -70,7 +70,7 @@ class SignalProcessor:
             ProcessResult with status and metadata
         """
         # Import config values (could be passed in constructor instead)
-        from config.config import (
+        from app.config_unified import (
             DEBUG_PRELIM,
             TELEGRAM_ALERT_MIN_INTERVAL,
             REQUIRE_SMART_MONEY_FOR_ALERT,
@@ -489,9 +489,9 @@ class SignalProcessor:
         """Generate and send alert via all configured channels"""
         # Build alert message
         message = self._build_alert_message(token_address, stats, score, conviction, details)
-        
+
         # Throttle alerts
-        from config.config import TELEGRAM_ALERT_MIN_INTERVAL
+        from app.config_unified import TELEGRAM_ALERT_MIN_INTERVAL
         import os
         
         if TELEGRAM_ALERT_MIN_INTERVAL and TELEGRAM_ALERT_MIN_INTERVAL > 0:
