@@ -678,7 +678,8 @@ def score_token(stats: Dict[str, Any], smart_money_detected: bool = False, token
 
     # === LIQUIDITY ANALYSIS (ANALYST FINDING: #1 PREDICTOR OF WINNERS!) ===
     # Winner median liquidity: $17,811 | Loser median: $0
-    # This is THE most important factor - weight it heavily
+    # This is THE most important factor - weight it MORE heavily
+    # INCREASED WEIGHTS: +4/+3/+2 (was +3/+2/+1) to match its importance
     liquidity_usd = (
         stats.get('liquidity_usd') or 
         (stats.get('liquidity', {}) or {}).get('usd') or 
@@ -686,19 +687,19 @@ def score_token(stats: Dict[str, Any], smart_money_detected: bool = False, token
         0
     )
     
-    # Liquidity scoring tiers (based on analyst percentiles)
+    # Liquidity scoring tiers (INCREASED WEIGHTS - liquidity is #1 predictor!)
     if liquidity_usd >= 50_000:  # 90th percentile - EXCELLENT
-        score += 3
-        scoring_details.append(f"✅ Liquidity: +3 (${liquidity_usd:,.0f} - EXCELLENT)")
+        score += 4  # Was +3, now +4 (CRITICAL FACTOR)
+        scoring_details.append(f"✅ Liquidity: +4 (${liquidity_usd:,.0f} - EXCELLENT)")
     elif liquidity_usd >= 15_000:  # 75th percentile - GOOD (minimum threshold)
-        score += 2
-        scoring_details.append(f"✅ Liquidity: +2 (${liquidity_usd:,.0f} - GOOD)")
+        score += 3  # Was +2, now +3
+        scoring_details.append(f"✅ Liquidity: +3 (${liquidity_usd:,.0f} - GOOD)")
     elif liquidity_usd >= 5_000:  # Below threshold but not terrible
-        score += 1
-        scoring_details.append(f"⚠️ Liquidity: +1 (${liquidity_usd:,.0f} - FAIR)")
+        score += 2  # Was +1, now +2
+        scoring_details.append(f"⚠️ Liquidity: +2 (${liquidity_usd:,.0f} - FAIR)")
     elif liquidity_usd > 0:  # Has some liquidity but very risky
-        # No points, but acknowledge it exists
-        scoring_details.append(f"❌ Liquidity: +0 (${liquidity_usd:,.0f} - TOO LOW)")
+        score += 1  # Was +0, now +1 (give some credit)
+        scoring_details.append(f"⚠️ Liquidity: +1 (${liquidity_usd:,.0f} - LOW)")
     else:  # Zero liquidity - will be filtered out by pre-filter
         score -= 2
         scoring_details.append(f"❌ Liquidity: -2 (${liquidity_usd:,.0f} - ZERO/RUG RISK)")
@@ -746,7 +747,15 @@ def score_token(stats: Dict[str, Any], smart_money_detected: bool = False, token
     change_1h = stats.get('change', {}).get('1h', 0)
     change_24h = stats.get('change', {}).get('24h', 0)
     
-    # EARLY MOMENTUM DETECTION (ideal entry zone: 5-50% in 24h)
+    # === EARLY MOMENTUM BONUS (IDEAL ENTRY ZONE: 5-30% in 24h) ===
+    # Reward tokens in the sweet spot - not flat, not pumped, just starting to move
+    # This is THE optimal entry point for maximum gains
+    if 5 <= (change_24h or 0) <= 30:
+        score += 2  # Big bonus for ideal entry zone
+        scoring_details.append(f"🎯 Early Entry: +2 ({(change_24h or 0):.1f}% - IDEAL MOMENTUM ZONE!)")
+    # === END EARLY MOMENTUM BONUS ===
+    
+    # Short-term momentum (1h)
     if (change_1h or 0) > max(MOMENTUM_1H_STRONG, MOMENTUM_1H_PUMPER):
         score += 2
         scoring_details.append(f"Momentum: +2 ({(change_1h or 0):.1f}% - strong pump)")
@@ -761,7 +770,7 @@ def score_token(stats: Dict[str, Any], smart_money_detected: bool = False, token
     
     # ANTI-FOMO PENALTY: Penalize tokens that already pumped too much (late entry!)
     # This ensures we catch tokens EARLY, not after they've mooned
-    # Note: Final rejection happens in gating, this just reduces score
+    # Note: Final rejection happens in gating (bot.py FOMO filter), this just reduces score
     
     # CRITICAL: Dump-after-pump detection (already peaked, now declining)
     if (change_24h or 0) > 30 and (change_1h or 0) < -5:

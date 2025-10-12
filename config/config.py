@@ -81,7 +81,9 @@ try:
     # ADJUSTED: Set to 5 to allow more signals through (was blocking everything at 7)
     HIGH_CONFIDENCE_SCORE = int(os.getenv("HIGH_CONFIDENCE_SCORE", "5"))
     MIN_USD_VALUE = int(os.getenv("MIN_USD_VALUE", "200"))
-    FETCH_INTERVAL = int(os.getenv("FETCH_INTERVAL", "120"))
+    # OPTIMIZED: 60s for better coverage (was 120s → 90s → now 60s)
+    # Competitive bots scan every 30-60s for faster signal detection
+    FETCH_INTERVAL = int(os.getenv("FETCH_INTERVAL", "60"))
     # Optional feed scoping
     _list_id_raw = os.getenv("CIELO_LIST_ID")
     if _list_id_raw is not None and _list_id_raw != "":
@@ -299,8 +301,9 @@ REQUIRE_SMART_MONEY_FOR_ALERT = os.getenv("REQUIRE_SMART_MONEY_FOR_ALERT", "fals
 SMART_MONEY_SCORE_BONUS = _get_int("SMART_MONEY_SCORE_BONUS", 0)
 
 # For general cycle (non-smart money), require higher score
-# ADJUSTED: Reduced to 5 for better signal flow (was 7 → 6 → now 5)
-GENERAL_CYCLE_MIN_SCORE = _get_int("GENERAL_CYCLE_MIN_SCORE", 5)
+# OPTIMIZED: Set to 6 for quality balance (was 7 → too strict, 5 → too loose)
+# This matches competitive bots while maintaining quality
+GENERAL_CYCLE_MIN_SCORE = _get_int("GENERAL_CYCLE_MIN_SCORE", 6)
 
 # Require minimum velocity score for final alert (0 disables)
 REQUIRE_VELOCITY_MIN_SCORE_FOR_ALERT = _get_int("REQUIRE_VELOCITY_MIN_SCORE_FOR_ALERT", 0)
@@ -317,8 +320,9 @@ ALLOW_UNKNOWN_SECURITY = os.getenv("ALLOW_UNKNOWN_SECURITY", "true").lower() == 
 MAX_TOP10_CONCENTRATION = _get_int("MAX_TOP10_CONCENTRATION", 18)
 
 # Volume-to-MCap ratio minimum gate (e.g., 0.5 means 24h vol >= 50% of mcap)
-# CRITICAL: Kept at 0.60 - this is already good
-VOL_TO_MCAP_RATIO_MIN = _get_float("VOL_TO_MCAP_RATIO_MIN", 0.60)  # 0 disables
+# OPTIMIZED: 0.25 for better signal flow (was 0.60 → too strict, 0.40 → moderate)
+# Competitive bots use 0.20-0.30 range for better volume
+VOL_TO_MCAP_RATIO_MIN = _get_float("VOL_TO_MCAP_RATIO_MIN", 0.25)  # 0 disables
 
 # Momentum gate for tight mode (require at least this 1h change for alert)
 # ADJUSTED: Reduced from 2% to 0% - was blocking all new tokens
@@ -338,9 +342,10 @@ MOMENTUM_1H_PUMPER = _get_int("MOMENTUM_1H_PUMPER", 20)
 # RISK GATES (NUANCED MODE FACTORS)
 # ==============================================
 # Relaxed thresholds for the nuanced evaluation path
-NUANCED_SCORE_REDUCTION = _get_int("NUANCED_SCORE_REDUCTION", 1)
+# OPTIMIZED: More lenient for score 5/10 tokens (was rejecting too many quality signals)
+NUANCED_SCORE_REDUCTION = _get_int("NUANCED_SCORE_REDUCTION", 2)  # Was 1, now 2 (allow score 5/10)
 NUANCED_LIQUIDITY_FACTOR = _get_float("NUANCED_LIQUIDITY_FACTOR", 0.5)
-NUANCED_VOL_TO_MCAP_FACTOR = _get_float("NUANCED_VOL_TO_MCAP_FACTOR", 0.7)
+NUANCED_VOL_TO_MCAP_FACTOR = _get_float("NUANCED_VOL_TO_MCAP_FACTOR", 0.5)  # Was 0.7, now 0.5 (more lenient)
 NUANCED_MCAP_FACTOR = _get_float("NUANCED_MCAP_FACTOR", 1.5)
 NUANCED_TOP10_CONCENTRATION_BUFFER = _get_int("NUANCED_TOP10_CONCENTRATION_BUFFER", 10)
 
