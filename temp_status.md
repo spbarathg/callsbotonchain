@@ -1,7 +1,7 @@
 # 🚀 CallsBot Status Report
-**Last Updated:** October 12, 2025 - 1:31 AM IST  
-**🎯 STATUS:** All Systems Healthy | ML Training Complete | Quality-First Filtering Active  
-**System Health:** ✅ **ALL SYSTEMS OPERATIONAL - STRICT QUALITY GATES ACTIVE**
+**Last Updated:** October 12, 2025 - 11:11 AM IST  
+**🎯 STATUS:** FOMO Filter Debug Deployed | All Systems Healthy | ML Models Not Trained Yet  
+**System Health:** ✅ **ALL SYSTEMS OPERATIONAL - FOMO FILTER DEBUG ACTIVE**
 
 ---
 
@@ -54,33 +54,34 @@
 
 ---
 
-## 📊 Current Status (1:31 AM IST - Oct 12)
+## 📊 Current Status (11:11 AM IST - Oct 12)
 
 ### System Health
-- **Worker**: ✅ Up 1h (healthy) - Actively processing feed
-- **Tracker**: ✅ Up 2h (healthy) - Monitoring 300 tokens
-- **Web Dashboard**: ✅ Up 11h (healthy) - http://64.227.157.221/
-- **Paper Trader**: ✅ Up 11h (healthy)
-- **Redis**: ✅ Up 11h (healthy)
-- **Proxy**: ✅ Up 11h (healthy)
+- **Worker**: ✅ Up 1min (healthy) - **REBUILT with FOMO debug logging**
+- **Tracker**: ✅ Up 11h (healthy) - Monitoring 298 tokens
+- **Web Dashboard**: ✅ Up 20h (healthy) - http://64.227.157.221/
+- **Paper Trader**: ✅ Up 20h (healthy)
+- **Redis**: ✅ Up 20h (healthy)
+- **Proxy**: ✅ Up 20h (healthy)
 
 ### Signal Activity
 - **Total Signals**: 619 (lifetime)
-- **Last Signal**: 6h 37min ago (Oct 11, 6:54 PM IST)
-- **Rejections (last 30min)**: Zero liquidity, Low scores, Nuanced debates
-- **Late Entry Rejections**: 0 (market quiet, no late pumps detected)
-- **Status**: ⚠️ **Quiet Market** - Strict quality gates working as expected
+- **Last Signal**: 16h+ ago (Oct 11, 6:54 PM IST)
+- **Rejections (active)**: Zero liquidity, Low liquidity (<$25k), Nuanced debates, Low scores
+- **FOMO Debug Status**: ✅ **DEPLOYED** - Debug logs will show if change data is missing
+- **Status**: ⚠️ **Quiet Market** - Quality gates actively rejecting junk
 
 ### Latest Deployment
-- **Commit**: `0ee39f7` - **ML Training Improvements + Anti-FOMO Filter**
-- **Deployed**: 1:15 AM IST (Oct 12)
-- **Status**: Active and filtering (QUALITY FIRST!)
+- **Commit**: `d4a23d8` - **FOMO Filter Debug Logging + Error Handling**
+- **Deployed**: 11:10 AM IST (Oct 12)
+- **Status**: Active with debug logging (investigating late entry issue)
 - **Key Features**: 
-  - ML models trained (297 clean samples, 51.8% rugs removed)
-  - Anti-FOMO filter (>50% 24h = rejected)
-  - Dump detection (24h>30% AND 1h<-5%)
-  - Liquidity gate ($25k minimum)
-  - Score threshold (6/10 minimum)
+  - ✅ Debug logging for FOMO filter (will show 24h/1h change values)
+  - ✅ Error handling for log formatting issues
+  - ✅ Anti-FOMO filter (>50% 24h = rejected)
+  - ✅ Liquidity gate ($25k minimum)
+  - ✅ Score threshold (6/10 minimum)
+  - ⚠️  ML models NOT deployed (need training first)
 
 ---
 
@@ -317,7 +318,11 @@ ssh root@64.227.157.221 "cd /opt/callsbotonchain/deployment && docker compose ps
 **12:15 AM** - ML training improvements deployed (rug removal, regularization)  
 **12:17 AM** - ML models trained successfully (297 clean samples)  
 **1:15 AM** - Worker container rebuilt with latest code  
-**1:31 AM** - **Status check:** All systems healthy, quiet market (6+ hours no signals)  
+**1:31 AM** - Status check: All systems healthy, quiet market (6+ hours no signals)  
+**11:00 AM** - **CRITICAL ISSUE FOUND:** FOMO filter not rejecting late entries (96-253% 24h pumps passing!)  
+**11:07 AM** - Added debug logging to FOMO filter to diagnose data flow issue  
+**11:10 AM** - Worker rebuilt with FOMO debug logging, deployed and healthy  
+**11:11 AM** - **Status check:** Debug logging active, will show if change data is missing at filter check time  
 
 ---
 
@@ -372,7 +377,8 @@ ssh root@64.227.157.221 "cd /opt/callsbotonchain/deployment && docker compose ps
 
 ---
 
-_Generated: October 12, 2025 1:31 AM IST_  
-_Status: ✅ **ALL SYSTEMS HEALTHY - QUALITY-FIRST FILTERING ACTIVE**_  
+_Generated: October 12, 2025 11:11 AM IST_  
+_Status: ✅ **FOMO DEBUG DEPLOYED - INVESTIGATING LATE ENTRY ISSUE**_  
 _Performance: 619 signals | +119% avg gain | 15.7% win rate | 8 moonshots (10x+)_  
-_ML Status: Trained (297 clean samples) | NOT enabled (needs more data)_
+_ML Status: ⚠️  **MODELS NOT DEPLOYED** (need to train on server first)_  
+_Critical Issue: Late entries (96-253% 24h pumps) passing through - FOMO filter debug active_
