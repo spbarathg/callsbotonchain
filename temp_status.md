@@ -1,7 +1,7 @@
 # 🚀 CallsBot Status Report
-**Last Updated:** October 11, 2025 - 11:31 PM IST  
-**🎯 CRITICAL UPDATE:** Optimized Anti-FOMO Filter (50% Threshold) + Dump Detection!  
-**System Health:** ✅ **ALL SYSTEMS OPTIMIZED - DATA-DRIVEN ENTRY DETECTION ACTIVE**
+**Last Updated:** October 12, 2025 - 1:31 AM IST  
+**🎯 STATUS:** All Systems Healthy | ML Training Complete | Quality-First Filtering Active  
+**System Health:** ✅ **ALL SYSTEMS OPERATIONAL - STRICT QUALITY GATES ACTIVE**
 
 ---
 
@@ -54,24 +54,33 @@
 
 ---
 
-## 📊 Current Status (11:31 PM IST)
+## 📊 Current Status (1:31 AM IST - Oct 12)
 
 ### System Health
-- **Worker**: ✅ Running (just restarted with anti-FOMO filter)
-- **Tracker**: ✅ Running (healthy)
-- **Web Dashboard**: ✅ Running (http://64.227.157.221/)
-- **Paper Trader**: ✅ Running (healthy)
-- **Redis**: ✅ Running (healthy)
-- **Proxy**: ✅ Running (healthy)
+- **Worker**: ✅ Up 1h (healthy) - Actively processing feed
+- **Tracker**: ✅ Up 2h (healthy) - Monitoring 300 tokens
+- **Web Dashboard**: ✅ Up 11h (healthy) - http://64.227.157.221/
+- **Paper Trader**: ✅ Up 11h (healthy)
+- **Redis**: ✅ Up 11h (healthy)
+- **Proxy**: ✅ Up 11h (healthy)
+
+### Signal Activity
+- **Total Signals**: 619 (lifetime)
+- **Last Signal**: 6h 37min ago (Oct 11, 6:54 PM IST)
+- **Rejections (last 30min)**: Zero liquidity, Low scores, Nuanced debates
+- **Late Entry Rejections**: 0 (market quiet, no late pumps detected)
+- **Status**: ⚠️ **Quiet Market** - Strict quality gates working as expected
 
 ### Latest Deployment
-- **Commit**: `c952fcc` - **OPTIMIZED ANTI-FOMO (50%) + DUMP DETECTION**
-- **Deployed**: 11:31 PM IST
-- **Status**: Active and filtering (STRICTER!)
-- **Critical Fixes**: 
-  - Reject late entries (>50% 24h pump, was 100%)
-  - Dump-after-pump detection (24h>30% AND 1h<-5%)
-  - Data-driven from 615 signals analysis
+- **Commit**: `0ee39f7` - **ML Training Improvements + Anti-FOMO Filter**
+- **Deployed**: 1:15 AM IST (Oct 12)
+- **Status**: Active and filtering (QUALITY FIRST!)
+- **Key Features**: 
+  - ML models trained (297 clean samples, 51.8% rugs removed)
+  - Anti-FOMO filter (>50% 24h = rejected)
+  - Dump detection (24h>30% AND 1h<-5%)
+  - Liquidity gate ($25k minimum)
+  - Score threshold (6/10 minimum)
 
 ---
 
@@ -292,6 +301,7 @@ ssh root@64.227.157.221 "cd /opt/callsbotonchain/deployment && docker compose ps
 
 ## 📅 Timeline Reference (IST)
 
+### October 11, 2025
 **9:00 PM** - User identified RAFPAF late entry issue (+1,469% already pumped)  
 **9:10 PM** - Analysis confirmed: no anti-FOMO filter existed  
 **9:15 PM** - Initial anti-FOMO filter coded (MAX_24H_CHANGE_FOR_ALERT = 100%)  
@@ -303,11 +313,66 @@ ssh root@64.227.157.221 "cd /opt/callsbotonchain/deployment && docker compose ps
 **11:25 PM** - Code committed and pushed (commit `c952fcc`)  
 **11:31 PM** - Deployed to server, worker rebuilt with optimized filter  
 
-**Next Check:** October 12, 2025 - 2:00 AM IST (2.5 hours)  
-**What to monitor:** Signal quality (should be 5-30% momentum), rejection logs, fewer late entries
+### October 12, 2025
+**12:15 AM** - ML training improvements deployed (rug removal, regularization)  
+**12:17 AM** - ML models trained successfully (297 clean samples)  
+**1:15 AM** - Worker container rebuilt with latest code  
+**1:31 AM** - **Status check:** All systems healthy, quiet market (6+ hours no signals)  
 
 ---
 
-_Generated: October 11, 2025 11:31 PM IST_  
-_Status: ✅ **OPTIMIZED ANTI-FOMO FILTER (50%) + DUMP DETECTION ACTIVE**_  
-_Performance: 615 signals | +119% avg gain | 15.6% win rate | 8 moonshots (10x+)_
+## 🎯 **What to Monitor Next (6:00 AM IST Check)**
+
+### **Expected Behavior:**
+1. **Signal Flow**: Market should pick up during US/EU hours (expect 1-3 signals by morning)
+2. **Quality Gates**: Most rejections should be liquidity/score-based (not late entry)
+3. **Tracking**: 300 tokens actively monitored for performance
+
+### **Commands to Run:**
+
+#### 1. Check for New Signals
+```bash
+ssh root@64.227.157.221 "docker exec callsbot-worker python -c \"
+import sqlite3
+from datetime import datetime, timedelta
+conn = sqlite3.connect('/app/var/alerted_tokens.db')
+c = conn.cursor()
+since = (datetime.now() - timedelta(hours=6)).strftime('%Y-%m-%d %H:%M:%S')
+c.execute('SELECT COUNT(*) FROM alerted_tokens WHERE alerted_at >= ?', (since,))
+print(f'Signals (last 6h): {c.fetchone()[0]}')
+\""
+```
+
+#### 2. Check Rejection Patterns
+```bash
+ssh root@64.227.157.221 "docker logs callsbot-worker --tail 200 | grep -E 'REJECTED|LIQUIDITY|LATE ENTRY' | tail -10"
+```
+
+#### 3. Check Tracker Performance
+```bash
+ssh root@64.227.157.221 "docker logs callsbot-tracker --tail 20"
+```
+
+#### 4. Verify Container Health
+```bash
+ssh root@64.227.157.221 "cd /opt/callsbotonchain/deployment && docker compose ps"
+```
+
+### **Red Flags (Immediate Action):**
+- ❌ **No signals for 12+ hours** → Market dead OR filters too strict
+- ❌ **Worker/Tracker unhealthy** → Container restart needed
+- ❌ **All rejections are "LATE ENTRY"** → Anti-FOMO threshold too aggressive
+- ❌ **Database errors in logs** → Schema/migration issue
+
+### **Good Signs:**
+- ✅ **1-3 signals by morning** → Quality over quantity working
+- ✅ **Mix of rejections** → Liquidity, scores, occasional late entry
+- ✅ **Tracker updates every 2min** → Performance monitoring active
+- ✅ **All containers healthy** → System stability
+
+---
+
+_Generated: October 12, 2025 1:31 AM IST_  
+_Status: ✅ **ALL SYSTEMS HEALTHY - QUALITY-FIRST FILTERING ACTIVE**_  
+_Performance: 619 signals | +119% avg gain | 15.7% win rate | 8 moonshots (10x+)_  
+_ML Status: Trained (297 clean samples) | NOT enabled (needs more data)_

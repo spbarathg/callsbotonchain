@@ -411,6 +411,9 @@ class SignalProcessor:
         change_1h = stats.change_1h or 0
         change_24h = stats.change_24h or 0
         
+        # DEBUG: Log actual values to diagnose FOMO filter
+        self._log(f"🔍 FOMO CHECK: {token_address[:8]}... → 1h:{change_1h:.1f}%, 24h:{change_24h:.1f}% (threshold: {MAX_24H_CHANGE_FOR_ALERT:.0f}%)")
+        
         # Handle NaN values
         if not (change_1h == change_1h):
             change_1h = 0
@@ -427,13 +430,17 @@ class SignalProcessor:
             self._log(f"❌ REJECTED (LATE ENTRY - 1H PUMP): {token_address} - {change_1h:.1f}% > {MAX_1H_CHANGE_FOR_ALERT:.0f}% (extreme pump!)")
             return False
         
-        # Log entry type for monitoring
-        if 5 <= change_24h <= 50:
-            self._log(f"✅ EARLY MOMENTUM: {token_address} - {change_24h:.1f}% (ideal entry zone!)")
-        elif change_24h > 50:
-            self._log(f"⚠️  MODERATE PUMP: {token_address} - {change_24h:.1f}% (getting late, but within limits)")
-        else:
-            self._log(f"✅ FOMO CHECK PASSED: {token_address} - {change_24h:.1f}% in 24h")
+        # Log entry type for monitoring (CRITICAL: Must log for debugging!)
+        try:
+            if 5 <= change_24h <= 50:
+                self._log(f"✅ EARLY MOMENTUM: {token_address} - {change_24h:.1f}% (ideal entry zone!)")
+            elif change_24h > 50:
+                self._log(f"⚠️  MODERATE PUMP: {token_address} - {change_24h:.1f}% (getting late, but within limits)")
+            else:
+                self._log(f"✅ FOMO CHECK PASSED: {token_address} - {change_24h:.1f}% in 24h")
+        except Exception as e:
+            # Log the error to debug formatting issues
+            self._log(f"⚠️  ERROR in FOMO log formatting: {e} (change_24h={change_24h})")
         
         return True
     
