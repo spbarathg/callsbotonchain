@@ -157,9 +157,9 @@ def _get_float(name: str, default: float) -> float:
 
 
 # Preliminary USD thresholds
-PRELIM_USD_HIGH = _get_int("PRELIM_USD_HIGH", 2000)
-PRELIM_USD_MID = _get_int("PRELIM_USD_MID", 750)
-PRELIM_USD_LOW = _get_int("PRELIM_USD_LOW", 250)
+PRELIM_USD_HIGH = _get_int("PRELIM_USD_HIGH", 1500)  # Lowered from 2000 - more realistic
+PRELIM_USD_MID = _get_int("PRELIM_USD_MID", 500)     # Lowered from 750 - catch mid-range txs
+PRELIM_USD_LOW = _get_int("PRELIM_USD_LOW", 100)     # Lowered from 250 - catch small but real activity
 
 # Market cap buckets (USD)
 MCAP_MICRO_MAX = _get_int("MCAP_MICRO_MAX", 100_000)
@@ -343,7 +343,7 @@ MOMENTUM_1H_PUMPER = _get_int("MOMENTUM_1H_PUMPER", 20)
 # ==============================================
 # Relaxed thresholds for the nuanced evaluation path
 # OPTIMIZED: More lenient for score 5/10 tokens (was rejecting too many quality signals)
-NUANCED_SCORE_REDUCTION = _get_int("NUANCED_SCORE_REDUCTION", 1)  # Changed from 2 to 1 (less harsh penalty)
+NUANCED_SCORE_REDUCTION = _get_int("NUANCED_SCORE_REDUCTION", 0)  # Changed to 0 - no penalty for nuanced tokens
 NUANCED_LIQUIDITY_FACTOR = _get_float("NUANCED_LIQUIDITY_FACTOR", 0.5)
 NUANCED_VOL_TO_MCAP_FACTOR = _get_float("NUANCED_VOL_TO_MCAP_FACTOR", 0.5)  # Was 0.7, now 0.5 (more lenient)
 NUANCED_MCAP_FACTOR = _get_float("NUANCED_MCAP_FACTOR", 1.5)
