@@ -66,17 +66,26 @@ def _get_bool(key: str, default: bool) -> bool:
 # ============================================================================
 
 # SSRF Protection - Allowlist for external HTTP requests
-SSRF_ALLOWED_HOSTS = [
-    "api.cielo.finance",
+_allow_hosts_env = os.getenv("CALLSBOT_HTTP_ALLOW_HOSTS", ",".join([
     "api.dexscreener.com",
+    "dexscreener.com",
+    "feed-api.cielo.finance",
+    "api.cielo.finance",
     "api.geckoterminal.com",
+    "api.telegram.org",
     "price.jup.ag",
     "quote-api.jup.ag",
-    "api.telegram.org",
-]
+]))
+HTTP_ALLOW_HOSTS = {h.strip() for h in _allow_hosts_env.split(",") if h.strip()}
+
+# Backward compatibility
+SSRF_ALLOWED_HOSTS = list(HTTP_ALLOW_HOSTS)
 
 # HTTP Settings
 HTTP_TIMEOUT_SECONDS = _get_int("HTTP_TIMEOUT_SECONDS", 15)
+HTTP_TIMEOUT_FEED = _get_int("HTTP_TIMEOUT_FEED", 10)
+HTTP_TIMEOUT_STATS = _get_int("HTTP_TIMEOUT_STATS", 20)
+HTTP_TIMEOUT_TELEGRAM = _get_int("HTTP_TIMEOUT_TELEGRAM", 10)
 HTTP_MAX_RETRIES = _get_int("HTTP_MAX_RETRIES", 3)
 HTTP_BACKOFF_FACTOR = _get_float("HTTP_BACKOFF_FACTOR", 0.5)
 
@@ -88,16 +97,60 @@ HTTP_BACKOFF_FACTOR = _get_float("HTTP_BACKOFF_FACTOR", 0.5)
 # Cielo API (Primary data source)
 CIELO_API_KEY = _load_secret("CIELO_API_KEY", min_len=10)
 CIELO_BASE_URL = os.getenv("CIELO_BASE_URL", "https://api.cielo.finance").rstrip("/")
+CIELO_DISABLE_STATS = _get_bool("CIELO_DISABLE_STATS", False)
+CIELO_NEW_TRADE_ONLY = _get_bool("CIELO_NEW_TRADE_ONLY", False)
+CIELO_LIST_ID = _get_int("CIELO_LIST_ID", 0) if os.getenv("CIELO_LIST_ID") else None
+try:
+    _list_ids_raw = os.getenv("CIELO_LIST_IDS", "")
+    CIELO_LIST_IDS = []
+    if _list_ids_raw:
+        parts = [p.strip() for p in _list_ids_raw.split(",") if p.strip()]
+        for p in parts:
+            try:
+                CIELO_LIST_IDS.append(int(p))
+            except ValueError:
+                pass
+except Exception:
+    CIELO_LIST_IDS = []
+
+# Cielo Smart Money Filters
+CIELO_MIN_WALLET_PNL = _get_int("CIELO_MIN_WALLET_PNL", 1000)
+CIELO_MIN_TRADES = _get_int("CIELO_MIN_TRADES", 0)
+CIELO_MIN_WIN_RATE = _get_int("CIELO_MIN_WIN_RATE", 0)
 
 # Telegram Bot (Alerts)
 TELEGRAM_BOT_TOKEN = _load_secret("TELEGRAM_BOT_TOKEN", min_len=20)
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").strip()
+TELEGRAM_ENABLED = bool(TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID)
 
 # Telethon (User client for groups)
-TELETHON_API_ID = os.getenv("TELETHON_API_ID", "").strip()
-TELETHON_API_HASH = _load_secret("TELETHON_API_HASH", min_len=16)
-TELETHON_SESSION_FILE = os.getenv("TELETHON_SESSION_FILE", "var/relay_user.session")
-TELETHON_TARGET_CHAT_ID = os.getenv("TELETHON_TARGET_CHAT_ID", "").strip()
+try:
+    TELEGRAM_USER_API_ID = int(os.getenv("TELEGRAM_USER_API_ID", "0"))
+    TELETHON_API_ID = str(TELEGRAM_USER_API_ID) if TELEGRAM_USER_API_ID else ""
+except (ValueError, TypeError):
+    TELEGRAM_USER_API_ID = 0
+    TELETHON_API_ID = ""
+
+TELEGRAM_USER_API_HASH = os.getenv("TELEGRAM_USER_API_HASH", "")
+TELETHON_API_HASH = TELEGRAM_USER_API_HASH or _load_secret("TELETHON_API_HASH", min_len=16)
+
+TELEGRAM_USER_SESSION_FILE = os.getenv("TELEGRAM_USER_SESSION_FILE", "var/relay_user.session")
+TELETHON_SESSION_FILE = TELEGRAM_USER_SESSION_FILE or os.getenv("TELETHON_SESSION_FILE", "var/relay_user.session")
+
+try:
+    TELEGRAM_GROUP_CHAT_ID = int(os.getenv("TELEGRAM_GROUP_CHAT_ID", "0"))
+    TELETHON_TARGET_CHAT_ID = str(TELEGRAM_GROUP_CHAT_ID) if TELEGRAM_GROUP_CHAT_ID else ""
+except (ValueError, TypeError):
+    TELEGRAM_GROUP_CHAT_ID = 0
+    TELETHON_TARGET_CHAT_ID = os.getenv("TELETHON_TARGET_CHAT_ID", "").strip()
+
+# Enable Telethon only if all required fields are present
+TELETHON_ENABLED = bool(
+    TELEGRAM_USER_API_ID
+    and TELEGRAM_USER_API_HASH
+    and TELEGRAM_USER_SESSION_FILE
+    and TELEGRAM_GROUP_CHAT_ID
+)
 
 # Solana Wallet (Trading)
 SOLANA_RPC_URL = os.getenv("SOLANA_RPC_URL", "https://api.mainnet-beta.solana.com").rstrip("/")
@@ -112,12 +165,13 @@ REDIS_URL = os.getenv("REDIS_URL", "").strip()
 # ============================================================================
 
 # Scoring thresholds
-HIGH_CONFIDENCE_SCORE = _get_int("HIGH_CONFIDENCE_SCORE", 5)  # FIX: Was 7, blocking everything
+HIGH_CONFIDENCE_SCORE = _get_int("HIGH_CONFIDENCE_SCORE", 7)  # Score 7 had 20% win rate (data-driven)
 
 # Feed processing
 FETCH_INTERVAL = _get_int("FETCH_INTERVAL", 60)
 SMART_FEED_SCOPE = os.getenv("SMART_FEED_SCOPE", "trending").strip().lower()
 GENERAL_FEED_SCOPE = os.getenv("GENERAL_FEED_SCOPE", "moonshot").strip().lower()
+MIN_USD_VALUE = _get_int("MIN_USD_VALUE", 200)  # Minimum USD value for feed filtering
 
 # Dry run mode
 DRY_RUN = _get_bool("DRY_RUN", False)
@@ -147,23 +201,34 @@ BUDGET_COST_FALLBACK_STATS = _get_int("BUDGET_COST_FALLBACK_STATS", 1)
 
 # Preliminary Scoring Thresholds
 PRELIM_USD_HIGH = _get_float("PRELIM_USD_HIGH", 50000.0)
-PRELIM_USD_MED = _get_float("PRELIM_USD_MED", 10000.0)
+PRELIM_USD_MID = _get_float("PRELIM_USD_MID", 10000.0)
+PRELIM_USD_MED = _get_float("PRELIM_USD_MED", 10000.0)  # Alias for MID
+PRELIM_USD_LOW = _get_float("PRELIM_USD_LOW", 1000.0)
 PRELIM_DETAILED_MIN = _get_int("PRELIM_DETAILED_MIN", 5)  # CRITICAL FIX: Was 3
 
 # Volume Thresholds (ADJUSTED based on moonshots' median volume)
 VOL_VERY_HIGH = _get_float("VOL_VERY_HIGH", 150000.0)
 VOL_HIGH = _get_float("VOL_HIGH", 50000.0)
 VOL_MED = _get_float("VOL_MED", 10000.0)
+VOL_24H_MIN_FOR_ALERT = _get_float("VOL_24H_MIN_FOR_ALERT", 0.0)
 
 # Market Cap
 MCAP_VERY_LOW = _get_float("MCAP_VERY_LOW", 50000.0)
 MCAP_LOW = _get_float("MCAP_LOW", 200000.0)
 MCAP_MED = _get_float("MCAP_MED", 1000000.0)
+MCAP_MICRO_MAX = _get_float("MCAP_MICRO_MAX", 100000.0)
+MCAP_SMALL_MAX = _get_float("MCAP_SMALL_MAX", 500000.0)
+MCAP_MID_MAX = _get_float("MCAP_MID_MAX", 5000000.0)
+MICROCAP_SWEET_MIN = _get_float("MICROCAP_SWEET_MIN", 50000.0)
+MICROCAP_SWEET_MAX = _get_float("MICROCAP_SWEET_MAX", 200000.0)
 
 # Momentum
 MOMENTUM_1H_HIGH = _get_float("MOMENTUM_1H_HIGH", 10.0)
 MOMENTUM_1H_MED = _get_float("MOMENTUM_1H_MED", 5.0)
+MOMENTUM_1H_STRONG = _get_float("MOMENTUM_1H_STRONG", 15.0)
+MOMENTUM_1H_PUMPER = _get_float("MOMENTUM_1H_PUMPER", 30.0)
 MOMENTUM_24H_HIGH = _get_float("MOMENTUM_24H_HIGH", 50.0)
+DRAW_24H_MAJOR = _get_float("DRAW_24H_MAJOR", -30.0)  # Major drawdown threshold
 
 # ANTI-FOMO FILTER: Reject tokens that already pumped (late entry risk)
 # Based on 615 signals analysis: 15.6% win rate, 119% avg gain
@@ -179,6 +244,21 @@ MAX_1H_CHANGE_FOR_ALERT = _get_float("MAX_1H_CHANGE_FOR_ALERT", 200.0)   # OPTIM
 STORAGE_BASE_DIR = os.getenv("STORAGE_BASE_DIR", "var")
 STORAGE_DB_FILE = os.getenv("STORAGE_DB_FILE", "var/admin.db")
 STORAGE_RETENTION_DAYS = _get_int("STORAGE_RETENTION_DAYS", 30)
+
+# Database files (backward compatibility)
+DB_FILE = os.getenv("DB_FILE", os.getenv("CALLSBOT_DB_FILE", "var/alerted_tokens.db"))
+DB_RETENTION_HOURS = _get_int("DB_RETENTION_HOURS", 720)  # 30 days
+
+# Budget tracking file
+CALLSBOT_BUDGET_FILE = os.getenv("CALLSBOT_BUDGET_FILE", "var/budget.json")
+
+# Budget settings
+BUDGET_ENABLED = _get_bool("BUDGET_ENABLED", True)
+BUDGET_PER_MINUTE_MAX = _get_int("BUDGET_PER_MINUTE_MAX", 15)
+BUDGET_PER_DAY_MAX = _get_int("BUDGET_PER_DAY_MAX", 10000)
+BUDGET_FEED_COST = _get_int("BUDGET_FEED_COST", 0)
+BUDGET_STATS_COST = _get_int("BUDGET_STATS_COST", 1)
+BUDGET_HARD_BLOCK = _get_bool("BUDGET_HARD_BLOCK", False)
 
 
 # ============================================================================
@@ -211,24 +291,35 @@ BLOCKLIST_TOKENS = [
     "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",  # USDT
 ]
 
+# Stable mints to exclude
+STABLE_MINTS = [
+    "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",  # USDC
+    "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",  # USDT
+    "So11111111111111111111111111111111111111112",   # Wrapped SOL
+]
+
 # Market cap limits
 MAX_MARKET_CAP_USD = _get_float("MAX_MARKET_CAP_USD", 50_000_000.0)
+MAX_MARKET_CAP_FOR_DEFAULT_ALERT = _get_float("MAX_MARKET_CAP_FOR_DEFAULT_ALERT", 50_000_000.0)
+LARGE_CAP_MOMENTUM_GATE_1H = _get_float("LARGE_CAP_MOMENTUM_GATE_1H", 5.0)
+LARGE_CAP_HOLDER_STATS_MCAP_USD = _get_float("LARGE_CAP_HOLDER_STATS_MCAP_USD", 1_000_000.0)
 
 
 # ============================================================================
 # RISK GATES (Data-Driven)
 # ============================================================================
 
-# Liquidity Gate - ADJUSTED: $20k threshold for better signal flow
+# Liquidity Gate - OPTIMIZED: $30k threshold (moonshots had $117k median, losers $30k)
 USE_LIQUIDITY_FILTER = _get_bool("USE_LIQUIDITY_FILTER", True)
 MIN_LIQUIDITY_USD = _get_float("MIN_LIQUIDITY_USD", min(
-    max(_get_float("MIN_LIQUIDITY_USD_RAW", 20000.0), 20000.0),
+    max(_get_float("MIN_LIQUIDITY_USD_RAW", 30000.0), 30000.0),
     50000.0
 ))
 EXCELLENT_LIQUIDITY_USD = _get_float("EXCELLENT_LIQUIDITY_USD", 50000.0)
 
 # Volume to Liquidity Ratio
 VOL_TO_LIQ_RATIO_MIN = _get_float("VOL_TO_LIQ_RATIO_MIN", 0.0)
+VOL_TO_MCAP_RATIO_MIN = _get_float("VOL_TO_MCAP_RATIO_MIN", 0.0)
 
 # Security Gates
 REQUIRE_LP_LOCKED = _get_bool("REQUIRE_LP_LOCKED", False)
@@ -239,6 +330,18 @@ ALLOW_UNKNOWN_SECURITY = _get_bool("ALLOW_UNKNOWN_SECURITY", True)
 MAX_TOP10_CONCENTRATION = _get_float("MAX_TOP10_CONCENTRATION", 18.0)
 MAX_BUNDLERS_PERCENT = _get_float("MAX_BUNDLERS_PERCENT", 100.0)
 MAX_INSIDERS_PERCENT = _get_float("MAX_INSIDERS_PERCENT", 100.0)
+ENFORCE_BUNDLER_CAP = _get_bool("ENFORCE_BUNDLER_CAP", False)
+ENFORCE_INSIDER_CAP = _get_bool("ENFORCE_INSIDER_CAP", False)
+REQUIRE_HOLDER_STATS_FOR_LARGE_CAP_ALERT = _get_bool("REQUIRE_HOLDER_STATS_FOR_LARGE_CAP_ALERT", False)
+
+# Nuanced Scoring Factors (for flexible gating)
+NUANCED_SCORE_REDUCTION = _get_int("NUANCED_SCORE_REDUCTION", 2)
+NUANCED_LIQUIDITY_FACTOR = _get_float("NUANCED_LIQUIDITY_FACTOR", 0.5)
+NUANCED_VOL_TO_MCAP_FACTOR = _get_float("NUANCED_VOL_TO_MCAP_FACTOR", 0.5)
+NUANCED_MCAP_FACTOR = _get_float("NUANCED_MCAP_FACTOR", 1.5)
+NUANCED_TOP10_CONCENTRATION_BUFFER = _get_float("NUANCED_TOP10_CONCENTRATION_BUFFER", 5.0)
+NUANCED_BUNDLERS_BUFFER = _get_float("NUANCED_BUNDLERS_BUFFER", 5.0)
+NUANCED_INSIDERS_BUFFER = _get_float("NUANCED_INSIDERS_BUFFER", 5.0)
 
 # Momentum Requirements - ADJUSTED: Was blocking all new tokens
 REQUIRE_MOMENTUM_1H_MIN_FOR_ALERT = _get_float("REQUIRE_MOMENTUM_1H_MIN_FOR_ALERT", 0.0)
@@ -256,8 +359,8 @@ SMART_MONEY_SCORE_BONUS = _get_int("SMART_MONEY_SCORE_BONUS", 0)  # REMOVED
 REQUIRE_VELOCITY_MIN_SCORE_FOR_ALERT = _get_int("REQUIRE_VELOCITY_MIN_SCORE_FOR_ALERT", 0)
 
 # Cycle Balance
-SMART_CYCLE_MIN_SCORE = _get_int("SMART_CYCLE_MIN_SCORE", 5)
-GENERAL_CYCLE_MIN_SCORE = _get_int("GENERAL_CYCLE_MIN_SCORE", 5)  # ADJUSTED for better flow
+SMART_CYCLE_MIN_SCORE = _get_int("SMART_CYCLE_MIN_SCORE", 7)
+GENERAL_CYCLE_MIN_SCORE = _get_int("GENERAL_CYCLE_MIN_SCORE", 7)  # Lower scores caught moonshots (data-driven)
 
 # Multi-signal Confirmation
 REQUIRE_MULTI_SIGNAL = _get_bool("REQUIRE_MULTI_SIGNAL", False)
@@ -286,8 +389,8 @@ GATE_PRESETS = {
     },
     "balanced": {
         "MIN_LIQUIDITY_USD": 30000.0,
-        "HIGH_CONFIDENCE_SCORE": 5,
-        "GENERAL_CYCLE_MIN_SCORE": 5,
+        "HIGH_CONFIDENCE_SCORE": 7,
+        "GENERAL_CYCLE_MIN_SCORE": 7,
         "REQUIRE_LP_LOCKED": False,
         "REQUIRE_MINT_REVOKED": False,
         "MAX_TOP10_CONCENTRATION": 22.0,

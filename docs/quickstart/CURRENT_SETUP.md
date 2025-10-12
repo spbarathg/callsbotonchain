@@ -1,8 +1,45 @@
-# Current Bot Setup - October 6, 2025
+# Current Bot Setup - October 13, 2025
 
-**Status:** 🟢 DEPLOYED & ACTIVE  
-**Commit:** `d798595`  
-**Analysis Basis:** 2,189 signals with full performance tracking
+**Status:** 🟢 DEPLOYED & ACTIVE
+**Server:** `64.227.157.221`
+**Commit:** `1c186c1`
+**Analysis Basis:** 673 signals with full performance tracking (55.29% win rate)
+
+---
+
+## 📍 IMPORTANT: Log & Database Locations
+
+### ✅ Active Locations (Use These)
+```bash
+# Logs
+/opt/callsbotonchain/deployment/data/logs/
+
+# Databases
+/opt/callsbotonchain/deployment/var/
+```
+
+### ❌ Deprecated Locations (Do Not Use)
+```bash
+# Old logs (empty, cleaned up)
+/opt/callsbotonchain/data/logs/
+
+# Old databases (empty)
+/opt/callsbotonchain/var/
+```
+
+### 🔍 Quick Verification
+```bash
+# Run verification script
+/opt/callsbotonchain/scripts/verify_logs.sh
+
+# View active logs
+tail -f /opt/callsbotonchain/deployment/data/logs/stdout.log
+
+# Check API health
+curl http://localhost/api/v2/quick-stats
+```
+
+**📖 Full Documentation:** See `/opt/callsbotonchain/LOG_LOCATIONS.md`
 
 ---
 

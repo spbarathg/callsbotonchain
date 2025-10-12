@@ -261,7 +261,7 @@ def signal_handler(sig, frame):
 
 def initialize_bot() -> bool:
 	"""Setup signals, enforce singleton, init DB, and emit startup notification."""
-	from config.config import HIGH_CONFIDENCE_SCORE, FETCH_INTERVAL
+	from app.config_unified import HIGH_CONFIDENCE_SCORE, FETCH_INTERVAL
 	try:
 		signal.signal(signal.SIGINT, signal_handler)
 		signal.signal(signal.SIGTERM, signal_handler)
@@ -305,7 +305,7 @@ def initialize_bot() -> bool:
 
 def handle_cooldown(feed_error: Optional[str], retry_after_sec: int) -> None:
 	"""Sleep with logging and metrics when upstream signals a cooldown event."""
-	from config.config import FETCH_INTERVAL
+	from app.config_unified import FETCH_INTERVAL
 	if feed_error == "quota_exceeded" and retry_after_sec <= 0:
 		retry_after_sec = max(300, FETCH_INTERVAL)
 	elif retry_after_sec <= 0:
@@ -350,7 +350,7 @@ def _select_token_and_usd(tx: dict) -> Tuple[Optional[str], float]:
 
 def process_feed_item(tx: dict, is_smart_cycle: bool, session_alerted_tokens: set, last_alert_time: float) -> Tuple[str, Optional[float], int, Optional[str]]:
 	"""Process one feed item. Returns (status, new_last_alert_time, api_saved_delta, alerted_token)."""
-	from config.config import DEBUG_PRELIM, TELEGRAM_ALERT_MIN_INTERVAL, REQUIRE_SMART_MONEY_FOR_ALERT, REQUIRE_VELOCITY_MIN_SCORE_FOR_ALERT, PRELIM_DETAILED_MIN, GENERAL_CYCLE_MIN_SCORE
+	from app.config_unified import DEBUG_PRELIM, TELEGRAM_ALERT_MIN_INTERVAL, REQUIRE_SMART_MONEY_FOR_ALERT, REQUIRE_VELOCITY_MIN_SCORE_FOR_ALERT, PRELIM_DETAILED_MIN, GENERAL_CYCLE_MIN_SCORE
 	# relay functions are already imported at module level with fallbacks
 
 	token_address, usd_value = _select_token_and_usd(tx)
@@ -385,7 +385,7 @@ def process_feed_item(tx: dict, is_smart_cycle: bool, session_alerted_tokens: se
 	# gating
 	# Phase 2: Multi-signal confirmation prior to expensive stats calls
 	try:
-		from config.config import REQUIRE_MULTI_SIGNAL, MULTI_SIGNAL_WINDOW_SEC, MULTI_SIGNAL_MIN_COUNT, MIN_TOKEN_AGE_MINUTES
+		from app.config_unified import REQUIRE_MULTI_SIGNAL, MULTI_SIGNAL_WINDOW_SEC, MULTI_SIGNAL_MIN_COUNT, MIN_TOKEN_AGE_MINUTES
 	except Exception:
 		REQUIRE_MULTI_SIGNAL, MULTI_SIGNAL_WINDOW_SEC, MULTI_SIGNAL_MIN_COUNT, MIN_TOKEN_AGE_MINUTES = True, 300, 2, 0
 
@@ -441,7 +441,7 @@ def process_feed_item(tx: dict, is_smart_cycle: bool, session_alerted_tokens: se
 	# Winner median: $17,811 | Loser median: $0
 	# Expected impact: Win rate 14% → 30-40%
 	try:
-		from config.config import MIN_LIQUIDITY_USD, USE_LIQUIDITY_FILTER, EXCELLENT_LIQUIDITY_USD
+		from app.config_unified import MIN_LIQUIDITY_USD, USE_LIQUIDITY_FILTER, EXCELLENT_LIQUIDITY_USD
 		
 		if USE_LIQUIDITY_FILTER:
 			# Extract liquidity (handle multiple possible structures)
@@ -515,7 +515,7 @@ def process_feed_item(tx: dict, is_smart_cycle: bool, session_alerted_tokens: se
 
 	# Phase 2: Quick security hard gate before expensive scoring paths
 	try:
-		from config.config import REQUIRE_LP_LOCKED, REQUIRE_MINT_REVOKED, ALLOW_UNKNOWN_SECURITY
+		from app.config_unified import REQUIRE_LP_LOCKED, REQUIRE_MINT_REVOKED, ALLOW_UNKNOWN_SECURITY
 		security = (stats or {}).get('security') or {}
 		liq = (stats or {}).get('liquidity') or {}
 		lp_locked = (
@@ -882,7 +882,7 @@ def run_bot():
         _fallback_feed_from_geckoterminal = None  # type: ignore
         _fallback_feed_from_dexscreener = None  # type: ignore
     try:
-        from config.config import CURRENT_GATES
+        from app.config_unified import CURRENT_GATES
     except Exception:
         CURRENT_GATES = None
 
@@ -898,8 +898,8 @@ def run_bot():
     api_calls_saved = 0  # Track credit optimization
     session_alerted_tokens = set()
     last_track_time = 0
-    
-    from config.config import HIGH_CONFIDENCE_SCORE, FETCH_INTERVAL
+
+    from app.config_unified import HIGH_CONFIDENCE_SCORE, FETCH_INTERVAL
     _out("SMART MONEY ENHANCED SOLANA MEMECOIN BOT STARTED")
     _out(f"Configuration: Score threshold = {HIGH_CONFIDENCE_SCORE}, Fetch interval = {FETCH_INTERVAL}s")
     if 'CURRENT_GATES' in globals() and CURRENT_GATES:
