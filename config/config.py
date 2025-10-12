@@ -343,7 +343,7 @@ MOMENTUM_1H_PUMPER = _get_int("MOMENTUM_1H_PUMPER", 20)
 # ==============================================
 # Relaxed thresholds for the nuanced evaluation path
 # OPTIMIZED: More lenient for score 5/10 tokens (was rejecting too many quality signals)
-NUANCED_SCORE_REDUCTION = _get_int("NUANCED_SCORE_REDUCTION", 2)  # Was 1, now 2 (allow score 5/10)
+NUANCED_SCORE_REDUCTION = _get_int("NUANCED_SCORE_REDUCTION", 1)  # Changed from 2 to 1 (less harsh penalty)
 NUANCED_LIQUIDITY_FACTOR = _get_float("NUANCED_LIQUIDITY_FACTOR", 0.5)
 NUANCED_VOL_TO_MCAP_FACTOR = _get_float("NUANCED_VOL_TO_MCAP_FACTOR", 0.5)  # Was 0.7, now 0.5 (more lenient)
 NUANCED_MCAP_FACTOR = _get_float("NUANCED_MCAP_FACTOR", 1.5)
