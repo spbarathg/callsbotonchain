@@ -204,7 +204,7 @@ PRELIM_USD_HIGH = _get_float("PRELIM_USD_HIGH", 50000.0)
 PRELIM_USD_MID = _get_float("PRELIM_USD_MID", 10000.0)
 PRELIM_USD_MED = _get_float("PRELIM_USD_MED", 10000.0)  # Alias for MID
 PRELIM_USD_LOW = _get_float("PRELIM_USD_LOW", 1000.0)
-PRELIM_DETAILED_MIN = _get_int("PRELIM_DETAILED_MIN", 5)  # CRITICAL FIX: Was 3
+PRELIM_DETAILED_MIN = _get_int("PRELIM_DETAILED_MIN", 4)  # Lowered from 5 to catch more early signals
 
 # Volume Thresholds (ADJUSTED based on moonshots' median volume)
 VOL_VERY_HIGH = _get_float("VOL_VERY_HIGH", 150000.0)
@@ -231,10 +231,10 @@ MOMENTUM_24H_HIGH = _get_float("MOMENTUM_24H_HIGH", 50.0)
 DRAW_24H_MAJOR = _get_float("DRAW_24H_MAJOR", -30.0)  # Major drawdown threshold
 
 # ANTI-FOMO FILTER: Reject tokens that already pumped (late entry risk)
-# Based on 615 signals analysis: 15.6% win rate, 119% avg gain
-# Pattern: Winners at 0-50% momentum, Late entries >50% often dump
-MAX_24H_CHANGE_FOR_ALERT = _get_float("MAX_24H_CHANGE_FOR_ALERT", 50.0)  # OPTIMIZED: Was 100%, now 50%
-MAX_1H_CHANGE_FOR_ALERT = _get_float("MAX_1H_CHANGE_FOR_ALERT", 200.0)   # OPTIMIZED: Was 300%, now 200%
+# DATA-DRIVEN UPDATE: Winners had 24h change up to +646%, mega winner had +186%
+# Raised threshold to avoid blocking legitimate high-momentum opportunities
+MAX_24H_CHANGE_FOR_ALERT = _get_float("MAX_24H_CHANGE_FOR_ALERT", 150.0)  # Raised from 50% to 150%
+MAX_1H_CHANGE_FOR_ALERT = _get_float("MAX_1H_CHANGE_FOR_ALERT", 300.0)   # Raised back to 300%
 
 
 # ============================================================================
@@ -309,12 +309,10 @@ LARGE_CAP_HOLDER_STATS_MCAP_USD = _get_float("LARGE_CAP_HOLDER_STATS_MCAP_USD", 
 # RISK GATES (Data-Driven)
 # ============================================================================
 
-# Liquidity Gate - OPTIMIZED: $30k threshold (moonshots had $117k median, losers $30k)
+# Liquidity Gate - DATA-DRIVEN: Winners had $13k-$159k range (median $35k)
+# 35% of winners had $10k-$30k liquidity, so lowered threshold to $20k
 USE_LIQUIDITY_FILTER = _get_bool("USE_LIQUIDITY_FILTER", True)
-MIN_LIQUIDITY_USD = _get_float("MIN_LIQUIDITY_USD", min(
-    max(_get_float("MIN_LIQUIDITY_USD_RAW", 30000.0), 30000.0),
-    50000.0
-))
+MIN_LIQUIDITY_USD = _get_float("MIN_LIQUIDITY_USD", 20000.0)  # Lowered from 30k, removed hardcoded clamps
 EXCELLENT_LIQUIDITY_USD = _get_float("EXCELLENT_LIQUIDITY_USD", 50000.0)
 
 # Volume to Liquidity Ratio
@@ -358,9 +356,9 @@ SMART_MONEY_SCORE_BONUS = _get_int("SMART_MONEY_SCORE_BONUS", 0)  # REMOVED
 # Velocity
 REQUIRE_VELOCITY_MIN_SCORE_FOR_ALERT = _get_int("REQUIRE_VELOCITY_MIN_SCORE_FOR_ALERT", 0)
 
-# Cycle Balance
+# Cycle Balance - DATA-DRIVEN: 26% of winners had scores 4-6, would be blocked at 7
 SMART_CYCLE_MIN_SCORE = _get_int("SMART_CYCLE_MIN_SCORE", 7)
-GENERAL_CYCLE_MIN_SCORE = _get_int("GENERAL_CYCLE_MIN_SCORE", 7)  # Lower scores caught moonshots (data-driven)
+GENERAL_CYCLE_MIN_SCORE = _get_int("GENERAL_CYCLE_MIN_SCORE", 6)  # Lowered from 7 to 6 to catch more winners
 
 # Multi-signal Confirmation
 REQUIRE_MULTI_SIGNAL = _get_bool("REQUIRE_MULTI_SIGNAL", False)

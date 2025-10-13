@@ -747,38 +747,38 @@ def score_token(stats: Dict[str, Any], smart_money_detected: bool = False, token
     change_1h = stats.get('change', {}).get('1h', 0)
     change_24h = stats.get('change', {}).get('24h', 0)
     
-    # === EARLY MOMENTUM BONUS (IDEAL ENTRY ZONE: 5-30% in 24h) ===
-    # Reward tokens in the sweet spot - not flat, not pumped, just starting to move
-    # This is THE optimal entry point for maximum gains
-    if 5 <= (change_24h or 0) <= 30:
+    # === EARLY MOMENTUM BONUS (EXPANDED RANGE: 5-100% in 24h) ===
+    # Reward tokens in the sweet spot - not flat, not extreme, showing momentum
+    # DATA: Winners averaged +37% 24h change, many had >30%
+    if 5 <= (change_24h or 0) <= 100:  # Expanded from 30% to 100%
         score += 2  # Big bonus for ideal entry zone
         scoring_details.append(f"🎯 Early Entry: +2 ({(change_24h or 0):.1f}% - IDEAL MOMENTUM ZONE!)")
     # === END EARLY MOMENTUM BONUS ===
     
-    # Short-term momentum (1h)
+    # Short-term momentum (1h) - REVISED TO REWARD DIP BUYING
+    # DATA: 45% of winners had negative 1h momentum, mega winners avg -7.1%
     if (change_1h or 0) > max(MOMENTUM_1H_STRONG, MOMENTUM_1H_PUMPER):
         score += 2
         scoring_details.append(f"Momentum: +2 ({(change_1h or 0):.1f}% - strong pump)")
     elif (change_1h or 0) > 0:
         score += 1
         scoring_details.append(f"Momentum: +1 ({(change_1h or 0):.1f}% - positive)")
+    # NEW: Reward dip buying (negative 1h but positive 24h trend)
+    elif (change_1h or 0) < 0 and (change_24h or 0) > 0:
+        score += 1  # Same bonus as positive momentum
+        scoring_details.append(f"🎯 Dip Buy: +1 ({(change_1h or 0):.1f}% 1h, {(change_24h or 0):.1f}% 24h - buying the dip!)")
 
     # Penalize if 24h is extremely negative (might be dump)
     if (change_24h or 0) < DRAW_24H_MAJOR:
         score -= 1
         scoring_details.append(f"Risk: -1 ({(change_24h or 0):.1f}% - major dump risk)")
-    
-    # ANTI-FOMO PENALTY: Penalize tokens that already pumped too much (late entry!)
-    # This ensures we catch tokens EARLY, not after they've mooned
-    # Note: Final rejection happens in gating (bot.py FOMO filter), this just reduces score
-    
-    # CRITICAL: Dump-after-pump detection (already peaked, now declining)
-    if (change_24h or 0) > 30 and (change_1h or 0) < -5:
-        score -= 3
-        scoring_details.append(f"🚨 DUMP AFTER PUMP: +{(change_24h or 0):.1f}% (24h) but {(change_1h or 0):.1f}% (1h) - Already peaked! -3 pts")
-    elif (change_24h or 0) > 50:  # Already pumped >50% in 24h
-        score -= 2
-        scoring_details.append(f"⚠️ Late Entry Risk: -2 ({(change_24h or 0):.1f}% already pumped in 24h)")
+
+    # ANTI-FOMO PENALTY: Only penalize extreme late entry (>200% in 24h)
+    # REMOVED: "Dump-after-pump" penalty - it was normal consolidation, not a sell signal
+    # DATA: Winners had 24h change up to +646%, mega winner had +186%
+    if (change_24h or 0) > 200:  # Raised from 50% to 200%
+        score -= 1  # Reduced from -2 to -1
+        scoring_details.append(f"⚠️ Late Entry Risk: -1 ({(change_24h or 0):.1f}% already pumped in 24h)")
 
     # Diminishing returns: if smart money but community is low, cap total bonus
     if smart_money_detected and community_bonus == 0:
