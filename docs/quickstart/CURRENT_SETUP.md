@@ -1,9 +1,25 @@
 # Current Bot Setup - October 13, 2025
 
-**Status:** 🟢 DEPLOYED & ACTIVE
+**Status:** 🟢 DEPLOYED & ACTIVE (Updated 22:11 UTC / 03:41 IST)
 **Server:** `64.227.157.221`
-**Commit:** `1c186c1`
+**Commit:** `0dc9229` (Fixed: Removed conflicting dump-after-pump filter)
 **Analysis Basis:** 673 signals with full performance tracking (55.29% win rate)
+
+---
+
+## ⏰ TIMEZONE REFERENCE (IMPORTANT!)
+
+**Server Time:** UTC (Coordinated Universal Time)  
+**IST (India Standard Time):** UTC + 5:30 (5 hours 30 minutes ahead)
+
+**Quick Conversion Examples:**
+- **00:00 UTC** = **05:30 IST** (12 midnight UTC = 5:30 AM IST)
+- **12:00 UTC** = **17:30 IST** (12 noon UTC = 5:30 PM IST)
+- **18:00 UTC** = **23:30 IST** (6 PM UTC = 11:30 PM IST)
+- **23:30 UTC** = **05:00 IST (next day)** (11:30 PM UTC = 5 AM next day IST)
+
+**⚠️ COMMON MISTAKE:** IST is NOT UTC+5:00, it's UTC+5:30!  
+When reading timestamps, always add **5 hours and 30 minutes** to UTC to get IST.
 
 ---
 
@@ -558,6 +574,32 @@ If win rate drops below 10%:
 **Reason:** Analysis of 2,189 signals revealed inverted scoring and anti-predictive smart money detection.
 
 **Expected Impact:** Win rate 11.3% → 15-20%, Avg return 1.6x → 2.5-3.5x
+
+---
+
+### **October 13, 2025 22:11 UTC / 03:41 IST - Critical Bug Fix**
+**Commit:** `0dc9229`
+
+**Changes:**
+- Removed conflicting "dump-after-pump" filter in `bot.py` (lines 497-502)
+
+**Reason:** 
+The dump-after-pump rejection logic was contradicting the data-driven changes in `analyze_token.py`. It was blocking tokens with the pattern: positive 24h momentum (+30%) but negative 1h momentum (-5%). This pattern is NORMAL consolidation for 45% of winners. Mega winners averaged -7.1% 1h momentum.
+
+**Technical Details:**
+```python
+# REMOVED (was blocking winners):
+if change_24h > 30 and change_1h < -5:
+    return "skipped"  # This was rejecting 45% of potential winners!
+```
+
+**Expected Impact:**
+- Catch 45% more winners (those with negative 1h momentum)
+- Aligns with Change 3.1 (dip buying bonus)
+- Better entry points during healthy consolidation
+
+**Deployment Time:** October 13, 2025 22:11 UTC (03:41 IST)  
+**Bot Restarted:** Process ID 3589815
 
 ---
 
