@@ -41,21 +41,11 @@ def _select_valid_number(primary: Any, fallback: Any) -> float:
 def init_db():
     """
     Initialize database schema and run migrations.
-    
+
     Creates base tables if they don't exist, then runs any pending migrations
     to bring the schema up to the latest version.
     """
-    # First, run migrations
-    try:
-        from app.migrations import get_signals_migrations
-        runner = get_signals_migrations()
-        current_version, applied = runner.run()
-        if applied > 0:
-            print(f"Applied {applied} database migration(s). Current version: {current_version}")
-    except Exception as e:
-        print(f"Warning: Migration system error: {e}")
-        # Continue with legacy init_db logic as fallback
-    
+    # FIRST: Create base tables (migrations depend on these existing)
     conn = _get_conn()
     c = conn.cursor()
 
@@ -248,6 +238,18 @@ def init_db():
             conn.rollback()
             raise
     conn.close()
+
+    # SECOND: Run migrations (now that base tables exist)
+    try:
+        from app.migrations import get_signals_migrations
+        runner = get_signals_migrations()
+        current_version, applied = runner.run()
+        if applied > 0:
+            print(f"Applied {applied} database migration(s). Current version: {current_version}")
+    except Exception as e:
+        print(f"Warning: Migration system error: {e}")
+        import traceback
+        traceback.print_exc()
 
 
 def has_been_alerted(token_address: str) -> bool:

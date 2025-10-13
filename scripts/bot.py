@@ -48,6 +48,8 @@ from app.storage import (
 	record_alert_with_metadata,
 	record_token_activity,
 	get_recent_token_signals,
+	record_transaction_snapshot,
+	record_wallet_first_buy,
 )
 
 # Optional Prometheus metrics (enable with CALLSBOT_METRICS_ENABLED=true)
@@ -705,7 +707,7 @@ def process_feed_item(tx: dict, is_smart_cycle: bool, session_alerted_tokens: se
 	try:
 		# vel_snap = get_token_velocity(token_address, minutes_back=15) or {}
 		vel_snap = {}
-		
+
 		# Calculate token age if available
 		token_age_minutes = None
 		try:
@@ -716,7 +718,7 @@ def process_feed_item(tx: dict, is_smart_cycle: bool, session_alerted_tokens: se
 				token_age_minutes = (datetime.now() - first_dt).total_seconds() / 60.0
 		except Exception:
 			pass
-		
+
 		alert_metadata = {
 			'token_age_minutes': token_age_minutes,
 			'unique_traders_15m': vel_snap.get('unique_traders'),
@@ -732,7 +734,7 @@ def process_feed_item(tx: dict, is_smart_cycle: bool, session_alerted_tokens: se
 			'feed_source': stats.get("_source") or "unknown",
 			'dex_name': tx.get('dex'),
 		}
-		
+
 		record_alert_with_metadata(
 			token_address=token_address,
 			preliminary_score=preliminary_score,
@@ -741,6 +743,43 @@ def process_feed_item(tx: dict, is_smart_cycle: bool, session_alerted_tokens: se
 			stats=stats,
 			alert_metadata=alert_metadata
 		)
+
+		# Record the initial transaction that triggered this alert
+		try:
+			tx_signature = tx.get('signature') or tx.get('tx_hash') or f"alert_{token_address}_{int(time.time())}"
+			from_wallet = tx.get('from') or tx.get('wallet') or trader
+			to_wallet = tx.get('to')
+			tx_type = tx.get('tx_type', 'buy')
+			dex = tx.get('dex', 'unknown')
+
+			record_transaction_snapshot(
+				token_address=token_address,
+				tx_signature=tx_signature,
+				timestamp=time.time(),
+				from_wallet=from_wallet,
+				to_wallet=to_wallet,
+				amount=None,  # Not always available in feed
+				amount_usd=usd_value,
+				tx_type=tx_type,
+				dex=dex,
+				is_smart_money=smart_involved
+			)
+
+			# Record wallet first buy if we have wallet info
+			if from_wallet:
+				record_wallet_first_buy(
+					token_address=token_address,
+					wallet_address=from_wallet,
+					timestamp=time.time(),
+					amount=None,  # Not always available
+					amount_usd=usd_value,
+					price_usd=baseline_price,
+					is_smart_money=smart_involved,
+					wallet_pnl_history=None  # Could extract if available
+				)
+		except Exception as e:
+			_out(f"Warning: Could not record transaction snapshot: {e}")
+
 	except Exception as e:
 		_out(f"Warning: Could not record alert metadata: {e}")
 	try:
