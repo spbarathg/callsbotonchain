@@ -979,7 +979,7 @@ def create_app() -> Flask:
                                NULLIF(s.last_liquidity_usd,0),
                                NULLIF(s.last_volume_24h_usd,0),
                                s.peak_drawdown_pct,
-                               s.outcome
+                               CASE WHEN s.is_rug = 1 THEN 'rug' ELSE NULL END AS outcome
                         FROM alerted_tokens t
                         LEFT JOIN alerted_token_stats s ON s.token_address = t.token_address
                         ORDER BY datetime(COALESCE(s.last_checked_at, t.alerted_at)) DESC
@@ -1003,7 +1003,7 @@ def create_app() -> Flask:
                                NULLIF(s.last_liquidity_usd,0),
                                NULLIF(s.last_volume_24h_usd,0),
                                s.peak_drawdown_pct,
-                               s.outcome
+                               CASE WHEN s.is_rug = 1 THEN 'rug' ELSE NULL END AS outcome
                         FROM alerted_tokens t
                         LEFT JOIN alerted_token_stats s ON s.token_address = t.token_address
                         ORDER BY datetime(COALESCE(s.last_checked_at, t.alerted_at)) DESC
@@ -1527,7 +1527,7 @@ def _signals_metrics(db_path: str) -> Dict[str, Any]:
         out["count_10x_plus"] = int(ge10x)
         out["count_tracked"] = int(denom_pos)
         # Rug rate
-        cur.execute("SELECT SUM(CASE WHEN outcome='rug' THEN 1 ELSE 0 END), COUNT(1) FROM alerted_token_stats")
+        cur.execute("SELECT SUM(CASE WHEN is_rug = 1 THEN 1 ELSE 0 END), COUNT(1) FROM alerted_token_stats")
         r = cur.fetchone(); rugs, n = (r or (0, 0))
         out["rug_rate"] = (float(rugs) / float(n)) if n else 0.0
         # Median time to peak price (seconds)
