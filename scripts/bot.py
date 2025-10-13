@@ -494,11 +494,12 @@ def process_feed_item(tx: dict, is_smart_cycle: bool, session_alerted_tokens: se
 			_out(f"❌ REJECTED (LATE ENTRY - 1H PUMP): {token_address} - {change_1h:.1f}% > {MAX_1H_CHANGE_FOR_ALERT:.0f}% (extreme pump!)")
 			return "skipped", None, 0, None
 		
-		# CRITICAL: Reject dump-after-pump (token already peaked, now declining)
-		# This catches tokens that pumped 30%+ but are now dumping (1h < -5%)
-		if change_24h > 30 and change_1h < -5:
-			_out(f"❌ REJECTED (DUMP AFTER PUMP): {token_address} - +{change_24h:.1f}% (24h) but {change_1h:.1f}% (1h) - Already peaked!")
-			return "skipped", None, 0, None
+		# REMOVED: "Dump-after-pump" filter - it was penalizing normal consolidation
+		# DATA: 45% of winners had negative 1h momentum, mega winners avg -7.1%
+		# This consolidation pattern (24h up, 1h down) is NORMAL for winners
+		# if change_24h > 30 and change_1h < -5:
+		# 	_out(f"❌ REJECTED (DUMP AFTER PUMP): {token_address} - +{change_24h:.1f}% (24h) but {change_1h:.1f}% (1h) - Already peaked!")
+		# 	return "skipped", None, 0, None
 		
 		# Log entry quality for monitoring (helps identify optimal entry zones)
 		if 5 <= change_24h <= 30:
