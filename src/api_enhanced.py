@@ -506,6 +506,202 @@ def get_hourly_heatmap() -> Dict[str, Any]:
     }
 
 
+# ============================================================================
+# COMPREHENSIVE TOKEN TRACKING ENDPOINTS
+# ============================================================================
+
+def get_token_detail(token_address: str) -> Dict[str, Any]:
+    """
+    Get comprehensive tracking data for a specific token.
+    
+    Returns all data including:
+    - Contract address
+    - First seen timestamp
+    - Liquidity snapshots
+    - Transaction snapshots
+    - Wallet first buys
+    - Price time series
+    - Holder counts over time
+    - Token metadata
+    - Outcome label
+    """
+    try:
+        from app.storage import get_token_comprehensive_data
+        
+        data = get_token_comprehensive_data(token_address)
+        
+        if not data:
+            return {"error": "Token not found"}
+        
+        return {
+            "success": True,
+            "token": data
+        }
+        
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def get_all_tracked_tokens(limit: int = 100, offset: int = 0) -> Dict[str, Any]:
+    """
+    Get summary list of all tracked tokens.
+    
+    Returns paginated list with key metrics for each token.
+    """
+    try:
+        from app.storage import get_all_tracked_tokens_summary
+        
+        tokens = get_all_tracked_tokens_summary(limit + offset)
+        
+        # Apply offset
+        tokens = tokens[offset:offset + limit]
+        
+        return {
+            "success": True,
+            "tokens": tokens,
+            "count": len(tokens),
+            "limit": limit,
+            "offset": offset
+        }
+        
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def get_token_transactions(token_address: str, limit: int = 100) -> Dict[str, Any]:
+    """Get transaction history for a token."""
+    try:
+        import sqlite3
+        from app.database_config import DatabasePaths
+        
+        conn = sqlite3.connect(DatabasePaths.SIGNALS_DB)
+        c = conn.cursor()
+        
+        c.execute("""
+            SELECT 
+                tx_signature, timestamp, from_wallet, to_wallet, amount,
+                amount_usd, tx_type, dex, is_smart_money
+            FROM transaction_snapshots
+            WHERE token_address = ?
+            ORDER BY timestamp DESC
+            LIMIT ?
+        """, (token_address, limit))
+        
+        transactions = []
+        for row in c.fetchall():
+            transactions.append({
+                "signature": row[0],
+                "timestamp": row[1],
+                "from_wallet": row[2],
+                "to_wallet": row[3],
+                "amount": row[4],
+                "amount_usd": row[5],
+                "tx_type": row[6],
+                "dex": row[7],
+                "is_smart_money": bool(row[8])
+            })
+        
+        conn.close()
+        
+        return {
+            "success": True,
+            "token_address": token_address,
+            "transactions": transactions,
+            "count": len(transactions)
+        }
+        
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def get_token_top_buyers(token_address: str, limit: int = 50) -> Dict[str, Any]:
+    """Get top buyers for a token."""
+    try:
+        import sqlite3
+        from app.database_config import DatabasePaths
+        
+        conn = sqlite3.connect(DatabasePaths.SIGNALS_DB)
+        c = conn.cursor()
+        
+        c.execute("""
+            SELECT 
+                wallet_address, timestamp, amount, amount_usd, price_usd,
+                is_smart_money, wallet_pnl_history
+            FROM wallet_first_buys
+            WHERE token_address = ?
+            ORDER BY amount_usd DESC NULLS LAST, timestamp ASC
+            LIMIT ?
+        """, (token_address, limit))
+        
+        buyers = []
+        for row in c.fetchall():
+            buyers.append({
+                "wallet": row[0],
+                "timestamp": row[1],
+                "amount": row[2],
+                "amount_usd": row[3],
+                "price_usd": row[4],
+                "is_smart_money": bool(row[5]),
+                "wallet_pnl_history": row[6]
+            })
+        
+        conn.close()
+        
+        return {
+            "success": True,
+            "token_address": token_address,
+            "buyers": buyers,
+            "count": len(buyers)
+        }
+        
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def get_token_price_history(token_address: str) -> Dict[str, Any]:
+    """Get full price history for a token."""
+    try:
+        import sqlite3
+        from app.database_config import DatabasePaths
+        
+        conn = sqlite3.connect(DatabasePaths.SIGNALS_DB)
+        c = conn.cursor()
+        
+        c.execute("""
+            SELECT 
+                snapshot_at, price_usd, market_cap_usd, liquidity_usd,
+                volume_24h_usd, holder_count, price_change_1h, price_change_24h
+            FROM price_snapshots
+            WHERE token_address = ?
+            ORDER BY snapshot_at
+        """, (token_address,))
+        
+        snapshots = []
+        for row in c.fetchall():
+            snapshots.append({
+                "timestamp": row[0],
+                "price_usd": row[1],
+                "market_cap_usd": row[2],
+                "liquidity_usd": row[3],
+                "volume_24h_usd": row[4],
+                "holder_count": row[5],
+                "price_change_1h": row[6],
+                "price_change_24h": row[7]
+            })
+        
+        conn.close()
+        
+        return {
+            "success": True,
+            "token_address": token_address,
+            "snapshots": snapshots,
+            "count": len(snapshots)
+        }
+        
+    except Exception as e:
+        return {"error": str(e)}
+
+
 # More endpoints to follow in next file...
 # This is Part 1 of the backend implementation
 

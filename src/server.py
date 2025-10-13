@@ -643,6 +643,56 @@ def create_app() -> Flask:
         strategy = str(body.get("strategy") or "smart_money_only")
         eng = get_paper_trading_engine()
         return _no_cache(jsonify(_sanitize_json(eng.run_backtest(days, capital, strategy))))
+    
+    # Comprehensive Token Tracking API
+    @app.get("/api/v2/token/<token_address>")
+    def api_v2_token_detail(token_address: str):
+        """Get comprehensive tracking data for a specific token."""
+        try:
+            from src.api_enhanced import get_token_detail
+            return _no_cache(jsonify(_sanitize_json(get_token_detail(token_address))))
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+    
+    @app.get("/api/v2/tokens")
+    def api_v2_all_tokens():
+        """Get summary list of all tracked tokens."""
+        try:
+            from src.api_enhanced import get_all_tracked_tokens
+            limit = int(request.args.get("limit") or 100)
+            offset = int(request.args.get("offset") or 0)
+            return _no_cache(jsonify(_sanitize_json(get_all_tracked_tokens(limit=limit, offset=offset))))
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+    
+    @app.get("/api/v2/token/<token_address>/transactions")
+    def api_v2_token_transactions(token_address: str):
+        """Get transaction history for a token."""
+        try:
+            from src.api_enhanced import get_token_transactions
+            limit = int(request.args.get("limit") or 100)
+            return _no_cache(jsonify(_sanitize_json(get_token_transactions(token_address, limit=limit))))
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+    
+    @app.get("/api/v2/token/<token_address>/buyers")
+    def api_v2_token_buyers(token_address: str):
+        """Get top buyers for a token."""
+        try:
+            from src.api_enhanced import get_token_top_buyers
+            limit = int(request.args.get("limit") or 50)
+            return _no_cache(jsonify(_sanitize_json(get_token_top_buyers(token_address, limit=limit))))
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+    
+    @app.get("/api/v2/token/<token_address>/price-history")
+    def api_v2_token_price_history(token_address: str):
+        """Get full price history for a token."""
+        try:
+            from src.api_enhanced import get_token_price_history
+            return _no_cache(jsonify(_sanitize_json(get_token_price_history(token_address))))
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
 
     @app.get("/healthz")
     def healthz():

@@ -278,6 +278,15 @@
         <div class="muted" style="margin-bottom:12px;font-size:13px">
           💡 <b>Note:</b> New tokens take 15-30 minutes to appear on DexScreener. "pending..." means tracking will start once indexed. This is normal for tokens <5 min old.
         </div>
+        
+        <!-- Summary Cards -->
+        <div class="cards" style="margin-bottom:16px">
+          <div class="card"><div class="label">Total Tracked</div><div class="value" id="tracked_total">-</div></div>
+          <div class="card"><div class="label">Moonshots (10x+)</div><div class="value" id="tracked_moonshots">-</div></div>
+          <div class="card"><div class="label">Winners (2x+)</div><div class="value" id="tracked_winners">-</div></div>
+          <div class="card"><div class="label">Losers</div><div class="value" id="tracked_losers">-</div></div>
+        </div>
+        
         <div class="table-wrap">
         <table id="tracked_table">
           <thead>
@@ -286,13 +295,24 @@
               <th>Price (first → last → peak)</th>
               <th>Peak Multiple</th>
               <th>MCap (first → last → peak)</th>
-              <th>Last Liquidity</th><th>Last 24h Vol</th><th>Outcome</th>
+              <th>Last Liquidity</th><th>Last 24h Vol</th>
+              <th>Outcome</th><th>Details</th>
             </tr>
           </thead>
           <tbody></tbody>
         </table>
         </div>
       </section>
+      
+      <!-- Token Detail Modal -->
+      <div id="token_detail_modal" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.8); z-index:1000; overflow:auto; padding:20px">
+        <div style="max-width:1400px; margin:0 auto; background:var(--panel); border-radius:12px; padding:24px; position:relative">
+          <button onclick="closeTokenDetail()" style="position:absolute; top:16px; right:16px; background:#232837; border:none; color:var(--text); padding:8px 16px; border-radius:6px; cursor:pointer">✕ Close</button>
+          
+          <h2 style="margin-top:0; font-size:20px">Token Details</h2>
+          <div id="token_detail_content">Loading...</div>
+        </div>
+      </div>
       </main>
 
     <script>
@@ -796,53 +816,176 @@
       // ---------- Tracked ----------
       async function fetchTracked(){
         try{
-          const ac = new AbortController();
-          const t = setTimeout(()=>ac.abort(), 4000);
-          let r = await fetch('/api/tracked?limit=200', { signal: ac.signal });
-          clearTimeout(t);
+          const r = await fetch('/api/v2/tokens?limit=100');
           if (!r.ok) throw new Error('tracked http '+r.status);
-          let data = await r.json();
-          // Fallback: if rows missing, try smaller payload once
-          if (!Array.isArray(data.rows) || data.rows.length === 0){
-            try{
-              r = await fetch('/api/tracked?limit=50');
-              if (r.ok) data = await r.json();
-            }catch(e){/* ignore */}
-          }
+          const data = await r.json();
+          
           const tbody = document.querySelector('#tracked_table tbody');
           tbody.innerHTML = '';
-          const rows = Array.isArray(data.rows) ? data.rows : [];
-          if (rows.length === 0){
+          const tokens = Array.isArray(data.tokens) ? data.tokens : [];
+          
+          if (tokens.length === 0){
             const tr = document.createElement('tr');
-            tr.innerHTML = `<td colspan="10" class="muted" style="text-align:center;padding:20px">No tracked tokens yet. Tokens will appear here after being alerted.</td>`;
+            tr.innerHTML = `<td colspan="11" class="muted" style="text-align:center;padding:20px">No tracked tokens yet. Tokens will appear here after being alerted.</td>`;
             tbody.appendChild(tr);
             return;
           }
-          rows.forEach(row=>{
+          
+          // Calculate summary stats
+          let moonshots = 0, winners = 0, losers = 0;
+          tokens.forEach(t => {
+            const gain = t.max_gain_pct || 0;
+            if (gain >= 900) moonshots++;
+            else if (gain >= 100) winners++;
+            else if (gain < 0) losers++;
+          });
+          
+          document.getElementById('tracked_total').textContent = tokens.length;
+          document.getElementById('tracked_moonshots').textContent = moonshots;
+          document.getElementById('tracked_winners').textContent = winners;
+          document.getElementById('tracked_losers').textContent = losers;
+          
+          tokens.forEach(token=>{
             const tr = document.createElement('tr');
             const isFiniteNum = (v)=> (typeof v === 'number' && isFinite(v));
             const fmt = (v, d=8)=> (isFiniteNum(v) && v!==0 ? Number(v).toFixed(d) : '<span class="muted" title="Waiting for price data (token too new)">pending...</span>')
             const fmtMoney = (v)=> (isFiniteNum(v) && v!==0 ? ('$'+Number(v).toLocaleString()) : '<span class="muted">pending...</span>')
-            const hasPrice = isFiniteNum(row.first_price) || isFiniteNum(row.last_price) || isFiniteNum(row.peak_price);
+            const hasPrice = isFiniteNum(token.entry_price) || isFiniteNum(token.current_price) || isFiniteNum(token.peak_price);
+            const peakMult = (token.entry_price && token.peak_price) ? (token.peak_price / token.entry_price) : null;
+            
             tr.innerHTML = `
-              <td>${tokenLinks(row.token)}</td>
-              <td>${row.alerted_at||'-'}</td>
-              <td>${row.final_score??'-'}</td>
-              <td>${row.conviction||'-'}</td>
-              <td>${hasPrice ? [fmt(row.first_price),fmt(row.last_price),fmt(row.peak_price)].join(' → ') : '<span class="muted" title="Token too new - waiting 15-30 min for DexScreener indexing">⏳ indexing...</span>'}</td>
-              <td>${row.peak_multiple!=null?('×'+Number(row.peak_multiple).toFixed(2)):'<span class="muted">pending...</span>'}</td>
-              <td>${hasPrice ? [fmtMoney(row.first_mcap),fmtMoney(row.last_mcap),fmtMoney(row.peak_mcap)].join(' → ') : '<span class="muted">⏳ indexing...</span>'}</td>
-              <td>${fmtMoney(row.last_liq)}</td>
-              <td>${fmtMoney(row.last_vol24)}</td>
-              <td>${row.outcome||'<span class="muted">tracking...</span>'}${row.peak_drawdown_pct!=null?(' ('+Number(row.peak_drawdown_pct).toFixed(1)+'%)'):''}</td>
+              <td>${tokenLinks(token.ca)}</td>
+              <td>${token.alerted_at||'-'}</td>
+              <td>${token.score??'-'}</td>
+              <td>${token.conviction||'-'}</td>
+              <td>${hasPrice ? [fmt(token.entry_price),fmt(token.current_price),fmt(token.peak_price)].join(' → ') : '<span class="muted" title="Token too new - waiting 15-30 min for DexScreener indexing">⏳ indexing...</span>'}</td>
+              <td>${peakMult!=null?('×'+Number(peakMult).toFixed(2)):'<span class="muted">pending...</span>'}</td>
+              <td>-</td>
+              <td>${fmtMoney(token.liquidity)}</td>
+              <td>${fmtMoney(token.volume_24h)}</td>
+              <td>${token.outcome||'<span class="muted">tracking...</span>'}</td>
+              <td><button class="btn-small" onclick="showTokenDetail('${token.ca}')" style="padding:4px 8px;background:#232837;border:1px solid #3a4356;color:var(--text);cursor:pointer;border-radius:4px">View</button></td>
             `;
             tbody.appendChild(tr);
           })
-        }catch(e){/* ignore */}
+        }catch(e){console.error('fetchTracked error:', e)}
       }
+      
+      // Show comprehensive token detail modal
+      async function showTokenDetail(tokenAddress) {
+        const modal = document.getElementById('token_detail_modal');
+        const content = document.getElementById('token_detail_content');
+        
+        modal.style.display = 'block';
+        content.innerHTML = 'Loading comprehensive data...';
+        
+        try {
+          const r = await fetch(`/api/v2/token/${tokenAddress}`);
+          const data = await r.json();
+          
+          if (!data.success || !data.token) {
+            content.innerHTML = '<p style="color:#e0245e">Failed to load token data</p>';
+            return;
+          }
+          
+          const t = data.token;
+          const meta = t.token_meta || {};
+          const pts = t.price_time_series || {};
+          
+          let html = '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px">';
+          
+          // Token Info
+          html += '<div>';
+          html += '<h3 style="font-size:16px;margin-top:0">Token Info</h3>';
+          html += `<p><strong>CA:</strong> <code>${t.ca||'N/A'}</code></p>`;
+          html += `<p><strong>Name:</strong> ${meta.name||'Unknown'}</p>`;
+          html += `<p><strong>Symbol:</strong> ${meta.symbol||'Unknown'}</p>`;
+          html += `<p><strong>Score:</strong> ${t.final_score}/10</p>`;
+          html += `<p><strong>Conviction:</strong> ${t.conviction_type||'N/A'}</p>`;
+          html += `<p><strong>Smart Money:</strong> ${t.smart_money_detected?'✅ Yes':'❌ No'}</p>`;
+          html += `<p><strong>Outcome:</strong> <span style="font-weight:bold;color:${getOutcomeColor(t.outcome_label)}">${t.outcome_label||'Pending'}</span></p>`;
+          html += '</div>';
+          
+          // Price Timeline
+          html += '<div>';
+          html += '<h3 style="font-size:16px;margin-top:0">Price Timeline</h3>';
+          html += `<p><strong>Entry (t0):</strong> $${(pts.t0||0).toFixed(8)}</p>`;
+          html += `<p><strong>+1 min:</strong> $${(pts.t_1m||0).toFixed(8)}</p>`;
+          html += `<p><strong>+5 min:</strong> $${(pts.t_5m||0).toFixed(8)}</p>`;
+          html += `<p><strong>+15 min:</strong> $${(pts.t_15m||0).toFixed(8)}</p>`;
+          html += `<p><strong>+1 hour:</strong> $${(pts.t_1h||0).toFixed(8)}</p>`;
+          html += `<p><strong>+24 hours:</strong> $${(pts.t_24h||0).toFixed(8)}</p>`;
+          html += `<p><strong>Peak:</strong> <span style="color:#17bf63">$${(pts.t_peak||0).toFixed(8)}</span></p>`;
+          html += `<p><strong>Latest:</strong> $${(pts.t_latest||0).toFixed(8)}</p>`;
+          html += `<p><strong>Max Gain:</strong> <span style="color:#17bf63;font-weight:bold">${(t.max_gain_percent||0).toFixed(1)}%</span></p>`;
+          html += '</div>';
+          
+          // Stats
+          html += '<div>';
+          html += '<h3 style="font-size:16px;margin-top:0">Activity Stats</h3>';
+          html += `<p><strong>Transactions:</strong> ${(t.tx_snapshots||[]).length}</p>`;
+          html += `<p><strong>Unique Buyers:</strong> ${(t.wallet_first_buys||[]).length}</p>`;
+          html += `<p><strong>Liquidity Snapshots:</strong> ${(t.liquidity_snapshots||[]).length}</p>`;
+          html += `<p><strong>Price Snapshots:</strong> ${(t.holders_count_ts||[]).length}</p>`;
+          html += '</div>';
+          
+          html += '</div>';
+          
+          // Top Buyers Table
+          if (t.wallet_first_buys && t.wallet_first_buys.length > 0) {
+            html += '<h3 style="margin-top:24px;font-size:16px">Top Buyers (First 10)</h3>';
+            html += '<div class="table-wrap"><table><thead><tr><th>Wallet</th><th>Amount USD</th><th>Price</th><th>Smart Money</th><th>PnL History</th></tr></thead><tbody>';
+            t.wallet_first_buys.slice(0, 10).forEach(buy => {
+              html += '<tr>';
+              html += `<td><code>${buy.wallet.slice(0,8)}...${buy.wallet.slice(-4)}</code></td>`;
+              html += `<td>$${(buy.amount_usd||0).toLocaleString()}</td>`;
+              html += `<td>$${(buy.price_usd||0).toFixed(8)}</td>`;
+              html += `<td>${buy.is_smart_money?'✅':'❌'}</td>`;
+              html += `<td>${buy.wallet_pnl_history?'$'+(buy.wallet_pnl_history).toLocaleString():'-'}</td>`;
+              html += '</tr>';
+            });
+            html += '</tbody></table></div>';
+          }
+          
+          // Recent Transactions
+          if (t.tx_snapshots && t.tx_snapshots.length > 0) {
+            html += '<h3 style="margin-top:24px;font-size:16px">Recent Transactions (Last 10)</h3>';
+            html += '<div class="table-wrap"><table><thead><tr><th>Type</th><th>Amount USD</th><th>DEX</th><th>Time</th><th>Smart Money</th></tr></thead><tbody>';
+            t.tx_snapshots.slice(-10).reverse().forEach(tx => {
+              html += '<tr>';
+              html += `<td>${tx.tx_type||'swap'}</td>`;
+              html += `<td>$${(tx.amount_usd||0).toLocaleString()}</td>`;
+              html += `<td>${tx.dex||'-'}</td>`;
+              html += `<td>${new Date((tx.ts||0)*1000).toLocaleTimeString()}</td>`;
+              html += `<td>${tx.is_smart_money?'✅':'❌'}</td>`;
+              html += '</tr>';
+            });
+            html += '</tbody></table></div>';
+          }
+          
+          content.innerHTML = html;
+          
+        } catch (e) {
+          content.innerHTML = `<p style="color:#e0245e">Error: ${e.message}</p>`;
+        }
+      }
+      
+      function closeTokenDetail() {
+        document.getElementById('token_detail_modal').style.display = 'none';
+      }
+      
+      function getOutcomeColor(outcome) {
+        if (!outcome) return 'var(--muted)';
+        if (outcome.includes('moonshot')) return '#17bf63';
+        if (outcome.includes('strong')) return '#1da1f2';
+        if (outcome.includes('good')) return '#4cc9f0';
+        if (outcome === 'rug' || outcome === 'loss') return '#e0245e';
+        return 'var(--text)';
+      }
+      
       fetchTracked(); 
-      // Refresh tracked tokens every 5 seconds for real-time updates
-      setInterval(fetchTracked, 5000);
+      // Refresh tracked tokens every 10 seconds
+      setInterval(fetchTracked, 10000);
 
       // ---------- v2 Overview ----------
       async function fetchOverviewV2(){

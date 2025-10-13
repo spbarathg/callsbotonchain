@@ -784,3 +784,366 @@ def cleanup_old_activity():
     c.execute("DELETE FROM token_activity WHERE observed_at < ?", (cutoff,))
     conn.commit()
     conn.close()
+
+
+def record_transaction_snapshot(
+    token_address: str,
+    tx_signature: str,
+    timestamp: float,
+    from_wallet: Optional[str] = None,
+    to_wallet: Optional[str] = None,
+    amount: Optional[float] = None,
+    amount_usd: Optional[float] = None,
+    tx_type: Optional[str] = None,
+    dex: Optional[str] = None,
+    is_smart_money: bool = False
+) -> None:
+    """
+    Record a transaction snapshot for tracking token activity.
+    
+    Args:
+        token_address: Token contract address
+        tx_signature: Solana transaction signature
+        timestamp: Unix timestamp of transaction
+        from_wallet: Sender wallet address
+        to_wallet: Receiver wallet address
+        amount: Token amount transacted
+        amount_usd: USD value of transaction
+        tx_type: Type of transaction (buy, sell, swap, etc.)
+        dex: DEX name where transaction occurred
+        is_smart_money: Whether wallet is identified as smart money
+    """
+    conn = _get_conn()
+    c = conn.cursor()
+    
+    try:
+        c.execute("""
+            INSERT OR IGNORE INTO transaction_snapshots (
+                token_address, tx_signature, timestamp, from_wallet, to_wallet,
+                amount, amount_usd, tx_type, dex, is_smart_money
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            token_address, tx_signature, timestamp, from_wallet, to_wallet,
+            amount, amount_usd, tx_type, dex, is_smart_money
+        ))
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        # Log but don't crash
+        try:
+            from app.logger_utils import log_process
+            log_process({"type": "tx_snapshot_error", "error": str(e), "token": token_address})
+        except Exception:
+            pass
+    finally:
+        conn.close()
+
+
+def record_wallet_first_buy(
+    token_address: str,
+    wallet_address: str,
+    timestamp: float,
+    amount: Optional[float] = None,
+    amount_usd: Optional[float] = None,
+    price_usd: Optional[float] = None,
+    is_smart_money: bool = False,
+    wallet_pnl_history: Optional[float] = None
+) -> None:
+    """
+    Record first buy from a wallet for a token.
+    
+    Args:
+        token_address: Token contract address
+        wallet_address: Buyer wallet address
+        timestamp: Unix timestamp of first buy
+        amount: Token amount purchased
+        amount_usd: USD value of purchase
+        price_usd: Price per token in USD
+        is_smart_money: Whether wallet is identified as smart money
+        wallet_pnl_history: Historical PnL of wallet (if known)
+    """
+    conn = _get_conn()
+    c = conn.cursor()
+    
+    try:
+        c.execute("""
+            INSERT OR IGNORE INTO wallet_first_buys (
+                token_address, wallet_address, timestamp, amount, amount_usd,
+                price_usd, is_smart_money, wallet_pnl_history
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            token_address, wallet_address, timestamp, amount, amount_usd,
+            price_usd, is_smart_money, wallet_pnl_history
+        ))
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        # Log but don't crash
+        try:
+            from app.logger_utils import log_process
+            log_process({"type": "wallet_buy_error", "error": str(e), "token": token_address})
+        except Exception:
+            pass
+    finally:
+        conn.close()
+
+
+def get_token_comprehensive_data(token_address: str) -> Dict[str, Any]:
+    """
+    Get all comprehensive tracking data for a token.
+    
+    Returns:
+        Dictionary with all tracking data including:
+        - ca: Contract address
+        - first_seen_ts: First seen timestamp
+        - liquidity_snapshots: Time series of liquidity
+        - tx_snapshots: Transaction history
+        - wallet_first_buys: First N wallet buyers
+        - price_time_series: Price at key intervals
+        - holders_count_ts: Holder counts over time
+        - token_meta: Token metadata
+        - outcome_label: Final outcome classification
+    """
+    conn = _get_conn()
+    c = conn.cursor()
+    
+    # Get basic token info
+    c.execute("""
+        SELECT 
+            a.token_address, a.alerted_at, a.final_score, a.smart_money_detected, a.conviction_type,
+            s.token_name, s.token_symbol, s.first_price_usd, s.peak_price_usd, s.last_price_usd,
+            s.first_market_cap_usd, s.peak_market_cap_usd, s.last_market_cap_usd,
+            s.first_liquidity_usd, s.last_liquidity_usd, s.last_volume_24h_usd,
+            s.max_gain_percent, s.is_rug, s.holder_count, s.peak_price_at
+        FROM alerted_tokens a
+        LEFT JOIN alerted_token_stats s ON a.token_address = s.token_address
+        WHERE a.token_address = ?
+    """, (token_address,))
+    
+    row = c.fetchone()
+    if not row:
+        conn.close()
+        return {}
+    
+    # Parse basic data
+    data = {
+        "ca": row[0],
+        "first_seen_ts": row[1],
+        "final_score": row[2],
+        "smart_money_detected": bool(row[3]),
+        "conviction_type": row[4],
+        "token_meta": {
+            "name": row[5],
+            "symbol": row[6],
+            "decimals": None,  # Not tracked yet
+            "total_supply": None  # Not tracked yet
+        }
+    }
+    
+    # Get price time series (at specific intervals)
+    c.execute("""
+        SELECT snapshot_at, price_usd
+        FROM price_snapshots
+        WHERE token_address = ?
+        ORDER BY snapshot_at
+    """, (token_address,))
+    
+    snapshots = c.fetchall()
+    first_ts = row[1]  # alerted_at
+    
+    # Create time series at key intervals: t0, +1m, +5m, +15m, +1h, +24h
+    price_time_series = {
+        "t0": row[7],  # first_price_usd
+        "t_1m": None,
+        "t_5m": None,
+        "t_15m": None,
+        "t_1h": None,
+        "t_24h": None,
+        "t_peak": row[8],  # peak_price_usd
+        "t_latest": row[9],  # last_price_usd
+    }
+    
+    if first_ts and snapshots:
+        try:
+            first_timestamp = float(first_ts) if isinstance(first_ts, (int, float)) else datetime.fromisoformat(first_ts).timestamp()
+            
+            for snap_ts, price in snapshots:
+                elapsed = snap_ts - first_timestamp
+                if elapsed >= 60 and price_time_series["t_1m"] is None:
+                    price_time_series["t_1m"] = price
+                if elapsed >= 300 and price_time_series["t_5m"] is None:
+                    price_time_series["t_5m"] = price
+                if elapsed >= 900 and price_time_series["t_15m"] is None:
+                    price_time_series["t_15m"] = price
+                if elapsed >= 3600 and price_time_series["t_1h"] is None:
+                    price_time_series["t_1h"] = price
+                if elapsed >= 86400 and price_time_series["t_24h"] is None:
+                    price_time_series["t_24h"] = price
+        except Exception:
+            pass
+    
+    data["price_time_series"] = price_time_series
+    
+    # Get liquidity snapshots
+    c.execute("""
+        SELECT snapshot_at, liquidity_usd
+        FROM price_snapshots
+        WHERE token_address = ? AND liquidity_usd IS NOT NULL
+        ORDER BY snapshot_at
+    """, (token_address,))
+    
+    data["liquidity_snapshots"] = [
+        {"ts": snap[0], "liquidity_sol": snap[1] / 150.0 if snap[1] else None}  # Rough conversion
+        for snap in c.fetchall()
+    ]
+    
+    # Get holder count time series
+    c.execute("""
+        SELECT snapshot_at, holder_count
+        FROM price_snapshots
+        WHERE token_address = ? AND holder_count IS NOT NULL
+        ORDER BY snapshot_at
+    """, (token_address,))
+    
+    data["holders_count_ts"] = [
+        {"ts": snap[0], "holders": snap[1]}
+        for snap in c.fetchall()
+    ]
+    
+    # Get transaction snapshots
+    c.execute("""
+        SELECT 
+            tx_signature, timestamp, from_wallet, to_wallet, amount, 
+            amount_usd, tx_type, dex, is_smart_money
+        FROM transaction_snapshots
+        WHERE token_address = ?
+        ORDER BY timestamp
+        LIMIT 500
+    """, (token_address,))
+    
+    data["tx_snapshots"] = [
+        {
+            "signature": tx[0],
+            "ts": tx[1],
+            "from_wallet": tx[2],
+            "to_wallet": tx[3],
+            "amount": tx[4],
+            "amount_usd": tx[5],
+            "tx_type": tx[6],
+            "dex": tx[7],
+            "is_smart_money": bool(tx[8])
+        }
+        for tx in c.fetchall()
+    ]
+    
+    # Get wallet first buys (top N by amount)
+    c.execute("""
+        SELECT 
+            wallet_address, timestamp, amount, amount_usd, price_usd,
+            is_smart_money, wallet_pnl_history
+        FROM wallet_first_buys
+        WHERE token_address = ?
+        ORDER BY amount_usd DESC NULLS LAST, timestamp ASC
+        LIMIT 50
+    """, (token_address,))
+    
+    data["wallet_first_buys"] = [
+        {
+            "wallet": buy[0],
+            "ts": buy[1],
+            "amount": buy[2],
+            "amount_usd": buy[3],
+            "price_usd": buy[4],
+            "is_smart_money": bool(buy[5]),
+            "wallet_pnl_history": buy[6]
+        }
+        for buy in c.fetchall()
+    ]
+    
+    # Compute outcome label
+    max_gain = row[16]  # max_gain_percent
+    is_rug = row[17]
+    
+    if is_rug:
+        outcome = "rug"
+    elif max_gain is None:
+        outcome = "pending"
+    elif max_gain >= 900:
+        outcome = "moonshot_10x+"
+    elif max_gain >= 400:
+        outcome = "strong_5x+"
+    elif max_gain >= 100:
+        outcome = "good_2x+"
+    elif max_gain >= 50:
+        outcome = "moderate_1.5x+"
+    elif max_gain >= 0:
+        outcome = "breakeven"
+    else:
+        outcome = "loss"
+    
+    data["outcome_label"] = outcome
+    data["max_gain_percent"] = max_gain
+    
+    conn.close()
+    return data
+
+
+def get_all_tracked_tokens_summary(limit: int = 100) -> List[Dict[str, Any]]:
+    """
+    Get summary of all tracked tokens for display on website.
+    
+    Returns list of dictionaries with key metrics for each token.
+    """
+    conn = _get_conn()
+    c = conn.cursor()
+    
+    c.execute("""
+        SELECT 
+            a.token_address, a.alerted_at, a.final_score, a.conviction_type,
+            s.token_name, s.token_symbol, s.first_price_usd, s.peak_price_usd, 
+            s.last_price_usd, s.max_gain_percent, s.is_rug,
+            s.first_liquidity_usd, s.last_liquidity_usd, s.last_volume_24h_usd,
+            (SELECT COUNT(*) FROM transaction_snapshots WHERE token_address = a.token_address) as tx_count,
+            (SELECT COUNT(*) FROM wallet_first_buys WHERE token_address = a.token_address) as buyer_count
+        FROM alerted_tokens a
+        LEFT JOIN alerted_token_stats s ON a.token_address = s.token_address
+        ORDER BY a.alerted_at DESC
+        LIMIT ?
+    """, (limit,))
+    
+    tokens = []
+    for row in c.fetchall():
+        max_gain = row[9]
+        is_rug = row[10]
+        
+        if is_rug:
+            outcome = "rug"
+        elif max_gain is None:
+            outcome = "tracking"
+        elif max_gain >= 100:
+            outcome = "2x+"
+        elif max_gain >= 0:
+            outcome = "positive"
+        else:
+            outcome = "negative"
+        
+        tokens.append({
+            "ca": row[0],
+            "alerted_at": row[1],
+            "score": row[2],
+            "conviction": row[3],
+            "name": row[4],
+            "symbol": row[5],
+            "entry_price": row[6],
+            "peak_price": row[7],
+            "current_price": row[8],
+            "max_gain_pct": max_gain,
+            "outcome": outcome,
+            "liquidity": row[12],
+            "volume_24h": row[13],
+            "tx_count": row[14],
+            "buyer_count": row[15]
+        })
+    
+    conn.close()
+    return tokens
