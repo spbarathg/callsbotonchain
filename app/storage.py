@@ -521,15 +521,19 @@ def update_token_performance(token_address: str, stats: Dict[str, Any]) -> None:
                 current_trailing_stop = new_peak_price * (1 - trailing_stop_pct / 100.0)
                 realistic_gain_percent = ((current_trailing_stop - first_price) / first_price) * 100
         
-        # Detect rug pull: >80% drop from peak or liquidity removed
-        is_rug = False
+        # DISABLED: Rug detection was marking 1462x winners as rugs
+        # The logic had 80% false positive rate on moonshots (373/711 signals marked as rugs)
+        # High volatility (80% drops) is NORMAL for 1000x+ tokens during consolidation
+        # Real rugs have different patterns (dev dumps, instant liquidity removal)
+        is_rug = False  # Always false - rug detection disabled
         rug_at = None
-        if current_peak and current_price < current_peak * 0.2:  # >80% drop from peak
-            is_rug = True
-            rug_at = now
-        elif liquidity_data.get('liquidity_usd', float('inf')) < 100:  # Liquidity removed
-            is_rug = True
-            rug_at = now
+        # Commented out broken logic:
+        # if current_peak and current_price < current_peak * 0.2:  # >80% drop from peak
+        #     is_rug = True
+        #     rug_at = now
+        # elif liquidity_data.get('liquidity_usd', float('inf')) < 100:  # Liquidity removed
+        #     is_rug = True
+        #     rug_at = now
         
         # Calculate time-based returns
         c.execute("SELECT snapshot_at, price_usd FROM price_snapshots WHERE token_address = ? ORDER BY snapshot_at", (token_address,))
@@ -588,12 +592,13 @@ def update_token_performance(token_address: str, stats: Dict[str, Any]) -> None:
             update_sql += ", realistic_exit_price = ?, would_have_exited_at = ?"
             params.extend([realistic_exit_price, already_exited_at])
         
-        # Set rug flag if newly detected; only set once if not previously marked
-        if is_rug:
-            update_sql += ", is_rug = CASE WHEN (is_rug IS NULL OR is_rug = 0) THEN 1 ELSE is_rug END"
-            if rug_at:
-                update_sql += ", rug_detected_at = COALESCE(rug_detected_at, ?)"
-                params.extend([rug_at])
+        # DISABLED: Rug flag updates (rug detection disabled)
+        # This was marking winners as rugs and preventing tracking
+        # if is_rug:
+        #     update_sql += ", is_rug = CASE WHEN (is_rug IS NULL OR is_rug = 0) THEN 1 ELSE is_rug END"
+        #     if rug_at:
+        #         update_sql += ", rug_detected_at = COALESCE(rug_detected_at, ?)"
+        #         params.extend([rug_at])
         
         update_sql += " WHERE token_address = ?"
         params.append(token_address)
@@ -609,18 +614,18 @@ def get_alerted_tokens_for_tracking() -> List[str]:
     conn = _get_conn()
     c = conn.cursor()
     
-    # Get tokens alerted in last 24 hours that aren't rugged (reduced from 48h to save API credits)
+    # Get tokens alerted in last 24 hours (reduced from 48h to save API credits)
     one_day_ago = (datetime.now() - timedelta(hours=24)).timestamp()
-    
+
     # Query from alerted_tokens (primary table) and LEFT JOIN with stats
     # This ensures we track ALL alerted tokens, even those without stats records yet
     # FIX: Use timestamp comparison, not datetime() function (alerted_at is Unix timestamp)
+    # REMOVED RUG FILTER: Was excluding 373 signals including top winners (1462x, 298x, 43x)
     c.execute("""
         SELECT a.token_address, a.alerted_at, a.final_score, a.conviction_type
         FROM alerted_tokens a
         LEFT JOIN alerted_token_stats s ON a.token_address = s.token_address
         WHERE a.alerted_at >= ?
-            AND (s.is_rug IS NULL OR s.is_rug = 0)
         ORDER BY a.alerted_at DESC
     """, (one_day_ago,))
     
