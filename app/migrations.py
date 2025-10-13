@@ -105,10 +105,10 @@ class MigrationRunner:
                     self._record_migration(conn, migration)
                     
                     applied_count += 1
-                    print(f"  ✓ Applied migration {migration.version}")
+                    print(f"  [OK] Applied migration {migration.version}")
                     
                 except Exception as e:
-                    print(f"  ✗ Failed to apply migration {migration.version}: {e}")
+                    print(f"  [FAILED] Migration {migration.version}: {e}")
                     conn.rollback()
                     raise
             
@@ -207,6 +207,78 @@ def get_signals_migrations() -> MigrationRunner:
         conn.commit()
     
     runner.register(3, "add_ml_columns", migration_3_add_ml_columns)
+    
+    # Migration 4: Add comprehensive transaction and wallet tracking
+    def migration_4_add_tx_tracking(conn: sqlite3.Connection) -> None:
+        """Add transaction snapshots and wallet first buys tracking."""
+        # Transaction snapshots table
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS transaction_snapshots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                token_address TEXT NOT NULL,
+                tx_signature TEXT NOT NULL,
+                timestamp REAL NOT NULL,
+                from_wallet TEXT,
+                to_wallet TEXT,
+                amount REAL,
+                amount_usd REAL,
+                tx_type TEXT,
+                dex TEXT,
+                is_smart_money BOOLEAN DEFAULT 0,
+                FOREIGN KEY (token_address) REFERENCES alerted_tokens(token_address)
+            )
+        """)
+        
+        # Create indexes for fast queries
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_tx_snapshots_token 
+            ON transaction_snapshots(token_address)
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_tx_snapshots_timestamp 
+            ON transaction_snapshots(timestamp)
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_tx_snapshots_signature 
+            ON transaction_snapshots(tx_signature)
+        """)
+        
+        # Wallet first buys table
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS wallet_first_buys (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                token_address TEXT NOT NULL,
+                wallet_address TEXT NOT NULL,
+                timestamp REAL NOT NULL,
+                amount REAL,
+                amount_usd REAL,
+                price_usd REAL,
+                is_smart_money BOOLEAN DEFAULT 0,
+                wallet_pnl_history REAL,
+                UNIQUE(token_address, wallet_address),
+                FOREIGN KEY (token_address) REFERENCES alerted_tokens(token_address)
+            )
+        """)
+        
+        # Create indexes
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_wallet_buys_token 
+            ON wallet_first_buys(token_address)
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_wallet_buys_timestamp 
+            ON wallet_first_buys(timestamp)
+        """)
+        
+        # Add time-series indexes to price_snapshots for better querying
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_price_snapshots_token_time 
+            ON price_snapshots(token_address, snapshot_at)
+        """)
+        
+        conn.commit()
+    
+    runner.register(4, "add_transaction_wallet_tracking", migration_4_add_tx_tracking)
     
     return runner
 
