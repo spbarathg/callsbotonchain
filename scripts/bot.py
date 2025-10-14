@@ -486,12 +486,17 @@ def process_feed_item(tx: dict, is_smart_cycle: bool, session_alerted_tokens: se
 		if not (change_24h == change_24h):  # NaN check
 			change_24h = 0
 		
-		# Reject if already pumped >50% in 24h (late entry!)
+		# Reject if already dumped significantly (>30% in 24h) - dead token!
+		if change_24h < -30:
+			_out(f"❌ REJECTED (MAJOR DUMP): {token_address} - {change_24h:.1f}% in 24h (already crashed!)")
+			return "skipped", None, 0, None
+
+		# Reject if already pumped >150% in 24h (late entry!)
 		if change_24h > MAX_24H_CHANGE_FOR_ALERT:
 			_out(f"❌ REJECTED (LATE ENTRY - 24H PUMP): {token_address} - {change_24h:.1f}% > {MAX_24H_CHANGE_FOR_ALERT:.0f}% (already mooned!)")
 			return "skipped", None, 0, None
-		
-		# Reject if already pumped >200% in 1h (extreme spike - too late!)
+
+		# Reject if already pumped >300% in 1h (extreme spike - too late!)
 		if change_1h > MAX_1H_CHANGE_FOR_ALERT:
 			_out(f"❌ REJECTED (LATE ENTRY - 1H PUMP): {token_address} - {change_1h:.1f}% > {MAX_1H_CHANGE_FOR_ALERT:.0f}% (extreme pump!)")
 			return "skipped", None, 0, None
