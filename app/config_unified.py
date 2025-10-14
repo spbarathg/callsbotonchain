@@ -212,15 +212,17 @@ VOL_HIGH = _get_float("VOL_HIGH", 50000.0)
 VOL_MED = _get_float("VOL_MED", 10000.0)
 VOL_24H_MIN_FOR_ALERT = _get_float("VOL_24H_MIN_FOR_ALERT", 0.0)
 
-# Market Cap
+# Market Cap - DATA-DRIVEN: 50k-100k range has 38.2% win rate (BEST!)
+# Under 50k has 77.2% rug rate (AVOID). Over 500k has only 11.4% win rate.
 MCAP_VERY_LOW = _get_float("MCAP_VERY_LOW", 50000.0)
 MCAP_LOW = _get_float("MCAP_LOW", 200000.0)
 MCAP_MED = _get_float("MCAP_MED", 1000000.0)
 MCAP_MICRO_MAX = _get_float("MCAP_MICRO_MAX", 100000.0)
 MCAP_SMALL_MAX = _get_float("MCAP_SMALL_MAX", 500000.0)
 MCAP_MID_MAX = _get_float("MCAP_MID_MAX", 5000000.0)
+# SWEET SPOT for 50% win rate: 50k-150k market cap
 MICROCAP_SWEET_MIN = _get_float("MICROCAP_SWEET_MIN", 50000.0)
-MICROCAP_SWEET_MAX = _get_float("MICROCAP_SWEET_MAX", 200000.0)
+MICROCAP_SWEET_MAX = _get_float("MICROCAP_SWEET_MAX", 150000.0)  # Tightened from 200k to 150k
 
 # Momentum
 MOMENTUM_1H_HIGH = _get_float("MOMENTUM_1H_HIGH", 10.0)
@@ -309,15 +311,16 @@ LARGE_CAP_HOLDER_STATS_MCAP_USD = _get_float("LARGE_CAP_HOLDER_STATS_MCAP_USD", 
 # RISK GATES (Data-Driven)
 # ============================================================================
 
-# Liquidity Gate - DATA-DRIVEN: Winners had $13k-$159k range (median $35k)
-# 35% of winners had $10k-$30k liquidity, so lowered threshold to $20k
+# Liquidity Gate - DATA-DRIVEN: 60k-100k range has 32.1% win rate, 25k-40k has 27.8%
+# Under 25k has only 13.4% win rate - must avoid!
+# OPTIMIZED for 50% win rate target: Raised to $30k-35k sweet spot
 USE_LIQUIDITY_FILTER = _get_bool("USE_LIQUIDITY_FILTER", True)
-MIN_LIQUIDITY_USD = _get_float("MIN_LIQUIDITY_USD", 20000.0)  # Lowered from 30k, removed hardcoded clamps
-EXCELLENT_LIQUIDITY_USD = _get_float("EXCELLENT_LIQUIDITY_USD", 50000.0)
+MIN_LIQUIDITY_USD = _get_float("MIN_LIQUIDITY_USD", 30000.0)  # Raised from 20k to 30k (27.8% -> 32.1% win rate zone)
+EXCELLENT_LIQUIDITY_USD = _get_float("EXCELLENT_LIQUIDITY_USD", 60000.0)  # Updated to reflect data
 
-# Volume to Liquidity Ratio
+# Volume to Liquidity Ratio - Keep low to catch early entries
 VOL_TO_LIQ_RATIO_MIN = _get_float("VOL_TO_LIQ_RATIO_MIN", 0.0)
-VOL_TO_MCAP_RATIO_MIN = _get_float("VOL_TO_MCAP_RATIO_MIN", 0.0)
+VOL_TO_MCAP_RATIO_MIN = _get_float("VOL_TO_MCAP_RATIO_MIN", 0.05)  # Slight filter for activity
 
 # Security Gates
 REQUIRE_LP_LOCKED = _get_bool("REQUIRE_LP_LOCKED", False)
@@ -333,9 +336,10 @@ ENFORCE_INSIDER_CAP = _get_bool("ENFORCE_INSIDER_CAP", False)
 REQUIRE_HOLDER_STATS_FOR_LARGE_CAP_ALERT = _get_bool("REQUIRE_HOLDER_STATS_FOR_LARGE_CAP_ALERT", False)
 
 # Nuanced Scoring Factors (for flexible gating)
-NUANCED_SCORE_REDUCTION = _get_int("NUANCED_SCORE_REDUCTION", 2)
+# Reduced penalties to allow more risky tokens with good fundamentals
+NUANCED_SCORE_REDUCTION = _get_int("NUANCED_SCORE_REDUCTION", 1)  # Reduced from 2 to 1
 NUANCED_LIQUIDITY_FACTOR = _get_float("NUANCED_LIQUIDITY_FACTOR", 0.5)
-NUANCED_VOL_TO_MCAP_FACTOR = _get_float("NUANCED_VOL_TO_MCAP_FACTOR", 0.5)
+NUANCED_VOL_TO_MCAP_FACTOR = _get_float("NUANCED_VOL_TO_MCAP_FACTOR", 0.3)  # Less strict
 NUANCED_MCAP_FACTOR = _get_float("NUANCED_MCAP_FACTOR", 1.5)
 NUANCED_TOP10_CONCENTRATION_BUFFER = _get_float("NUANCED_TOP10_CONCENTRATION_BUFFER", 5.0)
 NUANCED_BUNDLERS_BUFFER = _get_float("NUANCED_BUNDLERS_BUFFER", 5.0)
@@ -356,9 +360,10 @@ SMART_MONEY_SCORE_BONUS = _get_int("SMART_MONEY_SCORE_BONUS", 0)  # REMOVED
 # Velocity
 REQUIRE_VELOCITY_MIN_SCORE_FOR_ALERT = _get_int("REQUIRE_VELOCITY_MIN_SCORE_FOR_ALERT", 0)
 
-# Cycle Balance - DATA-DRIVEN: 26% of winners had scores 4-6, would be blocked at 7
-SMART_CYCLE_MIN_SCORE = _get_int("SMART_CYCLE_MIN_SCORE", 7)
-GENERAL_CYCLE_MIN_SCORE = _get_int("GENERAL_CYCLE_MIN_SCORE", 6)  # Lowered from 7 to 6 to catch more winners
+# Cycle Balance - DATA-DRIVEN: Score 9 had 31.9% win rate (BEST), Score 5-7 had 20-22%
+# Lower threshold to 5 to allow more risky but potentially profitable tokens
+SMART_CYCLE_MIN_SCORE = _get_int("SMART_CYCLE_MIN_SCORE", 6)
+GENERAL_CYCLE_MIN_SCORE = _get_int("GENERAL_CYCLE_MIN_SCORE", 5)  # Lowered from 6 to 5 for more volume
 
 # Multi-signal Confirmation
 REQUIRE_MULTI_SIGNAL = _get_bool("REQUIRE_MULTI_SIGNAL", False)
