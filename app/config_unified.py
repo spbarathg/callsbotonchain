@@ -164,8 +164,8 @@ REDIS_URL = os.getenv("REDIS_URL", "").strip()
 # BOT CORE SETTINGS
 # ============================================================================
 
-# Scoring thresholds
-HIGH_CONFIDENCE_SCORE = _get_int("HIGH_CONFIDENCE_SCORE", 7)  # Score 7 had 20% win rate (data-driven)
+# Scoring thresholds - LOWERED for more risky plays
+HIGH_CONFIDENCE_SCORE = _get_int("HIGH_CONFIDENCE_SCORE", 5)  # LOWERED to allow more signals (not too restrictive)
 
 # Feed processing
 FETCH_INTERVAL = _get_int("FETCH_INTERVAL", 60)
@@ -212,17 +212,18 @@ VOL_HIGH = _get_float("VOL_HIGH", 50000.0)
 VOL_MED = _get_float("VOL_MED", 10000.0)
 VOL_24H_MIN_FOR_ALERT = _get_float("VOL_24H_MIN_FOR_ALERT", 0.0)
 
-# Market Cap - DATA-DRIVEN: 50k-100k range has 38.2% win rate (BEST!)
-# Under 50k has 77.2% rug rate (AVOID). Over 500k has only 11.4% win rate.
-MCAP_VERY_LOW = _get_float("MCAP_VERY_LOW", 50000.0)
-MCAP_LOW = _get_float("MCAP_LOW", 200000.0)
-MCAP_MED = _get_float("MCAP_MED", 1000000.0)
-MCAP_MICRO_MAX = _get_float("MCAP_MICRO_MAX", 100000.0)
-MCAP_SMALL_MAX = _get_float("MCAP_SMALL_MAX", 500000.0)
-MCAP_MID_MAX = _get_float("MCAP_MID_MAX", 5000000.0)
-# SWEET SPOT for 50% win rate: 50k-150k market cap
-MICROCAP_SWEET_MIN = _get_float("MICROCAP_SWEET_MIN", 50000.0)
-MICROCAP_SWEET_MAX = _get_float("MICROCAP_SWEET_MAX", 150000.0)  # Tightened from 200k to 150k
+# Market Cap - AGGRESSIVE: Focus on micro-caps for 2x+ potential
+# Lower caps = higher risk but massive upside (2x-10x possible)
+# Accept rug risk for 2x+ hit rate target
+MCAP_VERY_LOW = _get_float("MCAP_VERY_LOW", 20000.0)  # LOWERED - allow very early stage
+MCAP_LOW = _get_float("MCAP_LOW", 100000.0)
+MCAP_MED = _get_float("MCAP_MED", 500000.0)
+MCAP_MICRO_MAX = _get_float("MCAP_MICRO_MAX", 150000.0)  # Focus zone
+MCAP_SMALL_MAX = _get_float("MCAP_SMALL_MAX", 300000.0)
+MCAP_MID_MAX = _get_float("MCAP_MID_MAX", 1000000.0)
+# SWEET SPOT for 2x+: 20k-150k market cap (risky but high reward)
+MICROCAP_SWEET_MIN = _get_float("MICROCAP_SWEET_MIN", 20000.0)  # LOWERED for early entries
+MICROCAP_SWEET_MAX = _get_float("MICROCAP_SWEET_MAX", 150000.0)
 
 # Momentum
 MOMENTUM_1H_HIGH = _get_float("MOMENTUM_1H_HIGH", 10.0)
@@ -311,16 +312,16 @@ LARGE_CAP_HOLDER_STATS_MCAP_USD = _get_float("LARGE_CAP_HOLDER_STATS_MCAP_USD", 
 # RISK GATES (Data-Driven)
 # ============================================================================
 
-# Liquidity Gate - DATA-DRIVEN: 60k-100k range has 32.1% win rate, 25k-40k has 27.8%
-# Under 25k has only 13.4% win rate - must avoid!
-# OPTIMIZED for 50% win rate target: Raised to $30k-35k sweet spot
+# Liquidity Gate - AGGRESSIVE: Lower threshold to catch 2x+ winners early
+# Target early entries before liquidity increases
+# Accept risk: Lower liquidity = earlier entry = higher potential for 2x+
 USE_LIQUIDITY_FILTER = _get_bool("USE_LIQUIDITY_FILTER", True)
-MIN_LIQUIDITY_USD = _get_float("MIN_LIQUIDITY_USD", 30000.0)  # Raised from 20k to 30k (27.8% -> 32.1% win rate zone)
-EXCELLENT_LIQUIDITY_USD = _get_float("EXCELLENT_LIQUIDITY_USD", 60000.0)  # Updated to reflect data
+MIN_LIQUIDITY_USD = _get_float("MIN_LIQUIDITY_USD", 15000.0)  # LOWERED for early entries (risky but high reward)
+EXCELLENT_LIQUIDITY_USD = _get_float("EXCELLENT_LIQUIDITY_USD", 40000.0)  # Updated for early-stage tokens
 
-# Volume to Liquidity Ratio - Keep low to catch early entries
+# Volume to Liquidity Ratio - Minimal restrictions for early entries
 VOL_TO_LIQ_RATIO_MIN = _get_float("VOL_TO_LIQ_RATIO_MIN", 0.0)
-VOL_TO_MCAP_RATIO_MIN = _get_float("VOL_TO_MCAP_RATIO_MIN", 0.05)  # Slight filter for activity
+VOL_TO_MCAP_RATIO_MIN = _get_float("VOL_TO_MCAP_RATIO_MIN", 0.02)  # LOWERED - less restrictive
 
 # Security Gates
 REQUIRE_LP_LOCKED = _get_bool("REQUIRE_LP_LOCKED", False)
@@ -360,10 +361,11 @@ SMART_MONEY_SCORE_BONUS = _get_int("SMART_MONEY_SCORE_BONUS", 0)  # REMOVED
 # Velocity
 REQUIRE_VELOCITY_MIN_SCORE_FOR_ALERT = _get_int("REQUIRE_VELOCITY_MIN_SCORE_FOR_ALERT", 0)
 
-# Cycle Balance - DATA-DRIVEN: Score 9 had 31.9% win rate (BEST), Score 5-7 had 20-22%
-# Lower threshold to 5 to allow more risky but potentially profitable tokens
-SMART_CYCLE_MIN_SCORE = _get_int("SMART_CYCLE_MIN_SCORE", 6)
-GENERAL_CYCLE_MIN_SCORE = _get_int("GENERAL_CYCLE_MIN_SCORE", 5)  # Lowered from 6 to 5 for more volume
+# Cycle Balance - AGGRESSIVE: Lower scores to catch more 2x+ opportunities
+# Accept borderline tokens that could be rockets
+# NOT TOO RESTRICTIVE - allow score 3+ for high volume
+SMART_CYCLE_MIN_SCORE = _get_int("SMART_CYCLE_MIN_SCORE", 4)  # LOWERED for volume
+GENERAL_CYCLE_MIN_SCORE = _get_int("GENERAL_CYCLE_MIN_SCORE", 3)  # LOWERED - accept riskier plays
 
 # Multi-signal Confirmation
 REQUIRE_MULTI_SIGNAL = _get_bool("REQUIRE_MULTI_SIGNAL", False)
