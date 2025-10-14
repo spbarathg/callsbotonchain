@@ -224,13 +224,19 @@ def get_token_complete_data(token_address: str) -> Dict[str, Any]:
 def export_to_csv(output_file: str = "comprehensive_token_data.csv"):
     """
     Export all token data to CSV.
-    
+
     Creates TWO files:
     1. Main CSV with summary data
     2. JSON file with complete time series data
     """
     print("🔍 Fetching all alerted tokens...")
-    tokens = get_alerted_tokens_for_tracking(hours=24*365)  # Get all tokens (1 year)
+
+    # Get all tokens directly from database
+    conn = sqlite3.connect(DatabasePaths.SIGNALS_DB)
+    c = conn.cursor()
+    c.execute("SELECT token_address FROM alerted_tokens ORDER BY alerted_at DESC")
+    tokens = [row[0] for row in c.fetchall()]
+    conn.close()
     
     if not tokens:
         print("❌ No tokens found!")
