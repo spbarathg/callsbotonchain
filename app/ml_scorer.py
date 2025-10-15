@@ -27,6 +27,23 @@ class MLScorer:
             self.gain_model = joblib.load(f'{model_dir}/gain_predictor.pkl')
             self.winner_model = joblib.load(f'{model_dir}/winner_classifier.pkl')
             self.features = joblib.load(f'{model_dir}/features.pkl')
+            
+            # CRITICAL: Validate feature order to prevent silent failures
+            expected_features = [
+                'score', 'prelim_score', 'score_gap', 'smart_money',
+                'log_liquidity', 'log_volume', 'log_mcap',
+                'vol_to_mcap', 'vol_to_liq', 'liq_to_mcap',
+                'is_smart_money', 'is_strict', 'is_nuanced', 'is_high_confidence',
+                'is_micro', 'is_small', 'is_excellent_liq', 'is_good_liq', 'is_low_liq'
+            ]
+            
+            if self.features != expected_features:
+                print(f"⚠️  ML feature mismatch! Expected {len(expected_features)}, got {len(self.features)}")
+                print(f"   Expected: {expected_features[:5]}...")
+                print(f"   Got: {self.features[:5] if isinstance(self.features, list) else self.features}...")
+                self.enabled = False
+                return
+            
             print("✅ ML models loaded successfully")
         except FileNotFoundError:
             print("⚠️  ML models not found. Run: python scripts/ml/train_model.py")
