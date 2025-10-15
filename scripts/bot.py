@@ -486,8 +486,9 @@ def process_feed_item(tx: dict, is_smart_cycle: bool, session_alerted_tokens: se
 		if not (change_24h == change_24h):  # NaN check
 			change_24h = 0
 		
-		# Reject if already dumped significantly (>30% in 24h) - dead token!
-		if change_24h < -30:
+		# Reject if already dumped significantly (>60% in 24h) - dead token!
+		# FIXED: Was -30%, now -60% to allow dip buying opportunities
+		if change_24h < -60:
 			_out(f"❌ REJECTED (MAJOR DUMP): {token_address} - {change_24h:.1f}% in 24h (already crashed!)")
 			return "skipped", None, 0, None
 
@@ -572,25 +573,28 @@ def process_feed_item(tx: dict, is_smart_cycle: bool, session_alerted_tokens: se
 		return "skipped", None, 0, None
 	jr_strict_ok = check_junior_strict(stats, score)
 	conviction_type = None
-	if smart_involved:
-		if jr_strict_ok:
+	
+	# FIXED: Give ALL tokens equal treatment - smart money or not
+	# Data showed non-smart outperformed (3.03x vs 1.12x), so no special treatment
+	# Both paths now get nuanced fallback
+	if jr_strict_ok:
+		if smart_involved:
 			_out(f"PASSED (Strict + Smart Money): {token_address}")
 			conviction_type = "High Confidence (Smart Money)"
 		else:
-			_out(f"REJECTED (Junior Strict): {token_address}")
-			return "skipped", None, 0, None
-	else:
-		if jr_strict_ok:
 			_out(f"PASSED (Strict Rules): {token_address}")
 			conviction_type = "High Confidence (Strict)"
-		else:
-			_out(f"ENTERING DEBATE (No Smart Money; Strict-Junior failed): {token_address}")
-			if check_junior_nuanced(stats, score):
-				_out(f"PASSED (Nuanced Junior): {token_address}")
-				conviction_type = "Nuanced Conviction"
+	else:
+		_out(f"ENTERING DEBATE (Strict-Junior failed): {token_address}")
+		if check_junior_nuanced(stats, score):
+			_out(f"PASSED (Nuanced Junior): {token_address}")
+			if smart_involved:
+				conviction_type = "Nuanced Conviction (Smart Money)"
 			else:
-				_out(f"REJECTED (Nuanced Debate): {token_address}")
-				return "skipped", None, 0, None
+				conviction_type = "Nuanced Conviction"
+		else:
+			_out(f"REJECTED (Nuanced Debate): {token_address}")
+			return "skipped", None, 0, None
 	
 	# 🤖 ML Enhancement (optional - requires trained models)
 	# Applied AFTER conviction_type is determined

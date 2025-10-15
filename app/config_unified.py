@@ -204,7 +204,7 @@ PRELIM_USD_HIGH = _get_float("PRELIM_USD_HIGH", 50000.0)
 PRELIM_USD_MID = _get_float("PRELIM_USD_MID", 10000.0)
 PRELIM_USD_MED = _get_float("PRELIM_USD_MED", 10000.0)  # Alias for MID
 PRELIM_USD_LOW = _get_float("PRELIM_USD_LOW", 1000.0)
-PRELIM_DETAILED_MIN = _get_int("PRELIM_DETAILED_MIN", 4)  # Lowered from 5 to catch more early signals
+PRELIM_DETAILED_MIN = _get_int("PRELIM_DETAILED_MIN", 1)  # FIXED: Was 4 (impossible to reach), now 1 to analyze all tokens
 
 # Volume Thresholds (ADJUSTED based on moonshots' median volume)
 VOL_VERY_HIGH = _get_float("VOL_VERY_HIGH", 150000.0)
@@ -231,13 +231,14 @@ MOMENTUM_1H_MED = _get_float("MOMENTUM_1H_MED", 5.0)
 MOMENTUM_1H_STRONG = _get_float("MOMENTUM_1H_STRONG", 15.0)
 MOMENTUM_1H_PUMPER = _get_float("MOMENTUM_1H_PUMPER", 30.0)
 MOMENTUM_24H_HIGH = _get_float("MOMENTUM_24H_HIGH", 50.0)
-DRAW_24H_MAJOR = _get_float("DRAW_24H_MAJOR", -30.0)  # Major drawdown threshold
+DRAW_24H_MAJOR = _get_float("DRAW_24H_MAJOR", -60.0)  # Major drawdown threshold (was -30%, now -60% to allow dip buying)
 
 # ANTI-FOMO FILTER: Reject tokens that already pumped (late entry risk)
 # DATA-DRIVEN UPDATE: Winners had 24h change up to +646%, mega winner had +186%
-# Raised threshold to avoid blocking legitimate high-momentum opportunities
-MAX_24H_CHANGE_FOR_ALERT = _get_float("MAX_24H_CHANGE_FOR_ALERT", 150.0)  # Raised from 50% to 150%
-MAX_1H_CHANGE_FOR_ALERT = _get_float("MAX_1H_CHANGE_FOR_ALERT", 300.0)   # Raised back to 300%
+# FIXED: Removed hard caps - today's best winners (+585%, +332%) would have been blocked!
+# Ongoing pumps can continue for days - catch them mid-pump
+MAX_24H_CHANGE_FOR_ALERT = _get_float("MAX_24H_CHANGE_FOR_ALERT", 1000.0)  # Raised from 150% to 1000% (effectively disabled)
+MAX_1H_CHANGE_FOR_ALERT = _get_float("MAX_1H_CHANGE_FOR_ALERT", 2000.0)   # Raised from 300% to 2000% (effectively disabled)
 
 
 # ============================================================================
