@@ -135,28 +135,16 @@ class SignalProcessor:
             trader
         )
         
-        # Multi-signal confirmation
-        if REQUIRE_MULTI_SIGNAL:
-            recent_obs = get_recent_token_signals(token_address, MULTI_SIGNAL_WINDOW_SEC)
-            if len(recent_obs) < int(MULTI_SIGNAL_MIN_COUNT or 2):
-                self._log(f"Awaiting confirmations: {token_address} ({len(recent_obs)}/{int(MULTI_SIGNAL_MIN_COUNT or 2)})")
-                return ProcessResult(
-                    status="skipped",
-                    token_address=token_address,
-                    preliminary_score=preliminary_score,
-                    api_calls_saved=1,
-                    error_message="Awaiting multi-signal confirmation"
-                )
+        # OPTIMIZED: Removed multi-signal check - always disabled (REQUIRE_MULTI_SIGNAL = False)
+        # if REQUIRE_MULTI_SIGNAL:
+        #     recent_obs = get_recent_token_signals(token_address, MULTI_SIGNAL_WINDOW_SEC)
+        #     if len(recent_obs) < int(MULTI_SIGNAL_MIN_COUNT or 2):
+        #         return ProcessResult(...)
         
-        # Token age check
-        if int(MIN_TOKEN_AGE_MINUTES or 0) > 0:
-            if not self._check_token_age(token_address, MIN_TOKEN_AGE_MINUTES):
-                return ProcessResult(
-                    status="skipped",
-                    token_address=token_address,
-                    preliminary_score=preliminary_score,
-                    error_message="Token too new"
-                )
+        # OPTIMIZED: Removed token age check - always disabled (MIN_TOKEN_AGE_MINUTES = 0)
+        # if int(MIN_TOKEN_AGE_MINUTES or 0) > 0:
+        #     if not self._check_token_age(token_address, MIN_TOKEN_AGE_MINUTES):
+        #         return ProcessResult(...)
         
         # Preliminary score gating
         if preliminary_score < PRELIM_DETAILED_MIN:
@@ -233,15 +221,10 @@ class SignalProcessor:
                 error_message="Smart money required but not detected"
             )
         
-        if REQUIRE_VELOCITY_MIN_SCORE_FOR_ALERT:
-            if (velocity_bonus // 2) < (REQUIRE_VELOCITY_MIN_SCORE_FOR_ALERT // 2):
-                return ProcessResult(
-                    status="skipped",
-                    token_address=token_address,
-                    preliminary_score=preliminary_score,
-                    final_score=score,
-                    error_message="Velocity score too low"
-                )
+        # OPTIMIZED: Removed velocity check - always 0, check always passes
+        # if REQUIRE_VELOCITY_MIN_SCORE_FOR_ALERT:
+        #     if (velocity_bonus // 2) < (REQUIRE_VELOCITY_MIN_SCORE_FOR_ALERT // 2):
+        #         return ProcessResult(...)
         
         # General cycle score requirement
         if not feed_tx.smart_money and score < GENERAL_CYCLE_MIN_SCORE:
@@ -266,40 +249,36 @@ class SignalProcessor:
             )
         
         # Junior strict and nuanced checks
+        # FIXED: Give ALL tokens equal treatment - smart money or not
+        # Data showed non-smart outperformed (3.03x vs 1.12x), so no special treatment
+        # Both paths now get nuanced fallback
         jr_strict_ok = check_junior_strict(stats_raw, score)
         conviction_type = None
         
-        if feed_tx.smart_money:
-            if jr_strict_ok:
+        if jr_strict_ok:
+            if feed_tx.smart_money:
                 self._log(f"PASSED (Strict + Smart Money): {token_address}")
                 conviction_type = "High Confidence (Smart Money)"
             else:
-                self._log(f"REJECTED (Junior Strict): {token_address}")
+                self._log(f"PASSED (Strict Rules): {token_address}")
+                conviction_type = "High Confidence (Strict)"
+        else:
+            self._log(f"ENTERING DEBATE (Strict-Junior failed): {token_address}")
+            if check_junior_nuanced(stats_raw, score):
+                self._log(f"PASSED (Nuanced Junior): {token_address}")
+                if feed_tx.smart_money:
+                    conviction_type = "Nuanced Conviction (Smart Money)"
+                else:
+                    conviction_type = "Nuanced Conviction"
+            else:
+                self._log(f"REJECTED (Nuanced Debate): {token_address}")
                 return ProcessResult(
                     status="skipped",
                     token_address=token_address,
                     preliminary_score=preliminary_score,
                     final_score=score,
-                    error_message="Failed junior strict check"
+                    error_message="Failed nuanced check"
                 )
-        else:
-            if jr_strict_ok:
-                self._log(f"PASSED (Strict Rules): {token_address}")
-                conviction_type = "High Confidence (Strict)"
-            else:
-                self._log(f"ENTERING DEBATE: {token_address}")
-                if check_junior_nuanced(stats_raw, score):
-                    self._log(f"PASSED (Nuanced Junior): {token_address}")
-                    conviction_type = "Nuanced Conviction"
-                else:
-                    self._log(f"REJECTED (Nuanced Debate): {token_address}")
-                    return ProcessResult(
-                        status="skipped",
-                        token_address=token_address,
-                        preliminary_score=preliminary_score,
-                        final_score=score,
-                        error_message="Failed nuanced check"
-                    )
         
         # ML Enhancement (optional)
         score = self._apply_ml_enhancement(score, stats_raw, feed_tx.smart_money, conviction_type, scoring_details)
@@ -420,8 +399,10 @@ class SignalProcessor:
         if not (change_24h == change_24h):
             change_24h = 0
 
-        # Reject if already dumped significantly (>30% in 24h) - dead token!
-        if change_24h < -30:
+        # Reject if already dumped significantly (>60% in 24h) - dead token!
+        # FIXED: Use DRAW_24H_MAJOR config instead of hardcoded -30%
+        from app.config_unified import DRAW_24H_MAJOR
+        if change_24h < DRAW_24H_MAJOR:
             self._log(f"❌ REJECTED (MAJOR DUMP): {token_address} - {change_24h:.1f}% in 24h (already crashed!)")
             return False
 

@@ -26,31 +26,15 @@ def relay_enabled() -> bool:
 
 def relay_contract_address_sync(*_args, **_kwargs) -> bool:
     return False
+
 from app.logger_utils import log_alert, log_tracking, log_process, log_heartbeat, mirror_stdout_line
 import html
 from app.toggles import signals_enabled
-from app.analyze_token import (
-	get_token_stats,
-	score_token,
-	calculate_preliminary_score,
-	check_senior_strict,
-	check_junior_strict,
-	check_junior_nuanced,
-)
-# ANTI-FOMO FILTER: Import thresholds to reject late entries
-from app.config_unified import MAX_24H_CHANGE_FOR_ALERT, MAX_1H_CHANGE_FOR_ALERT
-from app.notify import send_telegram_alert, push_signal_to_redis
-from app.telethon_notifier import send_group_message
-from app.storage import (
-	init_db,
-	has_been_alerted,
-	mark_alerted,
-	record_alert_with_metadata,
-	record_token_activity,
-	get_recent_token_signals,
-	record_transaction_snapshot,
-	record_wallet_first_buy,
-)
+from app.storage import init_db
+from app.notify import send_telegram_alert
+
+# OPTIMIZED: Use SignalProcessor for all feed processing (removed 870 lines of duplicate logic)
+from app.signal_processor import SignalProcessor
 
 # Optional Prometheus metrics (enable with CALLSBOT_METRICS_ENABLED=true)
 METRICS_ENABLED = (os.getenv("CALLSBOT_METRICS_ENABLED", "false").strip().lower() == "true")
@@ -98,37 +82,7 @@ def _out(msg: str) -> None:
 		pass
 
 
-# Exposed helper for tests and reuse
-def tx_has_smart_money(tx_obj: dict) -> bool:
-    """Detect smart money strictly from tx hints.
-
-    Hints considered:
-      - explicit flags: smart_money, is_smart, isTopWallet
-      - presence of non-empty top_wallets list
-      - large trader PnL signals in keys: wallet_pnl, min_wallet_pnl, trader_pnl, pnl_usd (>=1000)
-      - label strings containing smart/top/alpha/elite
-    """
-    try:
-        if any(bool(tx_obj.get(k)) for k in ("smart_money", "is_smart", "isTopWallet")):
-            return True
-        top_wallets = tx_obj.get("top_wallets")
-        if isinstance(top_wallets, (list, tuple)) and len(top_wallets) > 0:
-            return True
-        for key in ("wallet_pnl", "min_wallet_pnl", "trader_pnl", "pnl_usd"):
-            val = tx_obj.get(key)
-            if isinstance(val, (int, float)) and float(val) >= 1000:
-                return True
-        labels = tx_obj.get("labels") or tx_obj.get("wallet_labels")
-        if labels:
-            if isinstance(labels, (list, tuple)):
-                label_text = ",".join(str(x) for x in labels).lower()
-            else:
-                label_text = str(labels).lower()
-            if any(tag in label_text for tag in ("smart", "top", "alpha", "elite")):
-                return True
-        return False
-    except Exception:
-        return False
+# OPTIMIZED: Removed tx_has_smart_money - moved to SignalProcessor
 
 
 def _release_singleton_lock(lock_path: str) -> None:
@@ -333,30 +287,10 @@ def handle_cooldown(feed_error: Optional[str], retry_after_sec: int) -> None:
 		time.sleep(1)
                 
 
-def _select_token_and_usd(tx: dict) -> Tuple[Optional[str], float]:
-	"""Map Cielo-like feed item to candidate token address and usd value."""
-	sol_mint = "So11111111111111111111111111111111111111112"
-	t0 = tx.get("token0_address")
-	t1 = tx.get("token1_address")
-	t0_usd = tx.get("token0_amount_usd", 0) or 0
-	t1_usd = tx.get("token1_amount_usd", 0) or 0
-	if t0 == sol_mint and t1:
-		return t1, t1_usd
-	if t1 == sol_mint and t0:
-		return t0, t0_usd
-	# neither leg is SOL: choose higher USD leg
-	if (t1_usd or 0) >= (t0_usd or 0):
-		return t1, t1_usd
-	return t0, t0_usd
+# OPTIMIZED: Removed _select_token_and_usd - logic moved to FeedTransaction model
 
-
-def process_feed_item(tx: dict, is_smart_cycle: bool, session_alerted_tokens: set, last_alert_time: float) -> Tuple[str, Optional[float], int, Optional[str]]:
-	"""Process one feed item. Returns (status, new_last_alert_time, api_saved_delta, alerted_token)."""
-	from app.config_unified import DEBUG_PRELIM, TELEGRAM_ALERT_MIN_INTERVAL, REQUIRE_SMART_MONEY_FOR_ALERT, REQUIRE_VELOCITY_MIN_SCORE_FOR_ALERT, PRELIM_DETAILED_MIN, GENERAL_CYCLE_MIN_SCORE
-	# relay functions are already imported at module level with fallbacks
-
-	token_address, usd_value = _select_token_and_usd(tx)
-	tx["usd_value"] = usd_value
+# OPTIMIZED: Removed 870-line process_feed_item_legacy function - replaced with SignalProcessor
+# All signal detection logic is now in app/signal_processor.py (single source of truth)
 	# FIX: Trust the feed cycle instead of looking for non-existent metadata
 	# When smart_money=true is passed to Cielo API, it filters BY smart wallets
 	# but doesn't include wallet metadata in responses to flag them
@@ -980,6 +914,9 @@ def run_bot():
     except Exception:
         pass
     
+    # OPTIMIZED: Initialize SignalProcessor (replaces duplicate logic)
+    processor = SignalProcessor({})
+    
     is_smart_cycle = False
     while not shutdown_flag:
         try:
@@ -1073,23 +1010,26 @@ def run_bot():
                     except Exception:
                         pass
             
+            # OPTIMIZED: Use SignalProcessor for all feed items
             for tx in feed.get("transactions", []):
                 try:
                     if shutdown_flag:
                         break
-                    status, last_alert_time_delta, api_saved_delta, alerted = process_feed_item(tx, is_smart_cycle, session_alerted_tokens, last_alert_time)
-                    # Count each processed tx regardless of outcome
-                    try:
-                        processed_count += 1
-                    except Exception:
-                        processed_count = processed_count + 1
-                    if alerted:
-                        session_alerted_tokens.add(alerted)
+                    
+                    # Process feed item using optimized SignalProcessor
+                    result = processor.process_feed_item(tx, is_smart_cycle)
+                    
+                    processed_count += 1
+                    
+                    # Track API calls saved
+                    if result.api_calls_saved:
+                        api_calls_saved += result.api_calls_saved
+                    
+                    # Handle alerts
+                    if result.is_alert and result.token_address:
+                        session_alerted_tokens.add(result.token_address)
                         alert_count += 1
-                    if last_alert_time_delta is not None:
-                        last_alert_time = last_alert_time_delta
-                    if api_saved_delta:
-                        api_calls_saved += api_saved_delta
+                    
                 except Exception as e:
                     # Don't let one bad transaction crash the entire loop
                     _out(f"Error processing transaction: {e}")
