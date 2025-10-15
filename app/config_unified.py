@@ -168,7 +168,7 @@ REDIS_URL = os.getenv("REDIS_URL", "").strip()
 HIGH_CONFIDENCE_SCORE = _get_int("HIGH_CONFIDENCE_SCORE", 5)  # LOWERED to allow more signals (not too restrictive)
 
 # Feed processing
-FETCH_INTERVAL = _get_int("FETCH_INTERVAL", 60)
+FETCH_INTERVAL = _get_int("FETCH_INTERVAL", 45)  # OPTIMIZED: 45s = 33% more checks/hour (80/hr vs 60/hr)
 SMART_FEED_SCOPE = os.getenv("SMART_FEED_SCOPE", "trending").strip().lower()
 GENERAL_FEED_SCOPE = os.getenv("GENERAL_FEED_SCOPE", "moonshot").strip().lower()
 MIN_USD_VALUE = _get_int("MIN_USD_VALUE", 200)  # Minimum USD value for feed filtering
@@ -204,7 +204,7 @@ PRELIM_USD_HIGH = _get_float("PRELIM_USD_HIGH", 50000.0)
 PRELIM_USD_MID = _get_float("PRELIM_USD_MID", 10000.0)
 PRELIM_USD_MED = _get_float("PRELIM_USD_MED", 10000.0)  # Alias for MID
 PRELIM_USD_LOW = _get_float("PRELIM_USD_LOW", 1000.0)
-PRELIM_DETAILED_MIN = _get_int("PRELIM_DETAILED_MIN", 1)  # FIXED: Was 4 (impossible to reach), now 1 to analyze all tokens
+PRELIM_DETAILED_MIN = _get_int("PRELIM_DETAILED_MIN", 1)  # OPTIMIZED: Lowered to 1 to catch early micro-caps (higher frequency)
 
 # Volume Thresholds (ADJUSTED based on moonshots' median volume)
 VOL_VERY_HIGH = _get_float("VOL_VERY_HIGH", 150000.0)
@@ -235,10 +235,10 @@ DRAW_24H_MAJOR = _get_float("DRAW_24H_MAJOR", -60.0)  # Major drawdown threshold
 
 # ANTI-FOMO FILTER: Reject tokens that already pumped (late entry risk)
 # DATA-DRIVEN UPDATE: Winners had 24h change up to +646%, mega winner had +186%
-# FIXED: Removed hard caps - today's best winners (+585%, +332%) would have been blocked!
-# Ongoing pumps can continue for days - catch them mid-pump
-MAX_24H_CHANGE_FOR_ALERT = _get_float("MAX_24H_CHANGE_FOR_ALERT", 1000.0)  # Raised from 150% to 1000% (effectively disabled)
-MAX_1H_CHANGE_FOR_ALERT = _get_float("MAX_1H_CHANGE_FOR_ALERT", 2000.0)   # Raised from 300% to 2000% (effectively disabled)
+# OPTIMIZED: Allow ongoing pumps but reject extreme late entries
+# Balance: Catch tokens mid-pump while avoiding 10x-already-pumped scenarios
+MAX_24H_CHANGE_FOR_ALERT = _get_float("MAX_24H_CHANGE_FOR_ALERT", 800.0)  # OPTIMIZED: Allow up to 8x pump to catch ongoing mooners (data showed winners hit +646%)
+MAX_1H_CHANGE_FOR_ALERT = _get_float("MAX_1H_CHANGE_FOR_ALERT", 500.0)   # OPTIMIZED: Allow up to 5x spike in 1h to catch parabolic moves early
 
 
 # ============================================================================
@@ -317,14 +317,14 @@ LARGE_CAP_HOLDER_STATS_MCAP_USD = _get_float("LARGE_CAP_HOLDER_STATS_MCAP_USD", 
 # Winner median liquidity: $17,811 - we aim slightly above for safety
 # This filters out most losers (median $0) while keeping winners
 USE_LIQUIDITY_FILTER = _get_bool("USE_LIQUIDITY_FILTER", True)
-MIN_LIQUIDITY_USD = _get_float("MIN_LIQUIDITY_USD", 18000.0)  # RAISED to winner median ($17.8k) for higher quality
+MIN_LIQUIDITY_USD = _get_float("MIN_LIQUIDITY_USD", 15000.0)  # OPTIMIZED: $15k catches early tokens while filtering rugs (balance frequency+quality)
 EXCELLENT_LIQUIDITY_USD = _get_float("EXCELLENT_LIQUIDITY_USD", 50000.0)  # Premium tier
 
-# Volume to Liquidity/Mcap Ratios - TIGHTENED for quality
+# Volume to Liquidity/Mcap Ratios - BALANCED for frequency + quality
 # Higher vol/mcap ratio = more trading interest = better chance of 2x+
 VOL_TO_LIQ_RATIO_MIN = _get_float("VOL_TO_LIQ_RATIO_MIN", 0.0)
-VOL_TO_MCAP_RATIO_MIN = _get_float("VOL_TO_MCAP_RATIO_MIN", 0.10)  # RAISED 5x (was 0.02) - require real activity
-MIN_VOLUME_24H_USD = _get_float("MIN_VOLUME_24H_USD", 5000.0)  # NEW: Absolute minimum volume
+VOL_TO_MCAP_RATIO_MIN = _get_float("VOL_TO_MCAP_RATIO_MIN", 0.08)  # OPTIMIZED: Lowered to 8% to catch early activity (was 10%)
+MIN_VOLUME_24H_USD = _get_float("MIN_VOLUME_24H_USD", 3000.0)  # OPTIMIZED: Lowered to $3k to catch micro-caps earlier (was $5k)
 
 # Security Gates
 REQUIRE_LP_LOCKED = _get_bool("REQUIRE_LP_LOCKED", False)
@@ -333,13 +333,13 @@ ALLOW_UNKNOWN_SECURITY = _get_bool("ALLOW_UNKNOWN_SECURITY", True)
 
 # Holder Concentration - OPTIMIZED for 50% hit rate target
 # Tighter caps to filter out coordinated rug schemes
-MAX_TOP10_CONCENTRATION = _get_float("MAX_TOP10_CONCENTRATION", 30.0)  # Slightly looser for micro-caps (was 18%)
-MAX_BUNDLERS_PERCENT = _get_float("MAX_BUNDLERS_PERCENT", 35.0)  # NEW: Block coordinated schemes (was 100%)
-MAX_INSIDERS_PERCENT = _get_float("MAX_INSIDERS_PERCENT", 45.0)  # NEW: Block insider dump setups (was 100%)
+MAX_TOP10_CONCENTRATION = _get_float("MAX_TOP10_CONCENTRATION", 35.0)  # OPTIMIZED: Slightly looser for micro-cap opportunities (was 30%)
+MAX_BUNDLERS_PERCENT = _get_float("MAX_BUNDLERS_PERCENT", 40.0)  # OPTIMIZED: Balanced for early tokens (was 35%)
+MAX_INSIDERS_PERCENT = _get_float("MAX_INSIDERS_PERCENT", 50.0)  # OPTIMIZED: Balanced for launch phase (was 45%)
 ENFORCE_BUNDLER_CAP = _get_bool("ENFORCE_BUNDLER_CAP", True)  # ENABLED! (was False)
 ENFORCE_INSIDER_CAP = _get_bool("ENFORCE_INSIDER_CAP", True)  # ENABLED! (was False)
 REQUIRE_HOLDER_STATS_FOR_LARGE_CAP_ALERT = _get_bool("REQUIRE_HOLDER_STATS_FOR_LARGE_CAP_ALERT", False)
-MIN_HOLDER_COUNT = _get_int("MIN_HOLDER_COUNT", 50)  # NEW: Require some distribution
+MIN_HOLDER_COUNT = _get_int("MIN_HOLDER_COUNT", 40)  # OPTIMIZED: Lowered to 40 to catch earlier tokens (was 50)
 
 # Nuanced Scoring Factors (for flexible gating)
 # TIGHTENED for 50% hit rate target - nuanced should still be high quality
@@ -369,8 +369,8 @@ REQUIRE_VELOCITY_MIN_SCORE_FOR_ALERT = _get_int("REQUIRE_VELOCITY_MIN_SCORE_FOR_
 # Cycle Balance - OPTIMIZED: Higher scores for 50% hit rate target
 # Only alert on high-quality signals with strong fundamentals
 # Quality over quantity - aim for winners not volume
-SMART_CYCLE_MIN_SCORE = _get_int("SMART_CYCLE_MIN_SCORE", 5)  # RAISED for quality (was 4)
-GENERAL_CYCLE_MIN_SCORE = _get_int("GENERAL_CYCLE_MIN_SCORE", 5)  # RAISED significantly (was 3)
+SMART_CYCLE_MIN_SCORE = _get_int("SMART_CYCLE_MIN_SCORE", 4)  # OPTIMIZED: Lowered to 4 for more opportunities (was 5)
+GENERAL_CYCLE_MIN_SCORE = _get_int("GENERAL_CYCLE_MIN_SCORE", 4)  # OPTIMIZED: Lowered to 4 to increase frequency (was 5)
 
 # Multi-signal Confirmation
 REQUIRE_MULTI_SIGNAL = _get_bool("REQUIRE_MULTI_SIGNAL", False)
