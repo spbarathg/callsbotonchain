@@ -144,7 +144,13 @@ def fetch_solana_feed(cursor=None, smart_money_only: bool = False) -> Dict[str, 
         # Must have positive USD value
         usd = item.get("usd_value") or item.get("token1_amount_usd") or item.get("token0_amount_usd") or 0
         try:
-            if float(usd) <= 0:
+            usd_float = float(usd)
+            # CRITICAL FIX: Check for NaN and inf (NaN comparisons always return False!)
+            if not (usd_float == usd_float):  # NaN check (NaN != NaN)
+                return False
+            if usd_float == float('inf') or usd_float == float('-inf'):
+                return False
+            if usd_float <= 0:
                 return False
         except (ValueError, TypeError):
             return False
