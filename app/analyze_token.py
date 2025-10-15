@@ -136,121 +136,45 @@ def _get_token_stats_dexscreener(token_address: str) -> Dict[str, Any]:
     return {}
 
 
-_DENY_STATE_FILE = os.getenv("CALLSBOT_DENY_FILE", os.path.join("var", "stats_deny.json"))
-# Updated: Use time-boxed denial with TTL instead of permanent flag
-_deny_cache = {"stats_denied_until": 0}  # Unix timestamp
+# OPTIMIZED: In-memory only deny cache (removed file I/O bottleneck)
+_deny_cache = {"stats_denied_until": 0.0}  # Unix timestamp
 _deny_lock = threading.Lock()
-# Default TTL: 15 minutes (configurable via env)
 _DENY_TTL_SECONDS = int(os.getenv("CALLSBOT_DENY_TTL_SEC", "900"))  # 15 min default
 
 
-def _deny_load_unlocked() -> None:
-    try:
-        if not _DENY_STATE_FILE:
-            return
-        if not os.path.exists(os.path.dirname(_DENY_STATE_FILE) or "."):
-            os.makedirs(os.path.dirname(_DENY_STATE_FILE) or ".", exist_ok=True)
-        with file_lock(_DENY_STATE_FILE):
-            if os.path.exists(_DENY_STATE_FILE):
-                with open(_DENY_STATE_FILE, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                    if isinstance(data, dict):
-                        # Support legacy bool format for migration
-                        if isinstance(data.get("stats_denied"), bool):
-                            if data["stats_denied"]:
-                                # Convert legacy permanent deny to TTL
-                                _deny_cache["stats_denied_until"] = time.time() + _DENY_TTL_SECONDS
-                            else:
-                                _deny_cache["stats_denied_until"] = 0
-                        # New TTL format
-                        elif "stats_denied_until" in data:
-                            _deny_cache["stats_denied_until"] = float(data["stats_denied_until"])
-    except Exception as e:
-        try:
-            log_process({"type": "deny_state_load_error", "error": str(e)})
-        except Exception:
-            pass
-
-
-def _deny_save_unlocked() -> None:
-    try:
-        if not _DENY_STATE_FILE:
-            return
-        os.makedirs(os.path.dirname(_DENY_STATE_FILE) or ".", exist_ok=True)
-        with file_lock(_DENY_STATE_FILE):
-            tmp = _DENY_STATE_FILE + ".tmp"
-            with open(tmp, "w", encoding="utf-8") as f:
-                json.dump(_deny_cache, f, ensure_ascii=False)
-            os.replace(tmp, _DENY_STATE_FILE)
-    except Exception as e:
-        try:
-            log_process({"type": "deny_state_save_error", "error": str(e)})
-        except Exception:
-            pass
-
-
 def deny_is_denied() -> bool:
-    """Check if stats API is currently denied (with TTL expiry)"""
+    """OPTIMIZED: Check if stats API is denied (in-memory only, no file I/O)"""
     with _deny_lock:
-        _deny_load_unlocked()
-        denied_until = float(_deny_cache.get("stats_denied_until", 0))
+        denied_until = _deny_cache.get("stats_denied_until", 0.0)
         now = time.time()
         
         # Auto-clear expired denials
         if denied_until > 0 and now >= denied_until:
-            try:
-                log_process({
-                    "type": "deny_expired",
-                    "denied_until": denied_until,
-                    "now": now,
-                })
-            except Exception:
-                pass
-            _deny_cache["stats_denied_until"] = 0
-            _deny_save_unlocked()
+            _deny_cache["stats_denied_until"] = 0.0
             return False
         
         return denied_until > now
 
 
 def deny_mark_denied(duration_sec: Optional[int] = None) -> None:
-    """
-    Mark stats API as denied for a time-boxed duration.
-    
-    Args:
-        duration_sec: Duration in seconds (default: 15 minutes from env)
-    """
+    """OPTIMIZED: Mark stats API as denied (in-memory only)"""
     duration = duration_sec if duration_sec is not None else _DENY_TTL_SECONDS
     with _deny_lock:
-        denied_until = time.time() + duration
-        _deny_cache["stats_denied_until"] = denied_until
-        _deny_save_unlocked()
-        try:
-            log_process({
-                "type": "deny_marked",
-                "duration_sec": duration,
-                "denied_until": denied_until,
-            })
-        except Exception:
-            pass
+        _deny_cache["stats_denied_until"] = time.time() + duration
 
 
 def deny_clear() -> None:
     """Manually clear the deny state"""
     with _deny_lock:
-        _deny_cache["stats_denied_until"] = 0
-        _deny_save_unlocked()
+        _deny_cache["stats_denied_until"] = 0.0
 
 
 def deny_get_remaining_sec() -> int:
     """Get remaining deny duration in seconds"""
     with _deny_lock:
-        _deny_load_unlocked()
-        denied_until = float(_deny_cache.get("stats_denied_until", 0))
+        denied_until = _deny_cache.get("stats_denied_until", 0.0)
         now = time.time()
-        if denied_until <= now:
-            return 0
-        return int(denied_until - now)
+        return max(0, int(denied_until - now))
 
 
 _stats_cache: Dict[str, Tuple[float, Dict[str, Any]]] = {}
@@ -317,8 +241,11 @@ def _cache_set(token_address: str, data: Dict[str, Any]) -> None:
 
 
 def get_token_stats(token_address: str, force_refresh: bool = False) -> Dict[str, Any]:
+    """OPTIMIZED: Streamlined stats fetching with simplified retry logic"""
     if not token_address:
         return {}
+    
+    # Check cache
     cached = _cache_get(token_address) if not force_refresh else None
     if cached:
         try:
@@ -326,285 +253,132 @@ def get_token_stats(token_address: str, force_refresh: bool = False) -> Dict[str
             cache_hit()
         except Exception:
             pass
-        try:
-            # Emit lightweight process log so the web can compute cache hit% without Prometheus
-            log_process({"type": "stats_cache_hit", "token": token_address})
-        except Exception:
-            pass
         return cached
-    else:
-        try:
-            from app.metrics import cache_miss
-            cache_miss()
-        except Exception:
-            pass
-        try:
-            log_process({"type": "stats_cache_miss", "token": token_address})
-        except Exception:
-            pass
-    # Enforce budget before hitting paid APIs; fall back to DexScreener if blocked
+    
+    try:
+        from app.metrics import cache_miss
+        cache_miss()
+    except Exception:
+        pass
+    
+    # Budget check
     try:
         b = get_budget()
-        if b and (not b.can_spend("stats")):
-            try:
-                log_process({"type": "token_stats_budget_block", "provider": "cielo", "fallback": "dexscreener"})
-            except Exception:
-                pass
+        if b and not b.can_spend("stats"):
             ds = _get_token_stats_dexscreener(token_address)
             return _normalize_stats_schema(ds) if ds else {}
     except Exception:
-        # If budget subsystem errors, proceed normally (will try Cielo then DexScreener)
         pass
 
-    base_urls = [
-        "https://feed-api.cielo.finance/api/v1",
-        "https://api.cielo.finance/api/v1",
-    ]
-    # Guard headers so we don't send None/"Bearer None"; if no key, prefer DexScreener
-    header_variants = []
-    if CIELO_API_KEY:
-        header_variants.append({"X-API-Key": CIELO_API_KEY})
-        header_variants.append({"Authorization": f"Bearer {CIELO_API_KEY}"})
-    params = {"token_address": token_address, "chain": "solana"}
-
-    # Add timeout and retry logic (handled in http_client)
-
-    # Skip Cielo if user disabled or we detected denial previously
-    if CIELO_DISABLE_STATS or deny_is_denied():
-        return _get_token_stats_dexscreener(token_address)
-
-    # If no API key configured, avoid calling Cielo with invalid headers
-    if not (CIELO_API_KEY and str(CIELO_API_KEY).strip()):
-        try:
-            log_process({"type": "token_stats_no_api_key", "provider": "cielo", "fallback": "dexscreener"})
-        except Exception:
-            pass
+    # Skip Cielo if disabled or denied
+    if CIELO_DISABLE_STATS or deny_is_denied() or not CIELO_API_KEY:
         return _normalize_stats_schema(_get_token_stats_dexscreener(token_address) or {})
 
-    combos = [(b, h) for b in base_urls for h in header_variants]
-    last_status = None
-    import random as _rand
-    for idx, (base, hdrs) in enumerate(combos):
-        url = f"{base}/token/stats"
-        result = request_json("GET", url, params=params, headers=hdrs, timeout=HTTP_TIMEOUT_STATS)
-        last_status = result.get("status_code")
-        if last_status == 200:
+    # OPTIMIZED: Single URL and header (removed combinatorial explosion)
+    url = "https://feed-api.cielo.finance/api/v1/token/stats"
+    params = {"token_address": token_address, "chain": "solana"}
+    headers = {"X-API-Key": CIELO_API_KEY}
+    
+    # Try Cielo API with simple retry
+    max_retries = 2
+    for attempt in range(max_retries):
+        result = request_json("GET", url, params=params, headers=headers, timeout=HTTP_TIMEOUT_STATS)
+        status = result.get("status_code")
+        
+        if status == 200:
             try:
-                budget = get_budget()
-                if not budget.spend("stats"):
-                    try:
-                        log_process({
-                            "type": "budget_spend_failed",
-                            "token": token_address,
-                            "reason": "budget_exhausted",
-                        })
-                    except Exception:
-                        pass
-                try:
-                    from app.metrics import add_stats_budget_used
-                    add_stats_budget_used(1)
-                except Exception:
-                    pass
+                get_budget().spend("stats")
             except Exception:
                 pass
-            api_response = result.get("json") or {}
-            try:
-                if api_response.get("status") == "ok" and "data" in api_response:
-                    api_response["data"]["_source"] = "cielo"
-                    # Augment with DexScreener when critical fields are missing
-                    try:
-                        data = api_response["data"]
-                        # Normalize schema keys for downstream consumers
-                        data = _normalize_stats_schema(data)
-
-                        def _missing_liq(d: Dict[str, Any]) -> bool:
-                            liq_obj = d.get('liquidity') or {}
-                            return not bool(d.get('liquidity_usd') or liq_obj.get('usd'))
-
-                        def _missing_vol(d: Dict[str, Any]) -> bool:
-                            return not bool(((d.get('volume') or {}).get('24h') or {}).get('volume_usd'))
-
-                        def _missing_mcap(d: Dict[str, Any]) -> bool:
-                            try:
-                                return float(d.get('market_cap_usd') or 0) <= 0
-                            except Exception:
-                                return True
-
-                        if _missing_liq(data) or _missing_vol(data) or _missing_mcap(data) or not data.get('symbol') or not data.get('name'):
-                            ds = _get_token_stats_dexscreener(token_address)
-                            if ds:
-                                # Liquidity
-                                if _missing_liq(data) and (ds.get('liquidity_usd') or (ds.get('liquidity') or {}).get('usd')):
-                                    if ds.get('liquidity_usd') is not None:
-                                        data['liquidity_usd'] = ds.get('liquidity_usd')
-                                    if ds.get('liquidity'):
-                                        data['liquidity'] = ds.get('liquidity')
-                                # Volume (24h)
-                                if _missing_vol(data) and (((ds.get('volume') or {}).get('24h') or {}).get('volume_usd') is not None):
-                                    vol24 = ((ds.get('volume') or {}).get('24h') or {})
-                                    data.setdefault('volume', {}).setdefault('24h', {})[
-                                        'volume_usd'] = vol24.get('volume_usd')
-                                # Market cap
-                                if _missing_mcap(data) and (ds.get('market_cap_usd') is not None):
-                                    data['market_cap_usd'] = ds.get('market_cap_usd')
-                                # Symbol/name enrichment for UI/alerts
-                                if (not data.get('symbol')) and ds.get('symbol'):
-                                    data['symbol'] = ds.get('symbol')
-                                if (not data.get('name')) and ds.get('name'):
-                                    data['name'] = ds.get('name')
-                                # Mark composite source
-                                try:
-                                    data['_source'] = f"{data.get('_source') or 'cielo'}+ds"
-                                except Exception:
-                                    data['_source'] = 'cielo+ds'
-                        _cache_set(token_address, data)
-                        return data
-                    except Exception:
-                        # If augmentation fails for any reason, still return Cielo data
-                        norm = _normalize_stats_schema(api_response["data"]) if isinstance(
-                            api_response.get("data"), dict) else api_response.get("data")
-                        _cache_set(token_address, norm)
-                        return norm
-                if isinstance(api_response, dict):
-                    api_response["_source"] = "cielo"
-                norm = _normalize_stats_schema(api_response) if isinstance(api_response, dict) else api_response
-                _cache_set(token_address, norm)
-                return norm
-            except Exception:
-                return {}
-        elif last_status == 429:
-            # Respect Retry-After header and backoff with jitter; mark denied on persistent blocks
-            try:
-                log_process({"type": "token_stats_rate_limited", "variant": int(idx + 1)})
-                try:
-                    from app.metrics import inc_deny
-                    inc_deny()
-                except Exception:
-                    pass
-            except Exception:
-                pass
-            headers = result.get("headers") or {}
-            retry_after = 0
-            try:
-                ra = headers.get("Retry-After")
-                if ra:
-                    retry_after = int(float(ra))
-            except Exception:
-                retry_after = 0
-            if retry_after <= 0:
-                # Exponential backoff with jitter based on idx
-                base_delay = 2 ** max(0, idx)
-                jitter = _rand.uniform(0, 0.5)
-                retry_after = base_delay + jitter
-            time.sleep(min(30, retry_after))
-            if idx >= len(combos) - 1:
-                # Use default TTL to avoid accidental 1s deny due to bool->int cast
-                deny_mark_denied()
-            continue
-        elif last_status == 404:
-            try:
-                log_process({"type": "token_stats_not_found", "token": token_address})
-            except Exception:
-                pass
+            
+            api_response = result.get("json", {})
+            if api_response.get("status") == "ok" and "data" in api_response:
+                data = _normalize_stats_schema(api_response["data"])
+                data["_source"] = "cielo"
+                
+                # OPTIMIZED: Simplified augmentation logic
+                if not data.get("liquidity_usd") or not data.get("market_cap_usd") or not data.get("symbol"):
+                    ds = _get_token_stats_dexscreener(token_address)
+                    if ds:
+                        data["liquidity_usd"] = data.get("liquidity_usd") or ds.get("liquidity_usd")
+                        data["market_cap_usd"] = data.get("market_cap_usd") or ds.get("market_cap_usd")
+                        data["symbol"] = data.get("symbol") or ds.get("symbol")
+                        data["name"] = data.get("name") or ds.get("name")
+                        data["_source"] = "cielo+ds"
+                
+                _cache_set(token_address, data)
+                return data
+            break
+            
+        elif status == 429:
+            if attempt < max_retries - 1:
+                time.sleep(min(2 ** attempt, 10))
+                continue
+            deny_mark_denied()
+            break
+            
+        elif status in (401, 403):
+            deny_mark_denied()
+            break
+            
+        elif status == 404:
             return {}
-        elif last_status in (401, 403):
-            # Try next variant
+            
+        elif attempt < max_retries - 1:
+            time.sleep(1)
             continue
         else:
-            txt = None
-            if result.get("json") is None:
-                txt = result.get("text")
-            try:
-                log_process({"type": "token_stats_error", "status": last_status, "text": (txt or "")[:200]})
-            except Exception:
-                pass
-            continue
-
-    if last_status in (401, 403):
-        # Use default TTL to avoid accidental short deny
-        deny_mark_denied()
-        try:
-            log_process({"type": "token_stats_denied_variants", "provider": "cielo", "fallback": "dexscreener"})
-        except Exception:
-            pass
-    else:
-        try:
-            log_process({"type": "token_stats_unavailable", "last_status": last_status, "fallback": "dexscreener"})
-        except Exception:
-            pass
+            break
+    
+    # Fallback to DexScreener
     return _normalize_stats_schema(_get_token_stats_dexscreener(token_address) or {})
 
 
 def _normalize_stats_schema(d: Dict[str, Any]) -> Dict[str, Any]:
-    """Ensure consistent keys and types across Cielo and DexScreener shapes.
-    - Guarantees numeric normalization and unknown flags.
-    - Fields: market_cap_usd, price_usd, liquidity_usd, volume.24h.volume_usd, change.{1h,24h}.
-    """
+    """OPTIMIZED: Streamlined normalization with fast validation"""
     if not isinstance(d, dict):
         return {}
+    
     out: Dict[str, Any] = dict(d)
-    # Market cap
-    try:
-        out["market_cap_usd"] = float(out.get("market_cap_usd"))
-        out["market_cap_unknown"] = False
-    except Exception:
-        out["market_cap_usd"] = float("nan")
-        out["market_cap_unknown"] = True
-    # Price
-    try:
-        out["price_usd"] = float(out.get("price_usd"))
-        out["price_unknown"] = False
-    except Exception:
-        out["price_usd"] = float("nan")
-        out["price_unknown"] = True
-    # Liquidity
-    liq_obj = out.get("liquidity") or {}
-    try:
-        liq_usd = out.get("liquidity_usd")
-        if liq_usd is None:
-            liq_usd = liq_obj.get("usd")
-        if liq_usd is None:
-            # CRITICAL FIX: Use 0.0 instead of NaN (NaN comparisons always False!)
-            out["liquidity_usd"] = 0.0
-            out["liquidity_unknown"] = True
-        else:
-            value = float(liq_usd)
-            # Handle NaN/inf from API responses
-            if not (value == value) or value == float('inf') or value == float('-inf'):
-                out["liquidity_usd"] = 0.0
-                out["liquidity_unknown"] = True
-            else:
-                out["liquidity_usd"] = value
-                out["liquidity_unknown"] = False
-    except Exception:
-        out["liquidity_usd"] = 0.0
-        out["liquidity_unknown"] = True
-    # Volume
-    v = (out.get("volume") or {})
-    v24 = (v.get("24h") or {})
-    try:
-        v24_usd = float(v24.get("volume_usd"))
-        out.setdefault("volume", {}).setdefault("24h", {})["volume_usd_unknown"] = False
-    except Exception:
-        v24_usd = float("nan")
-        out.setdefault("volume", {}).setdefault("24h", {})["volume_usd_unknown"] = True
-    out.setdefault("volume", {}).setdefault("24h", {})["volume_usd"] = v24_usd
-    # Change
-    ch = out.get("change") or {}
-    for k in ("1h", "24h"):
+    
+    # Helper for safe float conversion
+    def safe_float(val, default=0.0):
+        if val is None:
+            return default
         try:
-            ch_val = float(ch.get(k))
-            unknown_key = f"change_{k}_unknown"
-            out[unknown_key] = False
-        except Exception:
-            ch_val = float("nan")
-            unknown_key = f"change_{k}_unknown"
-            out[unknown_key] = True
-        out.setdefault("change", {})[k] = ch_val
-    # Containers
+            f = float(val)
+            if f != f or f == float('inf') or f == float('-inf'):  # NaN or inf check
+                return default
+            return f
+        except (ValueError, TypeError):
+            return default
+    
+    # Market cap
+    out["market_cap_usd"] = safe_float(out.get("market_cap_usd"))
+    
+    # Price
+    out["price_usd"] = safe_float(out.get("price_usd"))
+    
+    # Liquidity
+    liq_usd = out.get("liquidity_usd")
+    if liq_usd is None:
+        liq_usd = (out.get("liquidity") or {}).get("usd")
+    out["liquidity_usd"] = safe_float(liq_usd)
+    
+    # Volume
+    v24 = (out.get("volume", {}) or {}).get("24h", {}) or {}
+    out.setdefault("volume", {}).setdefault("24h", {})["volume_usd"] = safe_float(v24.get("volume_usd"))
+    
+    # Change (can be negative)
+    ch = out.get("change", {}) or {}
+    for k in ("1h", "24h"):
+        out.setdefault("change", {})[k] = safe_float(ch.get(k))
+    
+    # Ensure containers exist
     for k in ("security", "liquidity", "holders"):
         if not isinstance(out.get(k), dict):
             out[k] = {}
+    
     return out
 
 
