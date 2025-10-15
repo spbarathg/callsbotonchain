@@ -313,39 +313,43 @@ LARGE_CAP_HOLDER_STATS_MCAP_USD = _get_float("LARGE_CAP_HOLDER_STATS_MCAP_USD", 
 # RISK GATES (Data-Driven)
 # ============================================================================
 
-# Liquidity Gate - AGGRESSIVE: Lower threshold to catch 2x+ winners early
-# Target early entries before liquidity increases
-# Accept risk: Lower liquidity = earlier entry = higher potential for 2x+
+# Liquidity Gate - OPTIMIZED: Set to winner median for 50% hit rate target
+# Winner median liquidity: $17,811 - we aim slightly above for safety
+# This filters out most losers (median $0) while keeping winners
 USE_LIQUIDITY_FILTER = _get_bool("USE_LIQUIDITY_FILTER", True)
-MIN_LIQUIDITY_USD = _get_float("MIN_LIQUIDITY_USD", 15000.0)  # LOWERED for early entries (risky but high reward)
-EXCELLENT_LIQUIDITY_USD = _get_float("EXCELLENT_LIQUIDITY_USD", 40000.0)  # Updated for early-stage tokens
+MIN_LIQUIDITY_USD = _get_float("MIN_LIQUIDITY_USD", 18000.0)  # RAISED to winner median ($17.8k) for higher quality
+EXCELLENT_LIQUIDITY_USD = _get_float("EXCELLENT_LIQUIDITY_USD", 50000.0)  # Premium tier
 
-# Volume to Liquidity Ratio - Minimal restrictions for early entries
+# Volume to Liquidity/Mcap Ratios - TIGHTENED for quality
+# Higher vol/mcap ratio = more trading interest = better chance of 2x+
 VOL_TO_LIQ_RATIO_MIN = _get_float("VOL_TO_LIQ_RATIO_MIN", 0.0)
-VOL_TO_MCAP_RATIO_MIN = _get_float("VOL_TO_MCAP_RATIO_MIN", 0.02)  # LOWERED - less restrictive
+VOL_TO_MCAP_RATIO_MIN = _get_float("VOL_TO_MCAP_RATIO_MIN", 0.10)  # RAISED 5x (was 0.02) - require real activity
+MIN_VOLUME_24H_USD = _get_float("MIN_VOLUME_24H_USD", 5000.0)  # NEW: Absolute minimum volume
 
 # Security Gates
 REQUIRE_LP_LOCKED = _get_bool("REQUIRE_LP_LOCKED", False)
 REQUIRE_MINT_REVOKED = _get_bool("REQUIRE_MINT_REVOKED", False)
 ALLOW_UNKNOWN_SECURITY = _get_bool("ALLOW_UNKNOWN_SECURITY", True)
 
-# Holder Concentration - CRITICAL: Tightened to 18%
-MAX_TOP10_CONCENTRATION = _get_float("MAX_TOP10_CONCENTRATION", 18.0)
-MAX_BUNDLERS_PERCENT = _get_float("MAX_BUNDLERS_PERCENT", 100.0)
-MAX_INSIDERS_PERCENT = _get_float("MAX_INSIDERS_PERCENT", 100.0)
-ENFORCE_BUNDLER_CAP = _get_bool("ENFORCE_BUNDLER_CAP", False)
-ENFORCE_INSIDER_CAP = _get_bool("ENFORCE_INSIDER_CAP", False)
+# Holder Concentration - OPTIMIZED for 50% hit rate target
+# Tighter caps to filter out coordinated rug schemes
+MAX_TOP10_CONCENTRATION = _get_float("MAX_TOP10_CONCENTRATION", 30.0)  # Slightly looser for micro-caps (was 18%)
+MAX_BUNDLERS_PERCENT = _get_float("MAX_BUNDLERS_PERCENT", 35.0)  # NEW: Block coordinated schemes (was 100%)
+MAX_INSIDERS_PERCENT = _get_float("MAX_INSIDERS_PERCENT", 45.0)  # NEW: Block insider dump setups (was 100%)
+ENFORCE_BUNDLER_CAP = _get_bool("ENFORCE_BUNDLER_CAP", True)  # ENABLED! (was False)
+ENFORCE_INSIDER_CAP = _get_bool("ENFORCE_INSIDER_CAP", True)  # ENABLED! (was False)
 REQUIRE_HOLDER_STATS_FOR_LARGE_CAP_ALERT = _get_bool("REQUIRE_HOLDER_STATS_FOR_LARGE_CAP_ALERT", False)
+MIN_HOLDER_COUNT = _get_int("MIN_HOLDER_COUNT", 50)  # NEW: Require some distribution
 
 # Nuanced Scoring Factors (for flexible gating)
-# Reduced penalties to allow more risky tokens with good fundamentals
-NUANCED_SCORE_REDUCTION = _get_int("NUANCED_SCORE_REDUCTION", 1)  # Reduced from 2 to 1
-NUANCED_LIQUIDITY_FACTOR = _get_float("NUANCED_LIQUIDITY_FACTOR", 0.5)
-NUANCED_VOL_TO_MCAP_FACTOR = _get_float("NUANCED_VOL_TO_MCAP_FACTOR", 0.3)  # Less strict
+# TIGHTENED for 50% hit rate target - nuanced should still be high quality
+NUANCED_SCORE_REDUCTION = _get_int("NUANCED_SCORE_REDUCTION", 2)  # Back to 2 (was reduced to 1)
+NUANCED_LIQUIDITY_FACTOR = _get_float("NUANCED_LIQUIDITY_FACTOR", 0.7)  # Less lenient (was 0.5)
+NUANCED_VOL_TO_MCAP_FACTOR = _get_float("NUANCED_VOL_TO_MCAP_FACTOR", 0.5)  # Tighter (was 0.3)
 NUANCED_MCAP_FACTOR = _get_float("NUANCED_MCAP_FACTOR", 1.5)
-NUANCED_TOP10_CONCENTRATION_BUFFER = _get_float("NUANCED_TOP10_CONCENTRATION_BUFFER", 5.0)
-NUANCED_BUNDLERS_BUFFER = _get_float("NUANCED_BUNDLERS_BUFFER", 5.0)
-NUANCED_INSIDERS_BUFFER = _get_float("NUANCED_INSIDERS_BUFFER", 5.0)
+NUANCED_TOP10_CONCENTRATION_BUFFER = _get_float("NUANCED_TOP10_CONCENTRATION_BUFFER", 3.0)  # Tighter (was 5.0)
+NUANCED_BUNDLERS_BUFFER = _get_float("NUANCED_BUNDLERS_BUFFER", 3.0)  # Tighter (was 5.0)
+NUANCED_INSIDERS_BUFFER = _get_float("NUANCED_INSIDERS_BUFFER", 3.0)  # Tighter (was 5.0)
 
 # Momentum Requirements - ADJUSTED: Was blocking all new tokens
 REQUIRE_MOMENTUM_1H_MIN_FOR_ALERT = _get_float("REQUIRE_MOMENTUM_1H_MIN_FOR_ALERT", 0.0)
@@ -362,11 +366,11 @@ SMART_MONEY_SCORE_BONUS = _get_int("SMART_MONEY_SCORE_BONUS", 0)  # REMOVED
 # Velocity
 REQUIRE_VELOCITY_MIN_SCORE_FOR_ALERT = _get_int("REQUIRE_VELOCITY_MIN_SCORE_FOR_ALERT", 0)
 
-# Cycle Balance - AGGRESSIVE: Lower scores to catch more 2x+ opportunities
-# Accept borderline tokens that could be rockets
-# NOT TOO RESTRICTIVE - allow score 3+ for high volume
-SMART_CYCLE_MIN_SCORE = _get_int("SMART_CYCLE_MIN_SCORE", 4)  # LOWERED for volume
-GENERAL_CYCLE_MIN_SCORE = _get_int("GENERAL_CYCLE_MIN_SCORE", 3)  # LOWERED - accept riskier plays
+# Cycle Balance - OPTIMIZED: Higher scores for 50% hit rate target
+# Only alert on high-quality signals with strong fundamentals
+# Quality over quantity - aim for winners not volume
+SMART_CYCLE_MIN_SCORE = _get_int("SMART_CYCLE_MIN_SCORE", 5)  # RAISED for quality (was 4)
+GENERAL_CYCLE_MIN_SCORE = _get_int("GENERAL_CYCLE_MIN_SCORE", 5)  # RAISED significantly (was 3)
 
 # Multi-signal Confirmation
 REQUIRE_MULTI_SIGNAL = _get_bool("REQUIRE_MULTI_SIGNAL", False)

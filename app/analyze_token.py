@@ -461,22 +461,36 @@ def score_token(stats: Dict[str, Any], smart_money_detected: bool = False, token
         0
     )
     
-    # Liquidity scoring tiers (INCREASED WEIGHTS - liquidity is #1 predictor!)
-    if liquidity_usd >= 50_000:  # 90th percentile - EXCELLENT
-        score += 4  # Was +3, now +4 (CRITICAL FACTOR)
-        scoring_details.append(f"✅ Liquidity: +4 (${liquidity_usd:,.0f} - EXCELLENT)")
-    elif liquidity_usd >= 15_000:  # 75th percentile - GOOD (minimum threshold)
-        score += 3  # Was +2, now +3
+    # Liquidity scoring tiers (OPTIMIZED FOR 50% HIT RATE TARGET!)
+    # Winner median: $17,811 | Loser median: $0
+    # Weight liquidity HEAVILY as it's the #1 predictor
+    if liquidity_usd >= 50_000:  # Premium tier - EXCELLENT
+        score += 5  # RAISED from +4 to +5
+        scoring_details.append(f"✅ Liquidity: +5 (${liquidity_usd:,.0f} - EXCELLENT)")
+    elif liquidity_usd >= 20_000:  # NEW TIER - Very Good
+        score += 4  # NEW: Above winner median
+        scoring_details.append(f"✅ Liquidity: +4 (${liquidity_usd:,.0f} - VERY GOOD)")
+    elif liquidity_usd >= 18_000:  # Winner median tier - Good
+        score += 3  # At winner median
         scoring_details.append(f"✅ Liquidity: +3 (${liquidity_usd:,.0f} - GOOD)")
-    elif liquidity_usd >= 5_000:  # Below threshold but not terrible
-        score += 2  # Was +1, now +2
+    elif liquidity_usd >= 15_000:  # Minimum threshold - Fair
+        score += 2  # LOWERED from +3 to +2
         scoring_details.append(f"⚠️ Liquidity: +2 (${liquidity_usd:,.0f} - FAIR)")
-    elif liquidity_usd > 0:  # Has some liquidity but very risky
-        score += 1  # Was +0, now +1 (give some credit)
+    elif liquidity_usd >= 5_000:  # Below threshold - Low
+        score += 1  # LOWERED from +2 to +1
         scoring_details.append(f"⚠️ Liquidity: +1 (${liquidity_usd:,.0f} - LOW)")
-    else:  # Zero liquidity - will be filtered out by pre-filter
+    elif liquidity_usd > 0:  # Very low liquidity
+        score += 0  # No bonus
+        scoring_details.append(f"❌ Liquidity: +0 (${liquidity_usd:,.0f} - VERY LOW)")
+    else:  # Zero liquidity - will be filtered out
         score -= 2
         scoring_details.append(f"❌ Liquidity: -2 (${liquidity_usd:,.0f} - ZERO/RUG RISK)")
+    
+    # === LIQUIDITY STABILITY BONUS (NEW!) ===
+    # Extra bonus for being at or above winner median
+    if liquidity_usd >= 18_000:
+        score += 1
+        scoring_details.append("✨ Winner-Tier Liquidity: +1 (≥$18k median)")
     # === END LIQUIDITY ANALYSIS ===
 
     # Volume analysis (24h volume indicates activity)
@@ -491,8 +505,8 @@ def score_token(stats: Dict[str, Any], smart_money_detected: bool = False, token
         score += 1
         scoring_details.append(f"Volume: +1 (${volume_24h:,.0f} - moderate activity)")
     
-    # === VOLUME-TO-LIQUIDITY RATIO (ANALYST FINDING: Top 3 Predictor) ===
-    # High ratio = good trading activity relative to liquidity
+    # === VOLUME-TO-LIQUIDITY & MCAP RATIOS (Top 3 Predictor) ===
+    # High ratio = strong trading interest = better chance of 2x+
     if liquidity_usd > 0 and volume_24h > 0:
         vol_to_liq_ratio = volume_24h / liquidity_usd
         if vol_to_liq_ratio >= 48:  # High precision rule from analyst
@@ -500,6 +514,14 @@ def score_token(stats: Dict[str, Any], smart_money_detected: bool = False, token
             scoring_details.append(f"⚡ Vol/Liq Ratio: +1 ({vol_to_liq_ratio:.1f} - EXCELLENT)")
         elif vol_to_liq_ratio >= 10:  # Good threshold
             scoring_details.append(f"✅ Vol/Liq Ratio: ({vol_to_liq_ratio:.1f} - GOOD)")
+    
+    # === LOW ACTIVITY PENALTY (NEW!) ===
+    # Penalize tokens with very low trading activity
+    if market_cap > 0 and volume_24h > 0:
+        vol_to_mcap = volume_24h / market_cap
+        if vol_to_mcap < 0.05:  # Very low activity
+            score -= 1
+            scoring_details.append(f"⚠️  Low Activity: -1 (vol/mcap: {vol_to_mcap:.3f})")
         else:
             scoring_details.append(f"Vol/Liq Ratio: ({vol_to_liq_ratio:.1f})")
     # === END VOLUME-TO-LIQUIDITY RATIO ===
@@ -644,6 +666,14 @@ def _check_senior_common(stats: Dict[str, Any], token_address: Optional[str], *,
         return False
     if token_address and token_address in STABLE_MINTS:
         return False
+    
+    # NEW: Minimum holder count check for distribution
+    from app.config_unified import MIN_HOLDER_COUNT
+    if MIN_HOLDER_COUNT:
+        holders = stats.get('holders') or {}
+        holder_count = holders.get('holder_count', 0)
+        if holder_count > 0 and holder_count < MIN_HOLDER_COUNT:
+            return False
 
     if REQUIRE_MINT_REVOKED:
         mint_revoked = security.get('is_mint_revoked')
@@ -721,6 +751,11 @@ def _check_junior_common(stats: Dict[str, Any], final_score: int, *,
         volume_24h = 0.0
     vol_min = float(VOL_24H_MIN_FOR_ALERT or 0)
     if vol_min and volume_24h < vol_min:
+        return False
+    
+    # NEW: Absolute minimum volume check for quality
+    from app.config_unified import MIN_VOLUME_24H_USD
+    if MIN_VOLUME_24H_USD and volume_24h < MIN_VOLUME_24H_USD:
         return False
 
     market_cap = stats.get('market_cap_usd', 0) or 0
