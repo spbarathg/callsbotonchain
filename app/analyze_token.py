@@ -747,12 +747,18 @@ def score_token(stats: Dict[str, Any], smart_money_detected: bool = False, token
     change_1h = stats.get('change', {}).get('1h', 0)
     change_24h = stats.get('change', {}).get('24h', 0)
     
-    # === EARLY MOMENTUM BONUS (EXPANDED RANGE: 5-100% in 24h) ===
-    # Reward tokens in the sweet spot - not flat, not extreme, showing momentum
-    # DATA: Winners averaged +37% 24h change, many had >30%
-    if 5 <= (change_24h or 0) <= 100:  # Expanded from 30% to 100%
-        score += 2  # Big bonus for ideal entry zone
-        scoring_details.append(f"🎯 Early Entry: +2 ({(change_24h or 0):.1f}% - IDEAL MOMENTUM ZONE!)")
+    # === EARLY MOMENTUM BONUS (EXPANDED: -20% to +300% in 24h) ===
+    # FIXED: Was 5-100%, now -20% to +300% to include dips and ongoing pumps
+    # Reward tokens showing momentum OR in dip-buy zone OR in mid-pump
+    # DATA: Winners ranged from -21% to +646%, mega winners often in dips
+    if -20 <= (change_24h or 0) <= 300:  # EXPANDED from 5-100%
+        score += 2  # Big bonus for entry opportunities
+        if (change_24h or 0) < 0:
+            scoring_details.append(f"🎯 Dip Buy: +2 ({(change_24h or 0):.1f}% - BUY THE DIP!)")
+        elif (change_24h or 0) <= 100:
+            scoring_details.append(f"🎯 Early Entry: +2 ({(change_24h or 0):.1f}% - MOMENTUM ZONE!)")
+        else:
+            scoring_details.append(f"🎯 Mid-Pump Entry: +2 ({(change_24h or 0):.1f}% - ONGOING PUMP!)")
     # === END EARLY MOMENTUM BONUS ===
     
     # Short-term momentum (1h) - REVISED TO REWARD DIP BUYING
@@ -769,44 +775,43 @@ def score_token(stats: Dict[str, Any], smart_money_detected: bool = False, token
         scoring_details.append(f"🎯 Dip Buy: +1 ({(change_1h or 0):.1f}% 1h, {(change_24h or 0):.1f}% 24h - buying the dip!)")
 
     # Penalize if 24h is extremely negative (might be dump)
-    if (change_24h or 0) < DRAW_24H_MAJOR:
+    # FIXED: Threshold now -60% (was -30%) to allow more dip buying
+    if (change_24h or 0) < DRAW_24H_MAJOR:  # DRAW_24H_MAJOR = -60
         score -= 1
         scoring_details.append(f"Risk: -1 ({(change_24h or 0):.1f}% - major dump risk)")
 
-    # ANTI-FOMO PENALTY: Only penalize extreme late entry (>200% in 24h)
-    # REMOVED: "Dump-after-pump" penalty - it was normal consolidation, not a sell signal
-    # DATA: Winners had 24h change up to +646%, mega winner had +186%
-    if (change_24h or 0) > 200:  # Raised from 50% to 200%
-        score -= 1  # Reduced from -2 to -1
-        scoring_details.append(f"⚠️ Late Entry Risk: -1 ({(change_24h or 0):.1f}% already pumped in 24h)")
+    # FIXED: Removed ANTI-FOMO scoring penalty (redundant with hard gate)
+    # REASON: Hard gate now at 1000%+ (effectively disabled)
+    # Winners can pump >200% and continue - don't penalize ongoing pumps
+    # DATA: Today's best winner +585% would have been penalized at entry
+    # if (change_24h or 0) > 200:
+    #     score -= 1  # REMOVED
 
-    # Diminishing returns: if smart money but community is low, cap total bonus
-    if smart_money_detected and community_bonus == 0:
-        score = min(score, 8)
+    # FIXED: Removed smart money score cap
+    # REASON: Smart money bonus was already removed (non-smart outperforms)
+    # No reason to cap smart money tokens when they don't get a bonus
+    # if smart_money_detected and community_bonus == 0:
+    #     score = min(score, 8)  # REMOVED
 
-    # Rug/honeypot resilience: if LP unlock < 24h, require stricter thresholds
-    liq_obj = stats.get('liquidity') or {}
-    lock_status = liq_obj.get('lock_status')
-    lock_hours = liq_obj.get('lock_hours') or liq_obj.get('lock_duration_hours')
-    try:
-        lock_hours = float(lock_hours) if lock_hours is not None else None
-    except Exception:
-        lock_hours = None
-    if lock_status in ("unlocked",) or (lock_hours is not None and lock_hours < 24):
-        score -= 1
-        scoring_details.append("Risk: -1 (LP lock <24h)")
+    # FIXED: Removed LP lock time penalty
+    # REASON: REQUIRE_LP_LOCKED = False (not required), so don't penalize
+    # Many early micro-caps have 1-7 day locks which are acceptable
+    # Only actual honeypots/rugs are blocked by senior strict checks
+    # liq_obj = stats.get('liquidity') or {}
+    # lock_status = liq_obj.get('lock_status')
+    # lock_hours = liq_obj.get('lock_hours') or liq_obj.get('lock_duration_hours')
+    # if lock_status in ("unlocked",) or (lock_hours < 24):
+    #     score -= 1  # REMOVED
 
-    # Weighted penalty combining concentration and mint status
-    holders = stats.get('holders') or {}
-    top10 = holders.get('top_10_concentration_percent') or holders.get('top10_percent') or 0
-    mint_revoked = (stats.get('security') or {}).get('is_mint_revoked')
-    try:
-        top10 = float(top10)
-    except Exception:
-        top10 = 0
-    if top10 > 60 and mint_revoked is not True:
-        score -= 2
-        scoring_details.append("Risk: -2 (High concentration + mint active)")
+    # FIXED: Removed concentration + mint double penalty
+    # REASON: REQUIRE_MINT_REVOKED = False (not required), so don't penalize
+    # 60% concentration is normal for new micro-caps
+    # Senior strict checks handle extreme cases (MAX_TOP10_CONCENTRATION)
+    # holders = stats.get('holders') or {}
+    # top10 = holders.get('top_10_concentration_percent') or holders.get('top10_percent') or 0
+    # mint_revoked = (stats.get('security') or {}).get('is_mint_revoked')
+    # if top10 > 60 and mint_revoked is not True:
+    #     score -= 2  # REMOVED
 
     final_score = max(0, min(score, 10))
     return final_score, scoring_details
