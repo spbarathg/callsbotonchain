@@ -12,8 +12,10 @@ from app.analyze_token import (
 
 
 def test_calculate_preliminary_score_bounds():
+    # FIXED: Preliminary score now starts at 1 (not 0) to avoid universal rejection
+    # This prevents PRELIM_DETAILED_MIN=0 from blocking all signals
     tx = {"usd_value": 0}
-    assert calculate_preliminary_score(tx) == 0
+    assert calculate_preliminary_score(tx) == 1  # Base score is 1 even with no USD value
     tx = {"usd_value": 10_000_000}
     s = calculate_preliminary_score(tx, smart_money_detected=True)
     assert 0 <= s <= 10
@@ -32,14 +34,19 @@ def test_score_token_returns_details_and_bounds():
 
 
 def _base_stats():
-    return _normalize_stats_schema({
-        "market_cap_usd": 200_000,
-        "liquidity_usd": 35_000,  # Above typical MIN_LIQUIDITY_USD config values
-        "volume": {"24h": {"volume_usd": 150_000}},  # High volume to ensure vol/mcap ratio > 0.6
-        "change": {"1h": 10, "24h": 5},
-        "security": {"is_honeypot": False, "is_mint_revoked": True},
+    # Updated for 50%+ hit rate optimization:
+    # - Top10: 24% (below 25% limit, was 30%)
+    # - Holder count: 100 (above 75 minimum)
+    # - Liquidity: $35k (above $25k requirement)
+    # - Volume: $60k (well above $10k requirement, 120% vol/mcap ratio)
+    return dict({
+        "market_cap_usd": 50_000,
+        "volume": {"24h": {"volume_usd": 60_000, "unique_buyers": 10, "unique_sellers": 5}},
+        "change": {"1h": 10.0, "24h": 5.0},
+        "liquidity_usd": 35_000,
         "liquidity": {"is_lp_locked": True},
-        "holders": {"top_10_concentration_percent": 30},
+        "holders": {"top_10_concentration_percent": 24, "holder_count": 100},  # UPDATED for new limits
+        "security": {"is_honeypot": False},
         "symbol": "TKN",
         "name": "Token",
     })
@@ -57,5 +64,4 @@ def test_senior_and_junior_checks_nuanced():
     # Slightly relax holders and liquidity in nuanced; still should pass
     assert check_senior_nuanced(stats, token_address="abc") is True
     assert check_junior_nuanced(stats, final_score=9) is True
-
 
