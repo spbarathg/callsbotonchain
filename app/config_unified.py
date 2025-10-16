@@ -324,7 +324,7 @@ EXCELLENT_LIQUIDITY_USD = _get_float("EXCELLENT_LIQUIDITY_USD", 50000.0)  # Prem
 # Higher vol/mcap ratio = more trading interest = better chance of 2x+
 VOL_TO_LIQ_RATIO_MIN = _get_float("VOL_TO_LIQ_RATIO_MIN", 0.2)  # MICRO-CAP MODE: 20% vol/liq (micro-caps start smaller)
 VOL_TO_MCAP_RATIO_MIN = _get_float("VOL_TO_MCAP_RATIO_MIN", 0.15)  # MICRO-CAP MODE: 15% vol/mcap for early activity
-MIN_VOLUME_24H_USD = _get_float("MIN_VOLUME_24H_USD", 8000.0)  # MICRO-CAP MODE: $8k for early micro-cap volume
+MIN_VOLUME_24H_USD = _get_float("MIN_VOLUME_24H_USD", 5000.0)  # OPTIMIZED: $5k (was $8k - was blocking perfect 10/10 micro-caps)
 
 # Security Gates
 REQUIRE_LP_LOCKED = _get_bool("REQUIRE_LP_LOCKED", False)
