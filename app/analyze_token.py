@@ -386,25 +386,32 @@ def calculate_preliminary_score(tx_data: Dict[str, Any], smart_money_detected: b
     """
     CREDIT-EFFICIENT: Calculate preliminary score from feed data without API calls
     Uses only data available in the transaction feed
+    
+    OPTIMIZED FOR MICRO-CAPS: More lenient thresholds to catch early transactions
     """
-    score = 0
+    score = 1  # FIXED: Start at 1 instead of 0 to avoid universal rejection
 
     # Smart money bonus REMOVED - analysis showed it's anti-predictive
     # if smart_money_detected:
     #     score += 3  # Baseline bonus
 
     # USD value indicates serious activity; downweight synthetic fallback items
+    # OPTIMIZED: Lowered thresholds for micro-cap focus
     usd_value = tx_data.get('usd_value', 0) or 0
     is_synthetic = bool(tx_data.get('is_synthetic')) or str(tx_data.get('tx_type') or '').endswith('_fallback')
-    high = PRELIM_USD_HIGH * (1.5 if is_synthetic else 1.0)
-    mid = PRELIM_USD_MID * (1.5 if is_synthetic else 1.0)
-    low = PRELIM_USD_LOW * (1.5 if is_synthetic else 1.0)
+    
+    # MICRO-CAP MODE: Lower thresholds (was 50k/10k/1k, now 10k/2k/200)
+    high = 10000.0 * (1.5 if is_synthetic else 1.0)
+    mid = 2000.0 * (1.5 if is_synthetic else 1.0)
+    low = 200.0 * (1.5 if is_synthetic else 1.0)
+    
     if usd_value > high:
         score += 3
     elif usd_value > mid:
         score += 2
     elif usd_value > low:
         score += 1
+    # Even tiny transactions get base score of 1 (from initialization)
 
     # Transaction frequency/urgency
     # Note: This would need to be tracked over time

@@ -204,7 +204,7 @@ PRELIM_USD_HIGH = _get_float("PRELIM_USD_HIGH", 50000.0)
 PRELIM_USD_MID = _get_float("PRELIM_USD_MID", 10000.0)
 PRELIM_USD_MED = _get_float("PRELIM_USD_MED", 10000.0)  # Alias for MID
 PRELIM_USD_LOW = _get_float("PRELIM_USD_LOW", 1000.0)
-PRELIM_DETAILED_MIN = _get_int("PRELIM_DETAILED_MIN", 2)  # MICRO-CAP MODE: 2 to catch early micro-caps (quality balance)
+PRELIM_DETAILED_MIN = _get_int("PRELIM_DETAILED_MIN", 0)  # FIXED: Was blocking ALL signals! Now analyze everything (filter at scoring stage)
 
 # Volume Thresholds (ADJUSTED based on moonshots' median volume)
 VOL_VERY_HIGH = _get_float("VOL_VERY_HIGH", 150000.0)
