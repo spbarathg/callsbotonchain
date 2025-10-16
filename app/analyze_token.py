@@ -780,16 +780,11 @@ def _check_junior_common(stats: Dict[str, Any], final_score: int, *,
     mcap_cap = float(MAX_MARKET_CAP_FOR_DEFAULT_ALERT or 0) * float(mcap_factor or 1.0)
     mcap_ok = (market_cap or 0) <= mcap_cap
     
-    # DEBUG: Log market cap check details
-    from app.logger_utils import log_process
-    log_process(f"🔍 MCAP CHECK: mcap={market_cap:,.0f}, cap={mcap_cap:,.0f}, mcap_ok={mcap_ok}, 1h_change={change_1h:.1f}%")
-    
+    # FIXED: Removed LARGE_CAP_MOMENTUM_GATE bypass - was allowing ANY token > $1M with 5%+ momentum!
+    # This was the bug causing $1.5M and $2.7M tokens to pass.
+    # Now STRICTLY enforce the market cap limit with NO exceptions.
     if not mcap_ok:
-        if not (change_1h >= float(LARGE_CAP_MOMENTUM_GATE_1H or 0)):
-            log_process(f"❌ REJECTED: Market cap ${market_cap:,.0f} > ${mcap_cap:,.0f} with {change_1h:.1f}% momentum")
-            return False
-        else:
-            log_process(f"⚠️  BYPASSED MCAP LIMIT: ${market_cap:,.0f} allowed due to {change_1h:.1f}% >= {LARGE_CAP_MOMENTUM_GATE_1H}% momentum!")
+        return False
 
     ratio = 0.0
     try:
