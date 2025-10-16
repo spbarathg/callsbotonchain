@@ -1,19 +1,20 @@
-# 🤖 Bot Status - MICRO-CAP MODE ACTIVE
+# 🤖 Bot Status - MICRO-CAP MODE ACTIVE (OPTIMIZED)
 
-**Last Updated:** October 16, 2025, 2:56 PM IST  
-**Status:** ✅ **MICRO-CAP MODE - Optimized for 2x+ Potential Tokens**
+**Last Updated:** October 16, 2025, 6:25 PM IST  
+**Status:** ✅ **MICRO-CAP MODE - FULLY OPTIMIZED (Critical Fix Applied)**
 
 ---
 
 ## 🎯 CURRENT CONFIGURATION
 
-### MICRO-CAP MODE (Winner-Median Optimized)
+### MICRO-CAP MODE (Winner-Median Optimized + Critical Fix)
 
 ```
 ✅ Score threshold: 5 (balanced micro-cap quality)
 ✅ Fetch interval: 30s (2x faster - NO FREQUENCY CAP!)
 ✅ Min Liquidity: $18,000 (winner median: $17,811)
-✅ Prelim threshold: 2 (catches early micro-caps)
+✅ Min Volume: $5,000 (FIXED: was $8k - was blocking 10/10 signals!)
+✅ Prelim threshold: 0 (analyze everything)
 ✅ MAX_24H_CHANGE: 300% (catch mid-pump)
 ✅ MAX_1H_CHANGE: 200% (parabolic moves OK)
 ✅ Min holders: 50 (early stage friendly)
@@ -81,6 +82,7 @@ ssh root@64.227.157.221 "cd /opt/callsbotonchain && sqlite3 deployment/var/alert
 
 ---
 
-**Status:** ✅ **MICRO-CAP MODE ACTIVE - Scanning every 30s for 2x+ opportunities**  
+**Status:** ✅ **MICRO-CAP MODE ACTIVE - FULLY OPTIMIZED**  
 **Hit Rate Target:** 30-40% (optimized for micro-cap winners)  
-**Commit:** `fc3a2a7` (MICRO-CAP MODE)
+**Latest Fix:** MIN_VOLUME lowered from $8k to $5k (was blocking perfect 10/10 tokens)  
+**Commit:** `1a4485b` (CRITICAL FIX: Volume Threshold Optimization)
