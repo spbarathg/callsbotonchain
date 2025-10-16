@@ -440,15 +440,21 @@ def score_token(stats: Dict[str, Any], smart_money_detected: bool = False, token
     if smart_money_detected:
         scoring_details.append("Smart Money: detected (no bonus)")
 
-    # Market cap analysis (lower market cap = higher 2x+ potential)
-    # OPTIMIZED FOR 2X PUMPS: Heavily reward ultra-micro caps
+    # Market cap analysis - DATA-DRIVEN SCORING (7-day performance analysis)
+    # < $50k: 63% avg gain, 53.7% win rate (decent)
+    # $50k-$100k: 207% avg gain, 68.4% win rate (excellent)
+    # $100k-$200k: 267% avg gain, 70.8% win rate, 5 moonshots (BEST!)
+    # $200k-$500k: 61% avg gain, 67.2% win rate (good)
     market_cap = stats.get('market_cap_usd', 0)
-    if 0 < (market_cap or 0) < MCAP_MICRO_MAX:  # < $100k
-        score += 3
-        scoring_details.append(f"Market Cap: +3 (${market_cap:,.0f} - ULTRA micro cap, 5-10x potential!)")
-    elif (market_cap or 0) < MCAP_SMALL_MAX:  # $100k-$200k
+    if 0 < (market_cap or 0) < 50_000:  # < $50k
         score += 2
-        scoring_details.append(f"Market Cap: +2 (${market_cap:,.0f} - micro cap, 3-5x potential)")
+        scoring_details.append(f"Market Cap: +2 (${market_cap:,.0f} - ULTRA micro cap, high volatility)")
+    elif (market_cap or 0) < MCAP_MICRO_MAX:  # $50k-$100k
+        score += 2
+        scoring_details.append(f"Market Cap: +2 (${market_cap:,.0f} - micro cap, excellent 2x potential)")
+    elif (market_cap or 0) < MCAP_SMALL_MAX:  # $100k-$200k
+        score += 3
+        scoring_details.append(f"Market Cap: +3 (${market_cap:,.0f} - SWEET SPOT! Best moonshot zone)")
     elif (market_cap or 0) < MCAP_MID_MAX:  # $200k-$1M
         score += 1
         scoring_details.append(f"Market Cap: +1 (${market_cap:,.0f} - small cap, 2-3x potential)")
