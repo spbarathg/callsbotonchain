@@ -220,10 +220,10 @@ MCAP_LOW = _get_float("MCAP_LOW", 100000.0)
 MCAP_MED = _get_float("MCAP_MED", 500000.0)
 MCAP_MICRO_MAX = _get_float("MCAP_MICRO_MAX", 150000.0)  # Focus zone
 MCAP_SMALL_MAX = _get_float("MCAP_SMALL_MAX", 300000.0)
-MCAP_MID_MAX = _get_float("MCAP_MID_MAX", 1000000.0)
-# SWEET SPOT for 2x+: 20k-150k market cap (risky but high reward)
-MICROCAP_SWEET_MIN = _get_float("MICROCAP_SWEET_MIN", 20000.0)  # LOWERED for early entries
-MICROCAP_SWEET_MAX = _get_float("MICROCAP_SWEET_MAX", 150000.0)
+MCAP_MID_MAX = _get_float("MCAP_MID_MAX", 1000000.0)  # $1M = our absolute maximum!
+# SWEET SPOT for 2x+: 20k-500k market cap (micro-cap zone)
+MICROCAP_SWEET_MIN = _get_float("MICROCAP_SWEET_MIN", 20000.0)  # $20k minimum
+MICROCAP_SWEET_MAX = _get_float("MICROCAP_SWEET_MAX", 500000.0)  # $500k sweet spot (was $150k)
 
 # Momentum
 MOMENTUM_1H_HIGH = _get_float("MOMENTUM_1H_HIGH", 10.0)
@@ -302,9 +302,9 @@ STABLE_MINTS = [
     "So11111111111111111111111111111111111111112",   # Wrapped SOL
 ]
 
-# Market cap limits
-MAX_MARKET_CAP_USD = _get_float("MAX_MARKET_CAP_USD", 50_000_000.0)
-MAX_MARKET_CAP_FOR_DEFAULT_ALERT = _get_float("MAX_MARKET_CAP_FOR_DEFAULT_ALERT", 50_000_000.0)
+# Market cap limits - MICRO-CAP FOCUS: Only tokens below $1M market cap!
+MAX_MARKET_CAP_USD = _get_float("MAX_MARKET_CAP_USD", 1_000_000.0)  # $1M max (was $50M - MICRO-CAP ONLY!)
+MAX_MARKET_CAP_FOR_DEFAULT_ALERT = _get_float("MAX_MARKET_CAP_FOR_DEFAULT_ALERT", 1_000_000.0)  # $1M max for alerts
 LARGE_CAP_MOMENTUM_GATE_1H = _get_float("LARGE_CAP_MOMENTUM_GATE_1H", 5.0)
 LARGE_CAP_HOLDER_STATS_MCAP_USD = _get_float("LARGE_CAP_HOLDER_STATS_MCAP_USD", 1_000_000.0)
 
