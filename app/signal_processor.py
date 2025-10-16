@@ -114,39 +114,17 @@ class SignalProcessor:
         if token_address in ("native", "So11111111111111111111111111111111111111112"):
             return ProcessResult(status="skipped", error_message="Native SOL token")
         
-        # Check if already alerted
+        # Check if already alerted (EARLY GATE: Skip before any processing)
         if token_address in self._session_alerted_tokens or has_been_alerted(token_address):
             return ProcessResult(status="skipped", error_message="Already alerted")
         
-        # Calculate preliminary score
+        # Calculate preliminary score (EARLY GATE: Skip expensive operations)
         preliminary_score = calculate_preliminary_score(tx, smart_money_detected=feed_tx.smart_money)
         
         if DEBUG_PRELIM:
             self._log_prelim_debug(tx)
         
-        # Record activity for velocity tracking
-        trader = tx.get('from') or tx.get('wallet')
-        record_token_activity(
-            token_address,
-            usd_value,
-            1,
-            feed_tx.smart_money,
-            preliminary_score,
-            trader
-        )
-        
-        # OPTIMIZED: Removed multi-signal check - always disabled (REQUIRE_MULTI_SIGNAL = False)
-        # if REQUIRE_MULTI_SIGNAL:
-        #     recent_obs = get_recent_token_signals(token_address, MULTI_SIGNAL_WINDOW_SEC)
-        #     if len(recent_obs) < int(MULTI_SIGNAL_MIN_COUNT or 2):
-        #         return ProcessResult(...)
-        
-        # OPTIMIZED: Removed token age check - always disabled (MIN_TOKEN_AGE_MINUTES = 0)
-        # if int(MIN_TOKEN_AGE_MINUTES or 0) > 0:
-        #     if not self._check_token_age(token_address, MIN_TOKEN_AGE_MINUTES):
-        #         return ProcessResult(...)
-        
-        # Preliminary score gating
+        # Preliminary score gating (BEFORE recording activity - no DB writes for rejected signals)
         if preliminary_score < PRELIM_DETAILED_MIN:
             self._log(f"Token {token_address} prelim: {preliminary_score}/10 (skipped detailed analysis)")
             self._api_calls_saved += 1
@@ -157,6 +135,18 @@ class SignalProcessor:
                 api_calls_saved=1,
                 error_message="Preliminary score too low"
             )
+        
+        # OPTIMIZED: Record activity ONLY for signals that pass preliminary score check
+        # This avoids writing thousands of rejected transactions to the database
+        trader = tx.get('from') or tx.get('wallet')
+        record_token_activity(
+            token_address,
+            usd_value,
+            1,
+            feed_tx.smart_money,
+            preliminary_score,
+            trader
+        )
         
         # Fetch detailed stats
         self._log(f"FETCHING DETAILED STATS for {token_address[:8]} (prelim: {preliminary_score}/10)")
@@ -179,7 +169,8 @@ class SignalProcessor:
                 error_message="Failed to parse stats"
             )
         
-        # Liquidity pre-filter
+        # EARLY GATE: Liquidity pre-filter (fast rejection before expensive scoring)
+        # NOTE: Also checked in junior_strict/nuanced for nuanced liquidity_factor support
         if USE_LIQUIDITY_FILTER:
             if not self._check_liquidity(stats, MIN_LIQUIDITY_USD, EXCELLENT_LIQUIDITY_USD):
                 return ProcessResult(
@@ -198,7 +189,9 @@ class SignalProcessor:
                 error_message="Already pumped - late entry rejected"
             )
         
-        # Quick security gate
+        # EARLY GATE: Quick security check (fast rejection before expensive scoring)
+        # NOTE: Currently disabled (REQUIRE_LP_LOCKED=False, REQUIRE_MINT_REVOKED=False)
+        # Also checked in senior_strict, but this provides early exit if requirements enabled
         if not self._check_quick_security(stats, REQUIRE_LP_LOCKED, REQUIRE_MINT_REVOKED, ALLOW_UNKNOWN_SECURITY):
             return ProcessResult(
                 status="skipped",

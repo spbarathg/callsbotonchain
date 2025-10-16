@@ -739,21 +739,23 @@ def _check_junior_common(stats: Dict[str, Any], final_score: int, *,
     if not stats:
         return False
 
+    # Liquidity check with factor support for nuanced mode
+    # NOTE: This is also checked in signal_processor as an EARLY GATE for performance
+    # but we need it here too to support nuanced liquidity_factor
     liq_usd = _extract_liquidity_usd(stats)
     min_liq = float(MIN_LIQUIDITY_USD or 0) * float(liquidity_factor or 1.0)
     if liq_usd < min_liq:
         return False
 
+    # OPTIMIZED: Single volume check (removed redundant VOL_24H_MIN_FOR_ALERT check)
+    # VOL_24H_MIN_FOR_ALERT is always 0.0 (disabled), so only check MIN_VOLUME_24H_USD
     volume_24h = stats.get('volume', {}).get('24h', {}).get('volume_usd', 0) or 0
     try:
         volume_24h = float(volume_24h)
     except Exception:
         volume_24h = 0.0
-    vol_min = float(VOL_24H_MIN_FOR_ALERT or 0)
-    if vol_min and volume_24h < vol_min:
-        return False
     
-    # NEW: Absolute minimum volume check for quality
+    # Absolute minimum volume check for quality
     from app.config_unified import MIN_VOLUME_24H_USD
     if MIN_VOLUME_24H_USD and volume_24h < MIN_VOLUME_24H_USD:
         return False
