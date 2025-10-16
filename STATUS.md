@@ -84,5 +84,7 @@ ssh root@64.227.157.221 "cd /opt/callsbotonchain && sqlite3 deployment/var/alert
 
 **Status:** ✅ **MICRO-CAP MODE ACTIVE - FULLY OPTIMIZED**  
 **Hit Rate Target:** 30-40% (optimized for micro-cap winners)  
-**Latest Fix:** MIN_VOLUME lowered from $8k to $5k (was blocking perfect 10/10 tokens)  
-**Commit:** `1a4485b` (CRITICAL FIX: Volume Threshold Optimization)
+**Latest Fixes:** 
+- MIN_VOLUME: $8k → $5k (catching more early gems)
+- MAX_MARKET_CAP: $50M → $1M (MICRO-CAP ONLY!)
+**Commit:** `31dce51` (Focus ONLY on sub-$1M micro-caps for maximum upside)
