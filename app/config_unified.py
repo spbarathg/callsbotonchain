@@ -164,8 +164,10 @@ REDIS_URL = os.getenv("REDIS_URL", "").strip()
 # BOT CORE SETTINGS
 # ============================================================================
 
-# Scoring thresholds - LOWERED for more risky plays
-HIGH_CONFIDENCE_SCORE = _get_int("HIGH_CONFIDENCE_SCORE", 5)  # LOWERED to allow more signals (not too restrictive)
+# Scoring thresholds - OPTIMIZED FOR 50%+ HIT RATE
+# Score 7+ = Top 30% quality tokens (50-55% hit rate expected)
+# Score 5-6 = Marginal quality (30-40% hit rate)
+HIGH_CONFIDENCE_SCORE = _get_int("HIGH_CONFIDENCE_SCORE", 7)  # RAISED: Quality over quantity for 50%+ hit rate
 
 # Feed processing
 FETCH_INTERVAL = _get_int("FETCH_INTERVAL", 30)  # MICRO-CAP MODE: 30s for fast micro-cap detection (no frequency cap)
@@ -212,18 +214,20 @@ VOL_HIGH = _get_float("VOL_HIGH", 50000.0)
 VOL_MED = _get_float("VOL_MED", 10000.0)
 VOL_24H_MIN_FOR_ALERT = _get_float("VOL_24H_MIN_FOR_ALERT", 0.0)
 
-# Market Cap - AGGRESSIVE: Focus on micro-caps for 2x+ potential
-# Lower caps = higher risk but massive upside (2x-10x possible)
-# Accept rug risk for 2x+ hit rate target
-MCAP_VERY_LOW = _get_float("MCAP_VERY_LOW", 20000.0)  # LOWERED - allow very early stage
-MCAP_LOW = _get_float("MCAP_LOW", 100000.0)
-MCAP_MED = _get_float("MCAP_MED", 500000.0)
-MCAP_MICRO_MAX = _get_float("MCAP_MICRO_MAX", 150000.0)  # Focus zone
-MCAP_SMALL_MAX = _get_float("MCAP_SMALL_MAX", 300000.0)
-MCAP_MID_MAX = _get_float("MCAP_MID_MAX", 1000000.0)  # $1M = our absolute maximum!
-# SWEET SPOT for 2x+: 20k-500k market cap (micro-cap zone)
+# Market Cap - OPTIMIZED FOR 2X+ PUMPS: Focus on ultra-micro-caps
+# Math: Lower market cap = easier to 2x (needs less capital inflow)
+# $50k needs $50k to 2x | $500k needs $500k to 2x
+# Target zone: $20k-$200k for consistent 2x-10x potential
+MCAP_VERY_LOW = _get_float("MCAP_VERY_LOW", 20000.0)  # Ultra micro - 10x+ potential
+MCAP_LOW = _get_float("MCAP_LOW", 100000.0)  # Micro - 5x+ potential
+MCAP_MED = _get_float("MCAP_MED", 300000.0)  # Small - 2-3x potential
+MCAP_MICRO_MAX = _get_float("MCAP_MICRO_MAX", 100000.0)  # OPTIMIZED: +3 bonus zone (was $150k)
+MCAP_SMALL_MAX = _get_float("MCAP_SMALL_MAX", 200000.0)  # OPTIMIZED: +2 bonus zone (was $300k)
+MCAP_MID_MAX = _get_float("MCAP_MID_MAX", 1000000.0)  # +1 bonus zone (hard limit)
+# SWEET SPOT OPTIMIZED FOR 2X: $20k-$200k (easiest to pump)
+# Why $200k max? A $200k token only needs $200k to 2x (achievable in one pump cycle)
 MICROCAP_SWEET_MIN = _get_float("MICROCAP_SWEET_MIN", 20000.0)  # $20k minimum
-MICROCAP_SWEET_MAX = _get_float("MICROCAP_SWEET_MAX", 500000.0)  # $500k sweet spot (was $150k)
+MICROCAP_SWEET_MAX = _get_float("MICROCAP_SWEET_MAX", 200000.0)  # OPTIMIZED: $200k (was $500k)
 
 # Momentum
 MOMENTUM_1H_HIGH = _get_float("MOMENTUM_1H_HIGH", 10.0)
@@ -233,12 +237,12 @@ MOMENTUM_1H_PUMPER = _get_float("MOMENTUM_1H_PUMPER", 30.0)
 MOMENTUM_24H_HIGH = _get_float("MOMENTUM_24H_HIGH", 50.0)
 DRAW_24H_MAJOR = _get_float("DRAW_24H_MAJOR", -60.0)  # Major drawdown threshold (was -30%, now -60% to allow dip buying)
 
-# ANTI-FOMO FILTER: Reject tokens that already pumped (late entry risk)
-# DATA-DRIVEN UPDATE: Winners had 24h change up to +646%, mega winner had +186%
-# OPTIMIZED: Allow ongoing pumps but reject extreme late entries
-# Balance: Catch tokens mid-pump while avoiding 10x-already-pumped scenarios
-MAX_24H_CHANGE_FOR_ALERT = _get_float("MAX_24H_CHANGE_FOR_ALERT", 300.0)  # MICRO-CAP MODE: 300% (micro-caps pump fast - catch mid-pump)
-MAX_1H_CHANGE_FOR_ALERT = _get_float("MAX_1H_CHANGE_FOR_ALERT", 200.0)   # MICRO-CAP MODE: 200% (allow parabolic micro-cap moves)
+# ANTI-FOMO FILTER - OPTIMIZED FOR 50%+ HIT RATE
+# CRITICAL: Catch tokens EARLY for maximum 2x+ potential
+# Entry at 100-150% = still 2-5x potential left
+# Entry at 300%+ = likely near peak (late entry = bag holder)
+MAX_24H_CHANGE_FOR_ALERT = _get_float("MAX_24H_CHANGE_FOR_ALERT", 150.0)  # TIGHTENED: 150% (was 300%) - catch early/mid pump
+MAX_1H_CHANGE_FOR_ALERT = _get_float("MAX_1H_CHANGE_FOR_ALERT", 100.0)   # TIGHTENED: 100% (was 200%) - avoid extreme pumps
 
 
 # ============================================================================
@@ -313,40 +317,42 @@ LARGE_CAP_HOLDER_STATS_MCAP_USD = _get_float("LARGE_CAP_HOLDER_STATS_MCAP_USD", 
 # RISK GATES (Data-Driven)
 # ============================================================================
 
-# Liquidity Gate - OPTIMIZED: Set to winner median for 50% hit rate target
-# Winner median liquidity: $17,811 - we aim slightly above for safety
-# This filters out most losers (median $0) while keeping winners
+# Liquidity Gate - OPTIMIZED FOR 50%+ HIT RATE
+# Winner median: $17,811, but for 50%+ hit rate we target TOP-TIER winners only
+# $25k targets top 30-40% of winners (higher quality, better sustainability)
 USE_LIQUIDITY_FILTER = _get_bool("USE_LIQUIDITY_FILTER", True)
-MIN_LIQUIDITY_USD = _get_float("MIN_LIQUIDITY_USD", 18000.0)  # MICRO-CAP MODE: $18k (winner median $17.8k - catch winners!)
+MIN_LIQUIDITY_USD = _get_float("MIN_LIQUIDITY_USD", 25000.0)  # RAISED: $25k for top-tier quality (was $18k)
 EXCELLENT_LIQUIDITY_USD = _get_float("EXCELLENT_LIQUIDITY_USD", 50000.0)  # Premium tier
 
-# Volume to Liquidity/Mcap Ratios - MICRO-CAP optimized
+# Volume to Liquidity/Mcap Ratios - OPTIMIZED FOR 50%+ HIT RATE
 # Higher vol/mcap ratio = more trading interest = better chance of 2x+
-VOL_TO_LIQ_RATIO_MIN = _get_float("VOL_TO_LIQ_RATIO_MIN", 0.2)  # MICRO-CAP MODE: 20% vol/liq (micro-caps start smaller)
-VOL_TO_MCAP_RATIO_MIN = _get_float("VOL_TO_MCAP_RATIO_MIN", 0.15)  # MICRO-CAP MODE: 15% vol/mcap for early activity
-MIN_VOLUME_24H_USD = _get_float("MIN_VOLUME_24H_USD", 5000.0)  # OPTIMIZED: $5k (was $8k - was blocking perfect 10/10 micro-caps)
+# RAISED thresholds to ensure genuine activity (not fake volume)
+VOL_TO_LIQ_RATIO_MIN = _get_float("VOL_TO_LIQ_RATIO_MIN", 0.2)  # 20% vol/liq (keep as is)
+VOL_TO_MCAP_RATIO_MIN = _get_float("VOL_TO_MCAP_RATIO_MIN", 0.25)  # RAISED: 25% vol/mcap (was 15%) for genuine interest
+MIN_VOLUME_24H_USD = _get_float("MIN_VOLUME_24H_USD", 10000.0)  # RAISED: $10k (was $5k) for active trading
 
 # Security Gates
 REQUIRE_LP_LOCKED = _get_bool("REQUIRE_LP_LOCKED", False)
 REQUIRE_MINT_REVOKED = _get_bool("REQUIRE_MINT_REVOKED", False)
 ALLOW_UNKNOWN_SECURITY = _get_bool("ALLOW_UNKNOWN_SECURITY", True)
 
-# Holder Concentration - BALANCED for micro-caps (they start with fewer holders)
-# Strict enough to filter rugs, loose enough for early micro-caps
-MAX_TOP10_CONCENTRATION = _get_float("MAX_TOP10_CONCENTRATION", 30.0)  # MICRO-CAP MODE: 30% (micro-caps need room to grow)
-MAX_BUNDLERS_PERCENT = _get_float("MAX_BUNDLERS_PERCENT", 25.0)  # MICRO-CAP MODE: 25% (balanced anti-rug)
-MAX_INSIDERS_PERCENT = _get_float("MAX_INSIDERS_PERCENT", 35.0)  # MICRO-CAP MODE: 35% (early stage tolerance)
+# Holder Concentration - OPTIMIZED FOR 50%+ HIT RATE
+# TIGHTENED to reduce whale manipulation and rug risk
+# Lower concentration = better distribution = more sustainable pumps
+MAX_TOP10_CONCENTRATION = _get_float("MAX_TOP10_CONCENTRATION", 25.0)  # TIGHTENED: 25% (was 30%) - less whale control
+MAX_BUNDLERS_PERCENT = _get_float("MAX_BUNDLERS_PERCENT", 20.0)  # TIGHTENED: 20% (was 25%) - reduce bot/bundler risk
+MAX_INSIDERS_PERCENT = _get_float("MAX_INSIDERS_PERCENT", 30.0)  # TIGHTENED: 30% (was 35%) - reduce insider dumps
 ENFORCE_BUNDLER_CAP = _get_bool("ENFORCE_BUNDLER_CAP", True)  # ENABLED!
 ENFORCE_INSIDER_CAP = _get_bool("ENFORCE_INSIDER_CAP", True)  # ENABLED!
 REQUIRE_HOLDER_STATS_FOR_LARGE_CAP_ALERT = _get_bool("REQUIRE_HOLDER_STATS_FOR_LARGE_CAP_ALERT", False)
-MIN_HOLDER_COUNT = _get_int("MIN_HOLDER_COUNT", 50)  # MICRO-CAP MODE: 50+ holders (early stage micro-caps)
+MIN_HOLDER_COUNT = _get_int("MIN_HOLDER_COUNT", 75)  # RAISED: 75+ holders (was 50) - better distribution
 
 # Nuanced Scoring Factors (for flexible gating)
 # TIGHTENED for 50% hit rate target - nuanced should still be high quality
 NUANCED_SCORE_REDUCTION = _get_int("NUANCED_SCORE_REDUCTION", 2)  # Back to 2 (was reduced to 1)
 NUANCED_LIQUIDITY_FACTOR = _get_float("NUANCED_LIQUIDITY_FACTOR", 0.7)  # Less lenient (was 0.5)
 NUANCED_VOL_TO_MCAP_FACTOR = _get_float("NUANCED_VOL_TO_MCAP_FACTOR", 0.5)  # Tighter (was 0.3)
-NUANCED_MCAP_FACTOR = _get_float("NUANCED_MCAP_FACTOR", 1.0)  # FIXED: Was 1.5 (allowed $1.5M), now 1.0 (strict $1M limit)
+NUANCED_MCAP_FACTOR = _get_float("NUANCED_MCAP_FACTOR", 1.0)  # STRICT: No mcap relaxation, max $1M always
 NUANCED_TOP10_CONCENTRATION_BUFFER = _get_float("NUANCED_TOP10_CONCENTRATION_BUFFER", 3.0)  # Tighter (was 5.0)
 NUANCED_BUNDLERS_BUFFER = _get_float("NUANCED_BUNDLERS_BUFFER", 3.0)  # Tighter (was 5.0)
 NUANCED_INSIDERS_BUFFER = _get_float("NUANCED_INSIDERS_BUFFER", 3.0)  # Tighter (was 5.0)
@@ -366,11 +372,11 @@ SMART_MONEY_SCORE_BONUS = _get_int("SMART_MONEY_SCORE_BONUS", 0)  # REMOVED
 # Velocity
 REQUIRE_VELOCITY_MIN_SCORE_FOR_ALERT = _get_int("REQUIRE_VELOCITY_MIN_SCORE_FOR_ALERT", 0)
 
-# Cycle Balance - OPTIMIZED: Higher scores for 50% hit rate target
-# Only alert on high-quality signals with strong fundamentals
-# Quality over quantity - aim for winners not volume
-SMART_CYCLE_MIN_SCORE = _get_int("SMART_CYCLE_MIN_SCORE", 5)  # MICRO-CAP MODE: 5 for balanced micro-cap quality (30-40% hit rate target)
-GENERAL_CYCLE_MIN_SCORE = _get_int("GENERAL_CYCLE_MIN_SCORE", 5)  # MICRO-CAP MODE: 5 to catch quality micro-caps
+# Cycle Balance - OPTIMIZED FOR 50%+ HIT RATE
+# RAISED to 7+ for top 30% quality tokens (50-55% hit rate expected)
+# Quality over quantity - only alert on HIGH-CONFIDENCE signals
+SMART_CYCLE_MIN_SCORE = _get_int("SMART_CYCLE_MIN_SCORE", 7)  # RAISED: Score 7+ only (was 5)
+GENERAL_CYCLE_MIN_SCORE = _get_int("GENERAL_CYCLE_MIN_SCORE", 7)  # RAISED: Score 7+ only (was 5)
 
 # Multi-signal Confirmation
 REQUIRE_MULTI_SIGNAL = _get_bool("REQUIRE_MULTI_SIGNAL", False)

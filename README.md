@@ -42,7 +42,7 @@ The bot runs continuously, scanning every 30 seconds:
 - **8-10:** Premium signals, highest conviction
 
 **Key Filters (All Data-Driven):**
-- **Maximum market cap:** $1,000,000 (STRICT - NO EXCEPTIONS!)
+- **Maximum market cap:** $1,000,000 (STRICT - no large caps!)
 - **Minimum liquidity:** $18,000 (winner median: $17,811)
 - **Minimum volume:** $5,000 (recent optimization - was $8k)
 - **Vol/MCap ratio:** 15%+ (shows real trading interest)
