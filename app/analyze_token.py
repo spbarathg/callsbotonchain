@@ -22,7 +22,6 @@ from app.config_unified import (
     STABLE_MINTS,
     BLOCKLIST_SYMBOLS,
     MAX_MARKET_CAP_FOR_DEFAULT_ALERT,
-    LARGE_CAP_MOMENTUM_GATE_1H,
     MIN_LIQUIDITY_USD,
     VOL_24H_MIN_FOR_ALERT,
     VOL_TO_MCAP_RATIO_MIN,
@@ -441,21 +440,31 @@ def score_token(stats: Dict[str, Any], smart_money_detected: bool = False, token
     if smart_money_detected:
         scoring_details.append("Smart Money: detected (no bonus)")
 
-    # Market cap analysis (lower market cap = higher potential)
+    # Market cap analysis (lower market cap = higher 2x+ potential)
+    # OPTIMIZED FOR 2X PUMPS: Heavily reward ultra-micro caps
     market_cap = stats.get('market_cap_usd', 0)
-    if 0 < (market_cap or 0) < MCAP_MICRO_MAX:
+    if 0 < (market_cap or 0) < MCAP_MICRO_MAX:  # < $100k
         score += 3
-        scoring_details.append(f"Market Cap: +3 (${market_cap:,.0f} - micro cap gem)")
-    elif (market_cap or 0) < MCAP_SMALL_MAX:
+        scoring_details.append(f"Market Cap: +3 (${market_cap:,.0f} - ULTRA micro cap, 5-10x potential!)")
+    elif (market_cap or 0) < MCAP_SMALL_MAX:  # $100k-$200k
         score += 2
-        scoring_details.append(f"Market Cap: +2 (${market_cap:,.0f} - small cap)")
-    elif (market_cap or 0) < MCAP_MID_MAX:
+        scoring_details.append(f"Market Cap: +2 (${market_cap:,.0f} - micro cap, 3-5x potential)")
+    elif (market_cap or 0) < MCAP_MID_MAX:  # $200k-$1M
         score += 1
-        scoring_details.append(f"Market Cap: +1 (${market_cap:,.0f} - growing)")
-    # Microcap sweet band bonus
+        scoring_details.append(f"Market Cap: +1 (${market_cap:,.0f} - small cap, 2-3x potential)")
+    
+    # === 2X SWEET SPOT BONUS (OPTIMIZED: $20k-$200k) ===
+    # Why? Tokens in this range need minimal capital to 2x
+    # $50k → $100k = needs $50k | $200k → $400k = needs $200k
     if market_cap and MICROCAP_SWEET_MIN <= market_cap <= MICROCAP_SWEET_MAX:
         score = min(score + 1, 10)
-        scoring_details.append(f"Microcap Sweet Spot: +1 (${market_cap:,.0f})")
+        scoring_details.append(f"🎯 2X Sweet Spot: +1 (${market_cap:,.0f} - optimized for quick 2x!)")
+    
+    # === ULTRA-MICRO BONUS: $20k-$50k (HIGHEST 2X POTENTIAL) ===
+    # Extra bonus for the tiniest tokens with explosive potential
+    if market_cap and 20_000 <= market_cap <= 50_000:
+        score = min(score + 1, 10)
+        scoring_details.append(f"💎 Ultra-Micro Gem: +1 (${market_cap:,.0f} - 10x+ potential!)")
 
     # === LIQUIDITY ANALYSIS (ANALYST FINDING: #1 PREDICTOR OF WINNERS!) ===
     # Winner median liquidity: $17,811 | Loser median: $0
@@ -514,6 +523,7 @@ def score_token(stats: Dict[str, Any], smart_money_detected: bool = False, token
     
     # === VOLUME-TO-LIQUIDITY & MCAP RATIOS (Top 3 Predictor) ===
     # High ratio = strong trading interest = better chance of 2x+
+    vol_to_liq_ratio = 0.0
     if liquidity_usd > 0 and volume_24h > 0:
         vol_to_liq_ratio = volume_24h / liquidity_usd
         if vol_to_liq_ratio >= 48:  # High precision rule from analyst
@@ -529,7 +539,7 @@ def score_token(stats: Dict[str, Any], smart_money_detected: bool = False, token
         if vol_to_mcap < 0.05:  # Very low activity
             score -= 1
             scoring_details.append(f"⚠️  Low Activity: -1 (vol/mcap: {vol_to_mcap:.3f})")
-        else:
+        elif vol_to_liq_ratio > 0:  # Only log if we have valid ratio
             scoring_details.append(f"Vol/Liq Ratio: ({vol_to_liq_ratio:.1f})")
     # === END VOLUME-TO-LIQUIDITY RATIO ===
 
@@ -772,19 +782,13 @@ def _check_junior_common(stats: Dict[str, Any], final_score: int, *,
         market_cap = float(market_cap)
     except Exception:
         market_cap = 0.0
-    change_1h = stats.get('change', {}).get('1h', 0) or 0
-    try:
-        change_1h = float(change_1h)
-    except Exception:
-        change_1h = 0.0
-    mcap_cap = float(MAX_MARKET_CAP_FOR_DEFAULT_ALERT or 0) * float(mcap_factor or 1.0)
-    mcap_ok = (market_cap or 0) <= mcap_cap
     
-    # FIXED: Removed LARGE_CAP_MOMENTUM_GATE bypass - was allowing ANY token > $1M with 5%+ momentum!
-    # This was the bug causing $1.5M and $2.7M tokens to pass.
-    # Now STRICTLY enforce the market cap limit with NO exceptions.
-    if not mcap_ok:
-        return False
+    # STRICT MARKET CAP FILTER: NO tokens > $1M, regardless of momentum or mode
+    # CRITICAL FIX: Removed momentum bypass and mcap_factor to enforce strict $1M limit
+    # User requirement: "no token with market cap > 1million gets past through"
+    mcap_cap = float(MAX_MARKET_CAP_FOR_DEFAULT_ALERT or 0)  # Always $1M, no multiplier
+    if market_cap > mcap_cap:
+        return False  # HARD REJECT: No bypass for large caps
 
     ratio = 0.0
     try:
