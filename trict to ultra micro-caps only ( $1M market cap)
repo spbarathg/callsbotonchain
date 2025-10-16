@@ -1,0 +1,37 @@
+[1mdiff --git a/app/config_unified.py b/app/config_unified.py[m
+[1mindex 557b5df..5d4420d 100644[m
+[1m--- a/app/config_unified.py[m
+[1m+++ b/app/config_unified.py[m
+[36m@@ -219,11 +219,11 @@[m [mMCAP_VERY_LOW = _get_float("MCAP_VERY_LOW", 20000.0)  # LOWERED - allow very ear[m
+ MCAP_LOW = _get_float("MCAP_LOW", 100000.0)[m
+ MCAP_MED = _get_float("MCAP_MED", 500000.0)[m
+ MCAP_MICRO_MAX = _get_float("MCAP_MICRO_MAX", 150000.0)  # Focus zone[m
+[31m-MCAP_SMALL_MAX = _get_float("MCAP_SMALL_MAX", 300000.0)[m
+[31m-MCAP_MID_MAX = _get_float("MCAP_MID_MAX", 1000000.0)[m
+[31m-# SWEET SPOT for 2x+: 20k-150k market cap (risky but high reward)[m
+[32m+[m[32mMCAP_SMALL_MAX = _get_float("MCAP_SMALL_MAX", 500000.0)  # Raised from 300k to 500k[m
+[32m+[m[32mMCAP_MID_MAX = _get_float("MCAP_MID_MAX", 1000000.0)  # This is now the HARD CAP[m
+[32m+[m[32m# SWEET SPOT for 2x+: 20k-500k market cap (ultra micro-caps!)[m
+ MICROCAP_SWEET_MIN = _get_float("MICROCAP_SWEET_MIN", 20000.0)  # LOWERED for early entries[m
+[31m-MICROCAP_SWEET_MAX = _get_float("MICROCAP_SWEET_MAX", 150000.0)[m
+[32m+[m[32mMICROCAP_SWEET_MAX = _get_float("MICROCAP_SWEET_MAX", 500000.0)  # Raised from 150k to 500k for more opportunities[m
+ [m
+ # Momentum[m
+ MOMENTUM_1H_HIGH = _get_float("MOMENTUM_1H_HIGH", 10.0)[m
+[36m@@ -302,11 +302,12 @@[m [mSTABLE_MINTS = [[m
+     "So11111111111111111111111111111111111111112",   # Wrapped SOL[m
+ ][m
+ [m
+[31m-# Market cap limits[m
+[31m-MAX_MARKET_CAP_USD = _get_float("MAX_MARKET_CAP_USD", 50_000_000.0)[m
+[31m-MAX_MARKET_CAP_FOR_DEFAULT_ALERT = _get_float("MAX_MARKET_CAP_FOR_DEFAULT_ALERT", 50_000_000.0)[m
+[32m+[m[32m# Market cap limits - ULTRA MICRO-CAP FOCUS (< $1M)[m
+[32m+[m[32m# User wants ONLY coins below $1M market cap for maximum 2x+ potential[m
+[32m+[m[32mMAX_MARKET_CAP_USD = _get_float("MAX_MARKET_CAP_USD", 1_000_000.0)  # Changed from 50M to 1M![m
+[32m+[m[32mMAX_MARKET_CAP_FOR_DEFAULT_ALERT = _get_float("MAX_MARKET_CAP_FOR_DEFAULT_ALERT", 1_000_000.0)  # Changed from 50M to 1M![m
+ LARGE_CAP_MOMENTUM_GATE_1H = _get_float("LARGE_CAP_MOMENTUM_GATE_1H", 5.0)[m
+[31m-LARGE_CAP_HOLDER_STATS_MCAP_USD = _get_float("LARGE_CAP_HOLDER_STATS_MCAP_USD", 1_000_000.0)[m
+[32m+[m[32mLARGE_CAP_HOLDER_STATS_MCAP_USD = _get_float("LARGE_CAP_HOLDER_STATS_MCAP_USD", 500_000.0)  # Lowered from 1M[m
+ [m
+ [m
+ # ============================================================================[m

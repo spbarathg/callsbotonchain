@@ -93,7 +93,7 @@ RESULT: $2,500 profit (exactly at goal!)
 ✅ Score: 9-10/10 (MUST)
 ✅ Conviction: "High Confidence (Strict)" or "High Confidence (Smart Money)"
 ✅ Liquidity: $18k-30k (micro-cap sweet spot)
-✅ Market Cap: $20k-100k (micro-cap zone)
+✅ Market Cap: $20k-$1M (MAXIMUM $1M - no large caps!)
 ✅ Volume 24h: $5k+ (thanks to today's fix!)
 ✅ Vol/MCap: 15%+ (active trading)
 ✅ Telegram alert: Instant (bot just improved)
