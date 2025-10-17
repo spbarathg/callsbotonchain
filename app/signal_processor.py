@@ -180,6 +180,16 @@ class SignalProcessor:
                     error_message="Liquidity check failed"
                 )
         
+        # EARLY GATE: Market cap filter ($50k-$200k sweet spot)
+        # DATA-DRIVEN: <$50k = 63.9% rug rate, $50k-$100k = 28.8% 2x+ rate (best!)
+        if not self._check_market_cap_range(stats, token_address):
+            return ProcessResult(
+                status="skipped",
+                token_address=token_address,
+                preliminary_score=preliminary_score,
+                error_message="Market cap outside target range"
+            )
+        
         # ANTI-FOMO FILTER: Reject tokens that already pumped (late entry!)
         if not self._check_fomo_filter(stats, token_address):
             return ProcessResult(
@@ -346,7 +356,13 @@ class SignalProcessor:
             return True
     
     def _check_liquidity(self, stats: TokenStats, min_liq: float, excellent_liq: float) -> bool:
-        """Check liquidity requirements"""
+        """
+        Check liquidity requirements with maximum cap
+        DATA-DRIVEN: $30k-$50k = 26.5% 2x+ rate, 335% avg gain (best!)
+        COUNTER-INTUITIVE: $75k+ has 65% rug rate (worse than lower liquidity!)
+        """
+        from app.config_unified import MAX_LIQUIDITY_USD
+        
         liquidity = stats.liquidity_usd or 0
 
         # CRITICAL FIX: Handle NaN/inf values (NaN comparisons always False!)
@@ -364,9 +380,19 @@ class SignalProcessor:
         if liquidity < min_liq:
             self._log(f"❌ REJECTED (LOW LIQUIDITY): {stats.token_address} - ${liquidity:,.0f} < ${min_liq:,.0f}")
             return False
+        
+        # Check maximum liquidity (counter-intuitive but data-driven!)
+        max_liq = MAX_LIQUIDITY_USD or 0
+        if max_liq > 0 and liquidity > max_liq:
+            self._log(f"❌ REJECTED (LIQUIDITY TOO HIGH): {stats.token_address} - ${liquidity:,.0f} > ${max_liq:,.0f} (data shows 65% rug rate!)")
+            return False
 
-        quality = "EXCELLENT" if liquidity >= excellent_liq else "GOOD"
-        self._log(f"✅ LIQUIDITY CHECK PASSED: {stats.token_address} - ${liquidity:,.0f} ({quality})")
+        # Log liquidity sweet spot
+        if 30000 <= liquidity <= 50000:
+            self._log(f"✅ LIQUIDITY SWEET SPOT: {stats.token_address} - ${liquidity:,.0f} ($30k-$50k zone - 26.5% 2x+ rate, 335% avg gain!)")
+        else:
+            quality = "EXCELLENT" if liquidity >= excellent_liq else "GOOD"
+            self._log(f"✅ LIQUIDITY CHECK PASSED: {stats.token_address} - ${liquidity:,.0f} ({quality})")
         return True
     
     def _check_fomo_filter(self, stats: TokenStats, token_address: str) -> bool:
@@ -420,6 +446,37 @@ class SignalProcessor:
         except Exception as e:
             # Log the error to debug formatting issues
             self._log(f"⚠️  ERROR in FOMO log formatting: {e} (change_24h={change_24h})")
+        
+        return True
+    
+    def _check_market_cap_range(self, stats: TokenStats, token_address: str) -> bool:
+        """
+        Check if market cap is within optimal range for 2x+ gains
+        DATA-DRIVEN: <$50k = 63.9% rug rate, $50k-$100k = 28.8% 2x+ rate (best!)
+        """
+        from app.config_unified import MIN_MARKET_CAP_USD, MAX_MARKET_CAP_FOR_DEFAULT_ALERT
+        
+        market_cap = stats.market_cap_usd or 0
+        
+        if market_cap <= 0:
+            self._log(f"❌ REJECTED (NO MARKET CAP DATA): {token_address}")
+            return False
+        
+        # Reject if below minimum (avoid <$50k death zone with 63.9% rug rate)
+        if market_cap < MIN_MARKET_CAP_USD:
+            self._log(f"❌ REJECTED (MARKET CAP TOO LOW): {token_address} - ${market_cap:,.0f} < ${MIN_MARKET_CAP_USD:,.0f} (death zone - 63.9% rug rate!)")
+            return False
+        
+        # Reject if above maximum (stay in sweet spot)
+        if market_cap > MAX_MARKET_CAP_FOR_DEFAULT_ALERT:
+            self._log(f"❌ REJECTED (MARKET CAP TOO HIGH): {token_address} - ${market_cap:,.0f} > ${MAX_MARKET_CAP_FOR_DEFAULT_ALERT:,.0f}")
+            return False
+        
+        # Log entry in sweet spot
+        if MIN_MARKET_CAP_USD <= market_cap <= 100000:
+            self._log(f"✅ MARKET CAP SWEET SPOT: {token_address} - ${market_cap:,.0f} ($50k-$100k zone - 28.8% 2x+ rate!)")
+        else:
+            self._log(f"✅ MARKET CAP OK: {token_address} - ${market_cap:,.0f}")
         
         return True
     

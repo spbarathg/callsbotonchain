@@ -1,0 +1,32 @@
+# DATA-DRIVEN OPTIMIZATION FOR 2X+ WIN RATE
+# Analysis: 757 sub-$1M signals, 20.2% current 2x+ rate → target 25-30%
+# Date: October 17, 2025
+
+# Market Cap Range - SWEET SPOT: $50k-$200k
+# <$50k: 18.2% 2x+ rate, 63.9% rug rate (DEATH ZONE)
+# $50k-$100k: 28.8% 2x+ rate, 43.5% rug rate (BEST!)
+# $100k-$200k: 20.9% 2x+ rate, 48.5% rug rate (GOOD)
+MIN_MARKET_CAP_USD=50000
+MAX_MARKET_CAP_USD=200000
+MAX_MARKET_CAP_FOR_DEFAULT_ALERT=200000
+
+# Liquidity Range - SWEET SPOT: $30k-$75k
+# $30k-$50k: 26.5% 2x+ rate, 335% avg gain (BEST!)
+# $75k+: 20.6% 2x+ rate, BUT 65% rug rate (AVOID!)
+MIN_LIQUIDITY_USD=30000
+MAX_LIQUIDITY_USD=75000
+
+# Volume - Stricter for Quality
+MIN_VOLUME_24H_USD=10000
+VOL_TO_MCAP_RATIO_MIN=0.30
+
+# Scoring - Quality Over Quantity
+GENERAL_CYCLE_MIN_SCORE=7
+HIGH_CONFIDENCE_SCORE=7
+
+# Anti-Rug Protection - Tighter
+MAX_TOP10_CONCENTRATION=20.0
+MAX_BUNDLERS_PERCENT=15.0
+MAX_INSIDERS_PERCENT=25.0
+MIN_HOLDER_COUNT=100
+
