@@ -332,7 +332,7 @@ EXCELLENT_LIQUIDITY_USD = _get_float("EXCELLENT_LIQUIDITY_USD", 50000.0)  # Prem
 # RAISED thresholds to ensure genuine activity (not fake volume)
 VOL_TO_LIQ_RATIO_MIN = _get_float("VOL_TO_LIQ_RATIO_MIN", 0.2)  # 20% vol/liq (keep as is)
 VOL_TO_MCAP_RATIO_MIN = _get_float("VOL_TO_MCAP_RATIO_MIN", 0.25)  # RAISED: 25% vol/mcap (was 15%) for genuine interest
-MIN_VOLUME_24H_USD = _get_float("MIN_VOLUME_24H_USD", 10000.0)  # RAISED: $10k (was $5k) for active trading
+MIN_VOLUME_24H_USD = _get_float("MIN_VOLUME_24H_USD", 5000.0)  # OPTIMIZED: $5k (catch tokens 38% earlier, aligned with audit findings)
 
 # Security Gates
 REQUIRE_LP_LOCKED = _get_bool("REQUIRE_LP_LOCKED", False)
