@@ -215,21 +215,25 @@ VOL_HIGH = _get_float("VOL_HIGH", 50000.0)
 VOL_MED = _get_float("VOL_MED", 10000.0)
 VOL_24H_MIN_FOR_ALERT = _get_float("VOL_24H_MIN_FOR_ALERT", 0.0)
 
-# Market Cap - OPTIMIZED FOR 2X+ PUMPS: Focus on ultra-micro-caps
-# Math: Lower market cap = easier to 2x (needs less capital inflow)
-# $50k needs $50k to 2x | $500k needs $500k to 2x
-# Target zone: $20k-$200k for consistent 2x-10x potential
-MCAP_VERY_LOW = _get_float("MCAP_VERY_LOW", 20000.0)  # Ultra micro - 10x+ potential
-MCAP_LOW = _get_float("MCAP_LOW", 100000.0)  # Micro - 5x+ potential
-MCAP_MED = _get_float("MCAP_MED", 300000.0)  # Small - 2-3x potential
-# DATA-DRIVEN: $100k-$200k = 267% avg (BEST!), $50k-$100k = 207% avg
-MCAP_MICRO_MAX = _get_float("MCAP_MICRO_MAX", 100000.0)  # $50k-$100k: +2 bonus zone
-MCAP_SMALL_MAX = _get_float("MCAP_SMALL_MAX", 200000.0)  # $100k-$200k: +3 bonus (BEST!)
-MCAP_MID_MAX = _get_float("MCAP_MID_MAX", 1000000.0)  # +1 bonus zone (hard limit)
-# SWEET SPOT OPTIMIZED FOR 2X: $20k-$200k (easiest to pump)
-# Why $200k max? A $200k token only needs $200k to 2x (achievable in one pump cycle)
-MICROCAP_SWEET_MIN = _get_float("MICROCAP_SWEET_MIN", 20000.0)  # $20k minimum
-MICROCAP_SWEET_MAX = _get_float("MICROCAP_SWEET_MAX", 200000.0)  # OPTIMIZED: $200k (was $500k)
+# Market Cap - OPTIMIZED FOR 2X+ PUMPS: Focus on $50k-$200k sweet spot
+# DATA-DRIVEN ANALYSIS (1,064 signals, sub-$1M only):
+# <$50k: 18.2% 2x+ rate, 63.9% rug rate (DEATH ZONE - AVOID!)
+# $50k-$100k: 28.8% 2x+ rate, 43.5% rug rate (BEST!)
+# $100k-$200k: 20.9% 2x+ rate, 48.5% rug rate (GOOD)
+# $200k-$500k: 13.3% 2x+ rate, 37.3% rug rate (low upside)
+# Target zone: $50k-$200k for best 2x+ rate (28.8%)
+MCAP_VERY_LOW = _get_float("MCAP_VERY_LOW", 50000.0)  # Minimum: avoid <$50k death zone
+MCAP_LOW = _get_float("MCAP_LOW", 100000.0)  # Micro - best 2x+ rate
+MCAP_MED = _get_float("MCAP_MED", 200000.0)  # Small - still good
+# DATA-DRIVEN: $50k-$100k = 28.8% 2x+ rate (BEST!), $100k-$200k = 20.9% (GOOD)
+MCAP_MICRO_MAX = _get_float("MCAP_MICRO_MAX", 100000.0)  # $50k-$100k: +3 bonus zone (BEST!)
+MCAP_SMALL_MAX = _get_float("MCAP_SMALL_MAX", 200000.0)  # $100k-$200k: +2 bonus (GOOD)
+MCAP_MID_MAX = _get_float("MCAP_MID_MAX", 200000.0)  # Hard limit at $200k (was $1M)
+# SWEET SPOT OPTIMIZED FOR 2X: $50k-$200k (best win rate)
+# Why $50k min? <$50k has 63.9% rug rate (death zone)
+# Why $200k max? Best balance of 2x potential and rug avoidance
+MICROCAP_SWEET_MIN = _get_float("MICROCAP_SWEET_MIN", 50000.0)  # $50k minimum (was $20k)
+MICROCAP_SWEET_MAX = _get_float("MICROCAP_SWEET_MAX", 200000.0)  # $200k maximum (confirmed optimal)
 
 # Momentum
 MOMENTUM_1H_HIGH = _get_float("MOMENTUM_1H_HIGH", 10.0)
@@ -239,12 +243,12 @@ MOMENTUM_1H_PUMPER = _get_float("MOMENTUM_1H_PUMPER", 30.0)
 MOMENTUM_24H_HIGH = _get_float("MOMENTUM_24H_HIGH", 50.0)
 DRAW_24H_MAJOR = _get_float("DRAW_24H_MAJOR", -60.0)  # Major drawdown threshold (was -30%, now -60% to allow dip buying)
 
-# ANTI-FOMO FILTER - OPTIMIZED FOR 50%+ HIT RATE
+# ANTI-FOMO FILTER - OPTIMIZED FOR 2X+ WIN RATE
 # CRITICAL: Catch tokens EARLY for maximum 2x+ potential
 # Entry at 100-150% = still 2-5x potential left
 # Entry at 300%+ = likely near peak (late entry = bag holder)
-MAX_24H_CHANGE_FOR_ALERT = _get_float("MAX_24H_CHANGE_FOR_ALERT", 150.0)  # TIGHTENED: 150% (was 300%) - catch early/mid pump
-MAX_1H_CHANGE_FOR_ALERT = _get_float("MAX_1H_CHANGE_FOR_ALERT", 100.0)   # TIGHTENED: 100% (was 200%) - avoid extreme pumps
+MAX_24H_CHANGE_FOR_ALERT = _get_float("MAX_24H_CHANGE_FOR_ALERT", 150.0)  # 150% - catch early/mid pump
+MAX_1H_CHANGE_FOR_ALERT = _get_float("MAX_1H_CHANGE_FOR_ALERT", 100.0)   # 100% - avoid extreme pumps
 
 
 # ============================================================================
@@ -308,47 +312,52 @@ STABLE_MINTS = [
     "So11111111111111111111111111111111111111112",   # Wrapped SOL
 ]
 
-# Market cap limits - MICRO-CAP FOCUS: Only tokens below $1M market cap!
-MAX_MARKET_CAP_USD = _get_float("MAX_MARKET_CAP_USD", 1_000_000.0)  # $1M max (was $50M - MICRO-CAP ONLY!)
-MAX_MARKET_CAP_FOR_DEFAULT_ALERT = _get_float("MAX_MARKET_CAP_FOR_DEFAULT_ALERT", 1_000_000.0)  # $1M max for alerts
+# Market cap limits - SWEET SPOT: $50k-$200k for best 2x+ rate
+# DATA-DRIVEN: $50k-$100k has 28.8% 2x+ rate (best), <$50k has 63.9% rug rate (avoid!)
+MIN_MARKET_CAP_USD = _get_float("MIN_MARKET_CAP_USD", 50000.0)  # $50k minimum (avoid death zone)
+MAX_MARKET_CAP_USD = _get_float("MAX_MARKET_CAP_USD", 200000.0)  # $200k max (sweet spot, was $1M)
+MAX_MARKET_CAP_FOR_DEFAULT_ALERT = _get_float("MAX_MARKET_CAP_FOR_DEFAULT_ALERT", 200000.0)  # $200k max for alerts
 LARGE_CAP_MOMENTUM_GATE_1H = _get_float("LARGE_CAP_MOMENTUM_GATE_1H", 5.0)
-LARGE_CAP_HOLDER_STATS_MCAP_USD = _get_float("LARGE_CAP_HOLDER_STATS_MCAP_USD", 1_000_000.0)
+LARGE_CAP_HOLDER_STATS_MCAP_USD = _get_float("LARGE_CAP_HOLDER_STATS_MCAP_USD", 200000.0)  # Updated to $200k
 
 
 # ============================================================================
 # RISK GATES (Data-Driven)
 # ============================================================================
 
-# Liquidity Gate - OPTIMIZED FOR 50%+ HIT RATE
-# Winner median: $17,811, but for 50%+ hit rate we target TOP-TIER winners only
-# $25k targets top 30-40% of winners (higher quality, better sustainability)
+# Liquidity Gate - OPTIMIZED FOR 2X+ WIN RATE
+# DATA-DRIVEN ANALYSIS (sub-$1M tokens only):
+# $30k-$50k: 26.5% 2x+ rate, 335% avg gain (BEST!)
+# $50k-$75k: 13.1% 2x+ rate, 52% avg gain
+# $75k+: 20.6% 2x+ rate, BUT 65% rug rate (AVOID!)
+# COUNTER-INTUITIVE: Higher liquidity ($75k+) has WORSE rug rate!
 USE_LIQUIDITY_FILTER = _get_bool("USE_LIQUIDITY_FILTER", True)
-# Data shows: $20k-$50k range has 206% avg gain, 68.7% win rate (best performance)
-MIN_LIQUIDITY_USD = _get_float("MIN_LIQUIDITY_USD", 20000.0)  # OPTIMIZED: $20k sweet spot entry (was $25k)
-EXCELLENT_LIQUIDITY_USD = _get_float("EXCELLENT_LIQUIDITY_USD", 50000.0)  # Premium tier
+MIN_LIQUIDITY_USD = _get_float("MIN_LIQUIDITY_USD", 30000.0)  # $30k minimum (was $20k)
+EXCELLENT_LIQUIDITY_USD = _get_float("EXCELLENT_LIQUIDITY_USD", 50000.0)  # $30k-$50k sweet spot
+MAX_LIQUIDITY_USD = _get_float("MAX_LIQUIDITY_USD", 75000.0)  # $75k cap (higher = worse!)
 
-# Volume to Liquidity/Mcap Ratios - OPTIMIZED FOR 50%+ HIT RATE
+# Volume to Liquidity/Mcap Ratios - OPTIMIZED FOR 2X+ WIN RATE
 # Higher vol/mcap ratio = more trading interest = better chance of 2x+
-# RAISED thresholds to ensure genuine activity (not fake volume)
-VOL_TO_LIQ_RATIO_MIN = _get_float("VOL_TO_LIQ_RATIO_MIN", 0.2)  # 20% vol/liq (keep as is)
-VOL_TO_MCAP_RATIO_MIN = _get_float("VOL_TO_MCAP_RATIO_MIN", 0.25)  # RAISED: 25% vol/mcap (was 15%) for genuine interest
-MIN_VOLUME_24H_USD = _get_float("MIN_VOLUME_24H_USD", 10000.0)  # RAISED: $10k (was $5k) for active trading
+# Strict thresholds to filter fake volume and ensure genuine activity
+VOL_TO_LIQ_RATIO_MIN = _get_float("VOL_TO_LIQ_RATIO_MIN", 0.2)  # 20% vol/liq
+VOL_TO_MCAP_RATIO_MIN = _get_float("VOL_TO_MCAP_RATIO_MIN", 0.30)  # RAISED: 30% vol/mcap (was 25%) for genuine interest
+MIN_VOLUME_24H_USD = _get_float("MIN_VOLUME_24H_USD", 10000.0)  # $10k minimum for active trading
 
 # Security Gates
 REQUIRE_LP_LOCKED = _get_bool("REQUIRE_LP_LOCKED", False)
 REQUIRE_MINT_REVOKED = _get_bool("REQUIRE_MINT_REVOKED", False)
 ALLOW_UNKNOWN_SECURITY = _get_bool("ALLOW_UNKNOWN_SECURITY", True)
 
-# Holder Concentration - OPTIMIZED FOR 50%+ HIT RATE
-# TIGHTENED to reduce whale manipulation and rug risk
+# Holder Concentration - OPTIMIZED FOR 2X+ WIN RATE
+# TIGHTENED to reduce whale manipulation and rug risk (51.9% → 35-40% target)
 # Lower concentration = better distribution = more sustainable pumps
-MAX_TOP10_CONCENTRATION = _get_float("MAX_TOP10_CONCENTRATION", 25.0)  # TIGHTENED: 25% (was 30%) - less whale control
-MAX_BUNDLERS_PERCENT = _get_float("MAX_BUNDLERS_PERCENT", 20.0)  # TIGHTENED: 20% (was 25%) - reduce bot/bundler risk
-MAX_INSIDERS_PERCENT = _get_float("MAX_INSIDERS_PERCENT", 30.0)  # TIGHTENED: 30% (was 35%) - reduce insider dumps
+MAX_TOP10_CONCENTRATION = _get_float("MAX_TOP10_CONCENTRATION", 20.0)  # TIGHTENED: 20% (was 25%) - less whale control
+MAX_BUNDLERS_PERCENT = _get_float("MAX_BUNDLERS_PERCENT", 15.0)  # TIGHTENED: 15% (was 20%) - reduce bot/bundler risk
+MAX_INSIDERS_PERCENT = _get_float("MAX_INSIDERS_PERCENT", 25.0)  # TIGHTENED: 25% (was 30%) - reduce insider dumps
 ENFORCE_BUNDLER_CAP = _get_bool("ENFORCE_BUNDLER_CAP", True)  # ENABLED!
 ENFORCE_INSIDER_CAP = _get_bool("ENFORCE_INSIDER_CAP", True)  # ENABLED!
 REQUIRE_HOLDER_STATS_FOR_LARGE_CAP_ALERT = _get_bool("REQUIRE_HOLDER_STATS_FOR_LARGE_CAP_ALERT", False)
-MIN_HOLDER_COUNT = _get_int("MIN_HOLDER_COUNT", 75)  # RAISED: 75+ holders (was 50) - better distribution
+MIN_HOLDER_COUNT = _get_int("MIN_HOLDER_COUNT", 100)  # RAISED: 100+ holders (was 75) - better distribution
 
 # Nuanced Scoring Factors (for flexible gating)
 # TIGHTENED for 50% hit rate target - nuanced should still be high quality
@@ -375,12 +384,12 @@ SMART_MONEY_SCORE_BONUS = _get_int("SMART_MONEY_SCORE_BONUS", 0)  # REMOVED
 # Velocity
 REQUIRE_VELOCITY_MIN_SCORE_FOR_ALERT = _get_int("REQUIRE_VELOCITY_MIN_SCORE_FOR_ALERT", 0)
 
-# Cycle Balance - OPTIMIZED FOR 50%+ HIT RATE
-# RAISED to 7+ for top 30% quality tokens (50-55% hit rate expected)
+# Cycle Balance - OPTIMIZED FOR 2X+ WIN RATE
+# RAISED to 7+ for quality signals - reduce noise from marginal tokens
 # Quality over quantity - only alert on HIGH-CONFIDENCE signals
-# Data shows: Score 6 = 81.8% win rate, captures more winners without flooding
-SMART_CYCLE_MIN_SCORE = _get_int("SMART_CYCLE_MIN_SCORE", 6)  # LOWERED: Data-driven (was 7)
-GENERAL_CYCLE_MIN_SCORE = _get_int("GENERAL_CYCLE_MIN_SCORE", 6)  # LOWERED: Data-driven (was 7)
+# Current issue: ALL signals are score 10 (no discrimination)
+SMART_CYCLE_MIN_SCORE = _get_int("SMART_CYCLE_MIN_SCORE", 7)  # RAISED: (was 6)
+GENERAL_CYCLE_MIN_SCORE = _get_int("GENERAL_CYCLE_MIN_SCORE", 7)  # RAISED: (was 6)
 
 # Multi-signal Confirmation
 REQUIRE_MULTI_SIGNAL = _get_bool("REQUIRE_MULTI_SIGNAL", False)

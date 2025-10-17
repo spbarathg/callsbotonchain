@@ -789,12 +789,21 @@ def _check_junior_common(stats: Dict[str, Any], final_score: int, *,
     except Exception:
         market_cap = 0.0
     
-    # STRICT MARKET CAP FILTER: NO tokens > $1M, regardless of momentum or mode
-    # CRITICAL FIX: Removed momentum bypass and mcap_factor to enforce strict $1M limit
-    # User requirement: "no token with market cap > 1million gets past through"
-    mcap_cap = float(MAX_MARKET_CAP_FOR_DEFAULT_ALERT or 0)  # Always $1M, no multiplier
-    if market_cap > mcap_cap:
-        return False  # HARD REJECT: No bypass for large caps
+    # STRICT MARKET CAP FILTER: $50k-$200k SWEET SPOT
+    # DATA-DRIVEN: <$50k = 63.9% rug rate (death zone), $50k-$100k = 28.8% 2x+ rate (best!)
+    # User requirement: Focus on $50k-$200k range for optimal 2x+ win rate
+    from app.config_unified import MIN_MARKET_CAP_USD
+    
+    mcap_min = float(MIN_MARKET_CAP_USD or 0)
+    mcap_max = float(MAX_MARKET_CAP_FOR_DEFAULT_ALERT or 0)
+    
+    # Reject if below minimum (avoid <$50k death zone with 63.9% rug rate)
+    if market_cap > 0 and market_cap < mcap_min:
+        return False  # HARD REJECT: Below $50k minimum
+    
+    # Reject if above maximum (keep focused on sweet spot)
+    if market_cap > mcap_max:
+        return False  # HARD REJECT: Above $200k maximum
 
     ratio = 0.0
     try:
