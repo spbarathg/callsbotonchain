@@ -5,11 +5,9 @@ Provides data for Overview, Performance, System, Configuration, and Paper Tradin
 import os
 import json
 import sqlite3
-import time
 from datetime import datetime, timedelta
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List
 from collections import defaultdict
-import subprocess
 
 # Import existing utilities
 try:
@@ -56,7 +54,7 @@ def _read_alerts_file(limit: int = 1000) -> List[Dict]:
                     alerts.append(_sanitize(obj))
                 except Exception:
                     continue
-    except Exception as e:
+    except Exception:
         pass
     return alerts
 
@@ -104,7 +102,7 @@ def get_smart_money_status() -> Dict[str, Any]:
         return {"status": "no_recent_data"}
     
     # Count smart money
-    smart_alerts = [a for a in recent if a.get('smart_money_detected') == True or a.get('smart_cycle') == True]
+    smart_alerts = [a for a in recent if a.get('smart_money_detected') is True or a.get('smart_cycle') is True]
     
     # Calculate metrics
     total_recent = len(recent)
@@ -201,7 +199,7 @@ def get_budget_status() -> Dict[str, Any]:
         return {"status": "unavailable"}
     
     try:
-        budget = get_budget()
+        get_budget()
         
         # Get current usage
         daily_max = int(os.getenv("BUDGET_PER_DAY_MAX", "10000"))
@@ -393,7 +391,6 @@ def get_gate_performance() -> Dict[str, Any]:
     prelim_fail = 0
     strict_pass = 0
     nuanced_pass = 0
-    final_fail = 0
     
     for log in logs:
         log_type = log.get('type', '')

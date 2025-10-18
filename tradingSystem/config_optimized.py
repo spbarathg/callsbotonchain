@@ -88,9 +88,9 @@ MAX_CONSECUTIVE_LOSSES = _get_int("TS_MAX_CONSECUTIVE_LOSSES", 5)  # Pause after
 
 # ==================== ENTRY FILTERS ====================
 # These are for additional validation beyond signal score
-# Set conservatively - bot already does excellent filtering at score 7+
+# Align with signal bot defaults to avoid integration mismatch
 
-MIN_LIQUIDITY_USD = _get_float("TS_MIN_LIQUIDITY_USD", 5000)  # Min $5k liquidity
+MIN_LIQUIDITY_USD = _get_float("TS_MIN_LIQUIDITY_USD", 30000)
 MIN_VOLUME_RATIO = _get_float("TS_MIN_VOLUME_RATIO", 0.1)  # Vol/MC ratio min
 
 # ==================== PATHS ====================

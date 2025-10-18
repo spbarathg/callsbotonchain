@@ -144,21 +144,21 @@ def run() -> None:
 
     trader = PaperTrader(starting_capital=args.capital)
     
-    print(f"")
+    print("")
     print(f"{'='*70}")
-    print(f"  📊 PAPER TRADING SYSTEM - REALISTIC SIMULATION")
+    print("  📊 PAPER TRADING SYSTEM - REALISTIC SIMULATION")
     print(f"{'='*70}")
     print(f"  Starting Capital: ${trader.starting_capital:.2f}")
-    print(f"  Swap Fee: 0.25% (Jupiter typical)")
-    print(f"  Slippage: 0.5-4% (liquidity dependent)")
-    print(f"  Latency: 1-3 seconds (realistic execution delay)")
-    print(f"  Stop Loss: 15% from entry")
-    print(f"  Trailing Stop: 30% default (score-dependent)")
-    print(f"  Circuit Breakers: 20% daily loss, 5 consecutive losses")
-    print(f"  Max Concurrent: 5 positions")
-    print(f"  Position Sizing: Optimized (Score 8 = $104, Smart Money = $80 base)")
+    print("  Swap Fee: 0.25% (Jupiter typical)")
+    print("  Slippage: 0.5-4% (liquidity dependent)")
+    print("  Latency: 1-3 seconds (realistic execution delay)")
+    print("  Stop Loss: 15% from entry")
+    print("  Trailing Stop: 30% default (score-dependent)")
+    print("  Circuit Breakers: 20% daily loss, 5 consecutive losses")
+    print("  Max Concurrent: 5 positions")
+    print("  Position Sizing: Optimized (Score 8 = $104, Smart Money = $80 base)")
     print(f"{'='*70}")
-    print(f"")
+    print("")
     
     # Start exit loop
     stop_event = threading.Event()
@@ -173,7 +173,7 @@ def run() -> None:
 
     try:
         # Use Redis-based signal streaming (real-time)
-        print(f"📡 Connecting to Redis signal stream...")
+        print("📡 Connecting to Redis signal stream...")
         for signal in follow_signals_redis(block_timeout=5):
             try:
                 signals_processed += 1
@@ -181,14 +181,14 @@ def run() -> None:
                 # Log health every 10 minutes
                 if time.time() - last_health_log > 600:
                     stats = trader.get_stats()
-                    print(f"\n[PAPER] Health Check:")
+                    print("\n[PAPER] Health Check:")
                     print(f"  Signals Processed: {signals_processed}")
                     print(f"  Positions Opened: {positions_opened}")
                     print(f"  Current Value: ${stats['total_value']:.2f}")
                     print(f"  ROI: {stats['roi_pct']:.1f}%")
                     print(f"  Win Rate: {stats['win_rate']:.1f}%")
                     print(f"  Circuit Breaker: {'TRIPPED' if stats['circuit_breaker_tripped'] else 'OK'}")
-                    print(f"")
+                    print("")
                     last_health_log = time.time()
                 
                 # Check trading toggle
@@ -275,14 +275,14 @@ def run() -> None:
                     print(f"  Trail: {plan['trail_pct']:.0f}%")
                     print(f"  Capital Remaining: ${stats_current['current_capital']:.2f}")
                     print(f"  Open Positions: {stats_current['open_positions']}/5")
-                    print(f"")
+                    print("")
                 
             except Exception as e:
                 print(f"[PAPER] Signal processing error: {e}")
                 continue
     
     except KeyboardInterrupt:
-        print(f"\n[PAPER] Shutting down...")
+        print("\n[PAPER] Shutting down...")
     except Exception as e:
         print(f"[PAPER] Fatal error: {e}")
     finally:
@@ -292,7 +292,7 @@ def run() -> None:
         # Final stats
         final_stats = trader.get_stats()
         print(f"\n{'='*70}")
-        print(f"  📊 PAPER TRADING FINAL RESULTS")
+        print("  📊 PAPER TRADING FINAL RESULTS")
         print(f"{'='*70}")
         print(f"  Starting Capital: ${trader.starting_capital:.2f}")
         print(f"  Final Value: ${final_stats['total_value']:.2f}")
@@ -305,7 +305,7 @@ def run() -> None:
         print(f"  Signals Processed: {signals_processed}")
         print(f"  Positions Opened: {positions_opened}")
         print(f"{'='*70}")
-        print(f"")
+        print("")
 
 
 if __name__ == "__main__":

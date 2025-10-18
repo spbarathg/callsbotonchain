@@ -1,4 +1,16 @@
-﻿# Sessions and secrets (never commit)
+﻿var/*.db
+var/*.sqlite
+var/*.session
+var/*.json
+var/*.lock
+data/logs/*
+*.log
+*.jsonl
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+# Sessions and secrets (never commit)
 *.session
 var/*.session
 

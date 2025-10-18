@@ -53,7 +53,7 @@ if _REDIS_URL:
         except Exception as e:
             print(f"⚠️ Redis not available for signal passing: {e}")
             _redis_client = None
-            _redis_status = f"failed"
+            _redis_status = "failed"
 else:
     print("⚠️ REDIS_URL not configured, signal passing to paper trader disabled")
 

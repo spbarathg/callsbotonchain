@@ -9,8 +9,7 @@ Tests the full flow:
 
 import pytest
 import time
-from unittest.mock import Mock, patch
-from tradingSystem.portfolio_manager import PortfolioManager, get_portfolio_manager
+from tradingSystem.portfolio_manager import PortfolioManager
 from tradingSystem.config_optimized import MAX_CONCURRENT
 
 

@@ -287,7 +287,7 @@ def print_report(health: Dict[str, Any], stats: Dict[str, Any], scenarios: Dict[
     print("📊 CALLSBOTONCHAIN - DAILY PERFORMANCE REPORT")
     print("="*80)
     print(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"Period: Last 24 hours")
+    print("Period: Last 24 hours")
     print("="*80)
     
     # Bot Health
@@ -305,19 +305,19 @@ def print_report(health: Dict[str, Any], stats: Dict[str, Any], scenarios: Dict[
     print(f"Tracked Signals: {stats['tracked_signals']} ({stats['tracking_rate']}%)")
     
     if stats['tracked_signals'] > 0:
-        print(f"\n📊 Overall Metrics:")
+        print("\n📊 Overall Metrics:")
         print(f"  Win Rate: {stats['win_rate_pct']}% ({stats['profitable_count']}/{stats['tracked_signals']})")
         print(f"  Avg Gain: {stats['avg_gain_pct']}% (Multiplier: {(stats['avg_gain_pct']/100)+1:.2f}x)")
         print(f"  Max Gain: {stats['max_gain_pct']}% (Multiplier: {(stats['max_gain_pct']/100)+1:.2f}x)")
         print(f"  Rug Rate: {stats['rug_rate_pct']}% ({stats['rugs']}/{stats['tracked_signals']})")
-        print(f"\n🎯 Success Tiers:")
+        print("\n🎯 Success Tiers:")
         print(f"  2x+ Gains: {stats['x2_plus']}")
         print(f"  5x+ Gains: {stats['x5_plus']}")
         print(f"  10x+ Gains: {stats['x10_plus']}")
         
         # Performance by score
         if stats.get("by_score"):
-            print(f"\n📊 Performance by Score:")
+            print("\n📊 Performance by Score:")
             print(f"  {'Score':<8} {'Count':<8} {'Win Rate':<12} {'Avg Gain':<12} {'2x+':<8}")
             print(f"  {'-'*7} {'-'*7} {'-'*11} {'-'*11} {'-'*7}")
             for score in sorted(stats["by_score"].keys(), reverse=True):
@@ -326,7 +326,7 @@ def print_report(health: Dict[str, Any], stats: Dict[str, Any], scenarios: Dict[
         
         # Top performers
         if stats.get("top_performers"):
-            print(f"\n🏆 Top Performers:")
+            print("\n🏆 Top Performers:")
             for i, perf in enumerate(stats["top_performers"][:5], 1):
                 sm_tag = " [SM]" if perf["smart_money"] else ""
                 print(f"  {i}. {perf['token']}: {perf['multiplier']:.2f}x (Score {perf['score']}{sm_tag})")
@@ -346,7 +346,7 @@ def print_report(health: Dict[str, Any], stats: Dict[str, Any], scenarios: Dict[
             
             if "projection_100_per_trade" in scenario:
                 proj = scenario["projection_100_per_trade"]
-                print(f"\n  💵 Projection ($100 per trade):")
+                print("\n  💵 Projection ($100 per trade):")
                 print(f"    Daily Investment: ${proj['daily_investment']}")
                 print(f"    Daily Return: ${proj['daily_return']}")
                 print(f"    Daily Profit: ${proj['daily_profit']}")

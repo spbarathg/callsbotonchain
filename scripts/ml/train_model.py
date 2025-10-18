@@ -84,7 +84,7 @@ def train_gain_predictor(df: pd.DataFrame, features: list) -> Tuple[object, Dict
     cv_r2_mean = cv_scores.mean()
     cv_r2_std = cv_scores.std()
     
-    print(f"\n📊 Results:")
+    print("\n📊 Results:")
     print(f"  Train R²: {train_r2:.3f}")
     print(f"  Test R²:  {test_r2:.3f}")
     print(f"  CV R² (5-fold): {cv_r2_mean:.3f} ± {cv_r2_std:.3f}")
@@ -95,13 +95,13 @@ def train_gain_predictor(df: pd.DataFrame, features: list) -> Tuple[object, Dict
     if train_r2 - test_r2 > 0.2:
         print(f"  ⚠️  WARNING: Overfitting detected! (Train-Test gap: {train_r2 - test_r2:.3f})")
     elif test_r2 > 0.3:
-        print(f"  ✅ Good generalization!")
+        print("  ✅ Good generalization!")
     else:
-        print(f"  ⚠️  Poor predictive power (Test R² < 0.3)")
+        print("  ⚠️  Poor predictive power (Test R² < 0.3)")
     
     # Feature importance
     importance = dict(zip(features, model.feature_importances_))
-    print(f"\n🔍 Top 10 Most Important Features:")
+    print("\n🔍 Top 10 Most Important Features:")
     for feat, imp in sorted(importance.items(), key=lambda x: x[1], reverse=True)[:10]:
         print(f"  {feat:30s}: {imp:.3f}")
     
@@ -187,8 +187,9 @@ def train_winner_classifier(df: pd.DataFrame, features: list, threshold='2x') ->
     # Evaluate
     train_pred = model.predict(X_train)
     test_pred = model.predict(X_test)
-    train_proba = model.predict_proba(X_train)[:, 1]
-    test_proba = model.predict_proba(X_test)[:, 1]
+    # Probabilities available but not currently used in metrics
+    # train_proba = model.predict_proba(X_train)[:, 1]
+    # test_proba = model.predict_proba(X_test)[:, 1]
     
     train_acc = accuracy_score(y_train, train_pred)
     test_acc = accuracy_score(y_test, test_pred)
@@ -199,7 +200,7 @@ def train_winner_classifier(df: pd.DataFrame, features: list, threshold='2x') ->
     cv_acc_mean = cv_scores.mean()
     cv_acc_std = cv_scores.std()
     
-    print(f"\n📊 Results:")
+    print("\n📊 Results:")
     print(f"  Train Accuracy: {train_acc:.3f}")
     print(f"  Test Accuracy:  {test_acc:.3f}")
     print(f"  CV Accuracy (5-fold): {cv_acc_mean:.3f} ± {cv_acc_std:.3f}")
@@ -208,11 +209,11 @@ def train_winner_classifier(df: pd.DataFrame, features: list, threshold='2x') ->
     if train_acc - test_acc > 0.15:
         print(f"  ⚠️  WARNING: Overfitting detected! (Train-Test gap: {train_acc - test_acc:.3f})")
     elif test_acc > 0.75:
-        print(f"  ✅ Good generalization!")
+        print("  ✅ Good generalization!")
     else:
-        print(f"  ⚠️  Poor predictive power (Test Acc < 0.75)")
+        print("  ⚠️  Poor predictive power (Test Acc < 0.75)")
     
-    print(f"\n📋 Test Set Classification Report:")
+    print("\n📋 Test Set Classification Report:")
     print(classification_report(y_test, test_pred, target_names=['Loser', 'Winner']))
     
     metrics = {

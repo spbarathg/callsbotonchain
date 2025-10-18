@@ -19,7 +19,6 @@ import threading
 from typing import Dict, Any, Optional, List, Tuple
 from dataclasses import dataclass
 from datetime import datetime
-from collections import defaultdict
 
 
 @dataclass

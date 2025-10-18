@@ -6,7 +6,7 @@ Analyzes correlation between features and token performance
 import sys
 import os
 import sqlite3
-from typing import Dict, List, Tuple
+from typing import Dict
 
 # Add parent directory to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -70,14 +70,14 @@ def analyze_feature_performance() -> Dict[str, any]:
     dumps = [t for t in tokens if (t['max_gain'] or 0) <= 0]
     rugs = [t for t in tokens if t['is_rug']]
     
-    print(f"\n🎯 Performance Distribution:")
+    print("\n🎯 Performance Distribution:")
     print(f"  🚀 50%+ Pumps: {len(pumps)} ({len(pumps)/len(tokens)*100:.1f}%)")
     print(f"  📈 Moderate Gains (0-50%): {len(moderate)} ({len(moderate)/len(tokens)*100:.1f}%)")
     print(f"  📉 Dumps (<0%): {len(dumps)} ({len(dumps)/len(tokens)*100:.1f}%)")
     print(f"  💀 Rugs: {len(rugs)} ({len(rugs)/len(tokens)*100:.1f}%)")
     
     # Feature correlation analysis
-    print(f"\n🔬 FEATURE CORRELATION WITH PUMPS (>50% gain)")
+    print("\n🔬 FEATURE CORRELATION WITH PUMPS (>50% gain)")
     print("="*80)
     
     features = [
@@ -119,14 +119,14 @@ def analyze_feature_performance() -> Dict[str, any]:
         
         # Determine if feature is protective or risky
         if pump_rate_with > pump_rate_without and rug_rate_with < rug_rate_without:
-            print(f"  ✅ POSITIVE SIGNAL (increases pumps, reduces rugs)")
+            print("  ✅ POSITIVE SIGNAL (increases pumps, reduces rugs)")
         elif pump_rate_with < pump_rate_without or rug_rate_with > rug_rate_without:
-            print(f"  ⚠️  NEGATIVE/NEUTRAL SIGNAL")
+            print("  ⚠️  NEGATIVE/NEUTRAL SIGNAL")
         else:
-            print(f"  ➖ NEUTRAL")
+            print("  ➖ NEUTRAL")
     
     # Numeric feature analysis
-    print(f"\n\n🔢 NUMERIC FEATURE ANALYSIS")
+    print("\n\n🔢 NUMERIC FEATURE ANALYSIS")
     print("="*80)
     
     numeric_features = [
@@ -154,12 +154,12 @@ def analyze_feature_performance() -> Dict[str, any]:
             
             if abs(avg_pump - avg_rug) > (avg_pump * 0.2):  # >20% difference
                 if avg_pump > avg_rug:
-                    print(f"  ✅ Higher values correlate with PUMPS")
+                    print("  ✅ Higher values correlate with PUMPS")
                 else:
-                    print(f"  ⚠️  Higher values correlate with RUGS")
+                    print("  ⚠️  Higher values correlate with RUGS")
     
     # Conviction type analysis
-    print(f"\n\n🏆 CONVICTION TYPE PERFORMANCE")
+    print("\n\n🏆 CONVICTION TYPE PERFORMANCE")
     print("="*80)
     
     conviction_types = {}
@@ -180,7 +180,7 @@ def analyze_feature_performance() -> Dict[str, any]:
         print(f"  Avg Gain: {avg_gain:+.1f}%")
     
     # Best and worst performers
-    print(f"\n\n🌟 BEST PERFORMERS")
+    print("\n\n🌟 BEST PERFORMERS")
     print("="*80)
     
     best = sorted(tokens, key=lambda t: t['max_gain'] or 0, reverse=True)[:5]
@@ -192,7 +192,7 @@ def analyze_feature_performance() -> Dict[str, any]:
         print(f"   Velocity: {token['velocity'] or 0}")
         print(f"   Top10: {token['top10'] or 0:.1f}%")
     
-    print(f"\n\n💀 WORST PERFORMERS (Rugs)")
+    print("\n\n💀 WORST PERFORMERS (Rugs)")
     print("="*80)
     
     worst = sorted(rugs, key=lambda t: t['max_gain'] or 0)[:5]
@@ -249,7 +249,7 @@ def generate_recommendations():
     row = c.fetchone()
     avg_gain, pump_rate, rug_rate, total = row
     
-    print(f"\n📊 Current Performance:")
+    print("\n📊 Current Performance:")
     print(f"  Total Alerts Tracked: {total}")
     print(f"  Average Gain: {avg_gain:+.1f}%")
     print(f"  Pump Rate (>50%): {pump_rate*100:.1f}%")
@@ -312,7 +312,7 @@ def generate_recommendations():
         })
     
     # Display recommendations
-    print(f"\n\n💡 Recommendations:")
+    print("\n\n💡 Recommendations:")
     if not recommendations:
         print("  ✅ No changes needed - system is performing optimally!")
     else:

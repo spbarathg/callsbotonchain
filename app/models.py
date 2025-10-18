@@ -5,7 +5,7 @@ Provides type-safe, validated data models for the application.
 Uses dataclasses with validation to prevent NaN/Infinity and ensure data integrity.
 """
 from dataclasses import dataclass, field
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any
 from datetime import datetime
 import math
 

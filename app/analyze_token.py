@@ -4,13 +4,9 @@ import os
 import json
 import threading
 from typing import Dict, Tuple, List, Any, Optional
-from app.file_lock import file_lock
 from app.config_unified import (
     CIELO_API_KEY,
     CIELO_DISABLE_STATS,
-    PRELIM_USD_HIGH,
-    PRELIM_USD_MID,
-    PRELIM_USD_LOW,
     MCAP_MICRO_MAX,
     MCAP_SMALL_MAX,
     MCAP_MID_MAX,
@@ -23,7 +19,6 @@ from app.config_unified import (
     BLOCKLIST_SYMBOLS,
     MAX_MARKET_CAP_FOR_DEFAULT_ALERT,
     MIN_LIQUIDITY_USD,
-    VOL_24H_MIN_FOR_ALERT,
     VOL_TO_MCAP_RATIO_MIN,
     MICROCAP_SWEET_MIN,
     MICROCAP_SWEET_MAX,
@@ -367,6 +362,9 @@ def _normalize_stats_schema(d: Dict[str, Any]) -> Dict[str, Any]:
     # Volume
     v24 = (out.get("volume", {}) or {}).get("24h", {}) or {}
     out.setdefault("volume", {}).setdefault("24h", {})["volume_usd"] = safe_float(v24.get("volume_usd"))
+    # Mark volume unknown when absent for test expectations
+    if "volume_usd" not in v24:
+        out["volume"]["24h"]["volume_usd_unknown"] = True
     
     # Change (can be negative)
     ch = out.get("change", {}) or {}
@@ -378,6 +376,17 @@ def _normalize_stats_schema(d: Dict[str, Any]) -> Dict[str, Any]:
         if not isinstance(out.get(k), dict):
             out[k] = {}
     
+    # Mark unknown flags for tests and downstream consumers
+    try:
+        if out.get("market_cap_usd") in (None, 0):
+            out["market_cap_unknown"] = True
+        if out.get("price_usd") in (None, 0):
+            out["price_unknown"] = True
+        liq = out.get("liquidity_usd")
+        if liq in (None, 0):
+            out["liquidity_unknown"] = True
+    except Exception:
+        pass
     return out
 
 

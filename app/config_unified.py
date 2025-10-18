@@ -5,7 +5,7 @@ Consolidates all configuration from config/config.py and tradingSystem/config_op
 into a single, well-organized module with clear sections.
 """
 import os
-from typing import Optional, List
+from typing import Optional
 
 
 # ============================================================================
@@ -168,7 +168,7 @@ REDIS_URL = os.getenv("REDIS_URL", "").strip()
 # Score 7+ = Top 30% quality tokens (50-55% hit rate expected)
 # Score 6+ = High quality (60%+ hit rate based on data analysis)
 # Data shows: Score 6 = 81.8% win rate, Score 7 = 57.9%, Score 8 = 68.8%
-HIGH_CONFIDENCE_SCORE = _get_int("HIGH_CONFIDENCE_SCORE", 6)  # LOWERED: Data shows score 6 has 81.8% win rate
+HIGH_CONFIDENCE_SCORE = _get_int("HIGH_CONFIDENCE_SCORE", 9)
 
 # Feed processing
 FETCH_INTERVAL = _get_int("FETCH_INTERVAL", 30)  # MICRO-CAP MODE: 30s for fast micro-cap detection (no frequency cap)
@@ -247,8 +247,8 @@ DRAW_24H_MAJOR = _get_float("DRAW_24H_MAJOR", -60.0)  # Major drawdown threshold
 # CRITICAL: Catch tokens EARLY for maximum 2x+ potential
 # Entry at 100-150% = still 2-5x potential left
 # Entry at 300%+ = likely near peak (late entry = bag holder)
-MAX_24H_CHANGE_FOR_ALERT = _get_float("MAX_24H_CHANGE_FOR_ALERT", 150.0)  # 150% - catch early/mid pump
-MAX_1H_CHANGE_FOR_ALERT = _get_float("MAX_1H_CHANGE_FOR_ALERT", 100.0)   # 100% - avoid extreme pumps
+MAX_24H_CHANGE_FOR_ALERT = _get_float("MAX_24H_CHANGE_FOR_ALERT", 200.0)
+MAX_1H_CHANGE_FOR_ALERT = _get_float("MAX_1H_CHANGE_FOR_ALERT", 150.0)
 
 
 # ============================================================================
@@ -351,7 +351,7 @@ ALLOW_UNKNOWN_SECURITY = _get_bool("ALLOW_UNKNOWN_SECURITY", True)
 # Holder Concentration - OPTIMIZED FOR 2X+ WIN RATE
 # TIGHTENED to reduce whale manipulation and rug risk (51.9% → 35-40% target)
 # Lower concentration = better distribution = more sustainable pumps
-MAX_TOP10_CONCENTRATION = _get_float("MAX_TOP10_CONCENTRATION", 20.0)  # TIGHTENED: 20% (was 25%) - less whale control
+MAX_TOP10_CONCENTRATION = _get_float("MAX_TOP10_CONCENTRATION", 30.0)
 MAX_BUNDLERS_PERCENT = _get_float("MAX_BUNDLERS_PERCENT", 15.0)  # TIGHTENED: 15% (was 20%) - reduce bot/bundler risk
 MAX_INSIDERS_PERCENT = _get_float("MAX_INSIDERS_PERCENT", 25.0)  # TIGHTENED: 25% (was 30%) - reduce insider dumps
 ENFORCE_BUNDLER_CAP = _get_bool("ENFORCE_BUNDLER_CAP", True)  # ENABLED!

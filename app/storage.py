@@ -527,8 +527,7 @@ def update_token_performance(token_address: str, stats: Dict[str, Any]) -> None:
         # The logic had 80% false positive rate on moonshots (373/711 signals marked as rugs)
         # High volatility (80% drops) is NORMAL for 1000x+ tokens during consolidation
         # Real rugs have different patterns (dev dumps, instant liquidity removal)
-        is_rug = False  # Always false - rug detection disabled
-        rug_at = None
+        # Rug detection disabled; always return False/None
         # Commented out broken logic:
         # if current_peak and current_price < current_peak * 0.2:  # >80% drop from peak
         #     is_rug = True
