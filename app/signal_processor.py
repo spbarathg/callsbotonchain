@@ -526,8 +526,8 @@ class SignalProcessor:
                 enhanced_score, ml_reason = ml_scorer.enhance_score(score, stats, smart_money, conviction)
                 
                 # Get predictions
-                predicted_gain = ml_scorer.predict_gain(stats, smart_money, conviction)
-                winner_prob = ml_scorer.predict_winner_probability(stats, smart_money, conviction)
+                predicted_gain = ml_scorer.predict_gain(stats, score, smart_money, conviction)
+                winner_prob = ml_scorer.predict_winner_probability(stats, score, smart_money, conviction)
                 
                 ml_data.update({
                     'enhanced_score': enhanced_score,
