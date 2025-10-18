@@ -216,18 +216,22 @@ async def start_monitoring():
         from app.config_unified import (
             TELEGRAM_USER_API_ID,
             TELEGRAM_USER_API_HASH,
-            TELEGRAM_USER_SESSION_FILE,
             TELETHON_ENABLED
         )
+        import os
         
         if not TELETHON_ENABLED:
             print("⚠️  Signal Aggregator: Telethon not enabled")
             return
         
+        # Use separate session file for monitoring to avoid conflicts with alert sender
+        SIGNAL_AGGREGATOR_SESSION_FILE = os.getenv("SIGNAL_AGGREGATOR_SESSION_FILE", "var/memecoin_session.session")
+        
         print(f"✅ Signal Aggregator: Starting to monitor {len(MONITORED_CHANNELS)} channels...")
+        print(f"   Using session: {SIGNAL_AGGREGATOR_SESSION_FILE}")
         
         async with TelegramClient(
-            TELEGRAM_USER_SESSION_FILE,
+            SIGNAL_AGGREGATOR_SESSION_FILE,
             TELEGRAM_USER_API_ID,
             TELEGRAM_USER_API_HASH
         ) as client:
