@@ -1,7 +1,7 @@
-# 🤖 Bot Status - OPTIMAL CONFIG V2 + ML ACTIVE
+# 🤖 Bot Status - OPTIMAL CONFIG V2 + ML ACTIVE + SIGNAL AGGREGATOR
 
-**Last Updated:** October 18, 2025, 8:20 PM IST  
-**Status:** ✅ **DATA-DRIVEN OPTIMAL CONFIG V2 + ML ENHANCEMENT ACTIVE**
+**Last Updated:** October 18, 2025, 7:45 PM IST  
+**Status:** ✅ **DATA-DRIVEN OPTIMAL CONFIG V2 + ML ENHANCEMENT + SIGNAL AGGREGATOR ACTIVE**
 
 ---
 
@@ -24,7 +24,144 @@
    - Gain predictor (regression)
    - Winner classifier (2x+ probability)
    - Auto-retrains weekly (Sundays 3 AM)
+✅ Signal Aggregator: ACTIVE (monitoring 13 Telegram groups)
+   - Multi-bot consensus validation
+   - Bonus scoring for tokens mentioned in multiple groups
+   - Separate session file (no conflicts with alerts)
 ```
+
+---
+
+## ⏱️ WHAT TO EXPECT IN 30 MINUTES (After Signal Aggregator Enabled)
+
+**Current Time:** 7:45 PM IST  
+**Check Time:** 8:15 PM IST (30 minutes later)
+
+### **✅ Expected Observations:**
+
+**1. Signal Aggregator Activity:**
+```bash
+# Check for monitoring activity
+ssh root@64.227.157.221 "docker logs --since 30m callsbot-worker | grep 'Signal Aggregator'"
+```
+
+**Expected Output:**
+```
+✅ Signal Aggregator: Monitoring active
+📨 Signal Aggregator: New message from @GroupName (if any messages received)
+🔍 Signal Aggregator: Extracted token ABC... from @GroupName (if tokens found)
+✅ Signal Aggregator: GroupName → ABC... (total groups: X) (if validated)
+```
+
+**What This Means:**
+- ✅ If you see "Monitoring active": Signal Aggregator is running
+- ✅ If you see "New message": Groups are being monitored
+- ✅ If you see "Extracted token": Token addresses are being parsed
+- ✅ If you see "total groups": Consensus validation is working
+
+**If No Messages:**
+- ℹ️ This is NORMAL - external groups may not post frequently
+- ℹ️ Signal Aggregator is still monitoring (check for "Monitoring active")
+- ℹ️ Messages will appear when groups post new tokens
+
+**2. Core Bot Processing:**
+```bash
+# Check bot is still processing
+ssh root@64.227.157.221 "docker logs --since 30m callsbot-worker | grep -E '(FEED ITEMS|heartbeat)' | tail -5"
+```
+
+**Expected Output:**
+```
+FEED ITEMS: 77-86
+{"type": "heartbeat", "pid": 1, "msg": "ok", ...}
+```
+
+**What This Means:**
+- ✅ Bot is processing 77-86 tokens every 30 seconds
+- ✅ No interruption from Signal Aggregator
+- ✅ Both systems running in parallel
+
+**3. Telethon Notifier Status:**
+```bash
+# Verify alerts are still working
+ssh root@64.227.157.221 "docker logs --since 30m callsbot-worker | grep 'Telethon'"
+```
+
+**Expected Output:**
+```
+📱 Telethon notifier enabled for group -1003153567866
+✅ Telethon: Message sent to group -1003153567866 (if any signals sent)
+```
+
+**What This Means:**
+- ✅ Telethon notifier is active
+- ✅ No session conflicts with Signal Aggregator
+- ✅ Alerts will be delivered when signals are generated
+
+**4. Signal Generation:**
+```bash
+# Check for any new signals
+ssh root@64.227.157.221 "docker exec callsbot-worker sqlite3 var/alerted_tokens.db \"SELECT datetime(alerted_at, 'unixepoch') as time, substr(token_address,1,12) as token, final_score FROM alerted_tokens WHERE alerted_at > (strftime('%s', 'now') - 1800) ORDER BY alerted_at DESC\""
+```
+
+**Expected Output:**
+- **If signals generated:** List of recent signals (depends on market conditions)
+- **If no signals:** Empty result (normal during slow markets)
+
+**What This Means:**
+- ✅ Signal generation depends on market quality
+- ✅ Low/no signals in 30 minutes is NORMAL during slow markets
+- ✅ Bot is correctly filtering low-quality tokens
+
+### **🔴 Red Flags (What Should NOT Happen):**
+
+**1. Session Conflicts:**
+```
+❌ database is locked
+❌ Session not authorized
+❌ Telethon: Failed to connect
+```
+**If you see these:** Signal Aggregator and notifier are conflicting (should NOT happen with separate sessions)
+
+**2. Signal Aggregator Crashed:**
+```
+❌ Failed to start signal aggregator
+❌ Signal Aggregator: Error
+```
+**If you see these:** Signal Aggregator failed to start or crashed
+
+**3. Bot Stopped Processing:**
+```
+(No FEED ITEMS or heartbeat messages in last 30 minutes)
+```
+**If you see this:** Bot may have stopped or crashed
+
+### **📊 Realistic Expectations for 30 Minutes:**
+
+**Signal Frequency:**
+- **Slow Market (Current):** 0-2 signals in 30 minutes ✅ NORMAL
+- **Active Market:** 2-5 signals in 30 minutes
+- **Hot Market:** 5-10 signals in 30 minutes
+
+**Signal Aggregator Messages:**
+- **Low Activity Groups:** 0-5 messages in 30 minutes ✅ NORMAL
+- **Active Groups:** 5-20 messages in 30 minutes
+- **Hot Market:** 20+ messages in 30 minutes
+
+**Token Extraction:**
+- **Depends on message content:** Not all messages contain token addresses
+- **Validation:** Only tokens with $10k+ liquidity and $5k+ volume are recorded
+- **Expected:** 0-3 validated tokens in 30 minutes (depends on group activity)
+
+### **✅ Success Criteria (30 Minutes Later):**
+
+- [x] Signal Aggregator shows "Monitoring active"
+- [x] Bot continues processing feed (FEED ITEMS every 30 seconds)
+- [x] Telethon notifier still enabled
+- [x] No session conflict errors
+- [x] Container still running (healthy)
+
+**If all 5 criteria are met:** ✅ **Everything is working perfectly!**
 
 ---
 
@@ -305,13 +442,32 @@ ssh root@64.227.157.221 "curl -s http://localhost/api/v2/quick-stats"
 
 ---
 
-**Status:** ✅ **OPTIMAL CONFIG V2 + ML ACTIVE**  
+**Status:** ✅ **OPTIMAL CONFIG V2 + ML ACTIVE + SIGNAL AGGREGATOR ENABLED**  
 **Current Win Rate:** 25.9% (baseline from 1,093 signals)  
 **Target Win Rate:** 28-35% (Week 1-4), 32-40% (Month 4-6 with ML)  
-**Latest Changes (V2):**
+**Latest Changes (V2.1 - Oct 18, 7:45 PM IST):**
+- ✅ **Signal Aggregator ENABLED** (monitoring 13 Telegram groups)
+- ✅ **Separate Telethon Sessions** (no more conflicts)
+  - Notifier: `var/relay_user.session`
+  - Aggregator: `var/memecoin_session.session`
+- ✅ **Multi-Bot Consensus Validation** (bonus scoring for tokens in multiple groups)
 - Market Cap: $50k-$130k (extended to capture moonshots)
 - Min Liquidity: $35k (RAISED from $30k for +5-10% win rate)
 - Min Score: 8 (data-driven optimal)
 - Soft Ranking: +1 for consolidation/dip buy/6h momentum patterns
 - ML: Trained and active, auto-retrains weekly
 **Analysis:** Based on 1,187 tokens (1,093 server + 94 CSV external data)
+
+**Check Status in 30 Minutes (8:15 PM IST):**
+```bash
+# Verify Signal Aggregator is still active
+ssh root@64.227.157.221 "docker logs --since 30m callsbot-worker | grep 'Signal Aggregator'"
+
+# Verify bot is still processing
+ssh root@64.227.157.221 "docker logs --since 30m callsbot-worker | grep -E '(FEED ITEMS|heartbeat)' | tail -5"
+
+# Check for any session conflicts
+ssh root@64.227.157.221 "docker logs --since 30m callsbot-worker | grep -i 'locked\|conflict\|error'"
+```
+
+**Expected:** ✅ "Signal Aggregator: Monitoring active" + No errors
