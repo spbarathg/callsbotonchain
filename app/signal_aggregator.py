@@ -245,16 +245,26 @@ async def start_monitoring():
                     except Exception:
                         group_name = "unknown"
                     
+                    # Log all messages (for debugging)
+                    print(f"📨 Signal Aggregator: New message from @{group_name}")
+                    if message_text:
+                        # Show first 100 chars of message
+                        preview = message_text[:100].replace('\n', ' ')
+                        print(f"   Message preview: {preview}...")
+                    
                     # Extract token address
                     token_address = extract_token_address(message_text)
                     
                     if token_address:
+                        print(f"🔍 Signal Aggregator: Extracted token {token_address[:8]}... from @{group_name}")
                         await record_signal(token_address, group_name)
                         signal_count = get_signal_count(token_address)
                         
                         if signal_count > 0:  # Only log if validated
-                            print(f"📊 Signal Aggregator: {group_name} → {token_address[:8]}... "
+                            print(f"✅ Signal Aggregator: {group_name} → {token_address[:8]}... "
                                   f"(total groups: {signal_count})")
+                    else:
+                        print(f"   No token address found in message")
                 
                 except Exception as e:
                     print(f"❌ Signal Aggregator: Error processing message: {e}")
