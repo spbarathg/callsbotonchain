@@ -6,7 +6,7 @@ in the hot path of transaction processing.
 """
 import time
 import threading
-from typing import Dict, Optional
+from typing import Dict, Optional, Any
 
 
 class AlertCache:
@@ -120,7 +120,7 @@ class AlertCache:
             
             return len(expired)
     
-    def get_stats(self) -> Dict[str, any]:
+    def get_stats(self) -> Dict[str, Any]:
         """
         Get cache statistics.
         

@@ -34,15 +34,33 @@ class MLScorer:
             
             # Soft-validate features: warn but do not hard-disable
             if not isinstance(self.features, list) or len(self.features) < 10:
-                print("⚠️  ML features metadata looks unusual; continuing with caution")
+                self._log_warn("ML features metadata looks unusual; continuing with caution")
             
-            print("✅ ML models loaded successfully")
+            self._log_info("ML models loaded successfully")
         except FileNotFoundError:
-            print("⚠️  ML models not found. Run: python scripts/ml/train_model.py")
+            self._log_warn("ML models not found. Run: python scripts/ml/train_model.py")
             self.enabled = False
         except Exception as e:
-            print(f"⚠️  Failed to load ML models: {e}")
+            self._log_warn(f"Failed to load ML models: {e}")
             self.enabled = False
+    
+    @staticmethod
+    def _log_info(msg: str) -> None:
+        """Log info message"""
+        try:
+            from app.logger_utils import log_process
+            log_process({"type": "ml_scorer_info", "message": msg})
+        except Exception:
+            print(f"✅ {msg}")
+    
+    @staticmethod
+    def _log_warn(msg: str) -> None:
+        """Log warning message"""
+        try:
+            from app.logger_utils import log_process
+            log_process({"type": "ml_scorer_warning", "message": msg})
+        except Exception:
+            print(f"⚠️  {msg}")
     
     def is_available(self) -> bool:
         """Check if ML scoring is available"""

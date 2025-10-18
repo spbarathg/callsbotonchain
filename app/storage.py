@@ -345,6 +345,9 @@ def record_alert_with_metadata(
     if top10 is None:
         top10 = holders_data.get('top10_concentration')
     
+    # Extract initial holder count for growth tracking
+    initial_holder_count = holders_data.get('holder_count') or holders_data.get('holders')
+    
     c.execute("""
         INSERT OR REPLACE INTO alerted_token_stats (
             token_address, first_alert_at, last_checked_at,
@@ -353,7 +356,7 @@ def record_alert_with_metadata(
             last_price_usd, last_market_cap_usd, last_liquidity_usd,
             last_volume_24h_usd,
             token_name, token_symbol, token_age_minutes,
-            holder_count, unique_traders_15m,
+            holder_count, initial_holder_count, unique_traders_15m,
             smart_money_involved, smart_wallet_address, smart_wallet_pnl,
             velocity_score_15m, velocity_bonus,
             passed_junior_strict, passed_senior_strict, passed_debate,
@@ -361,7 +364,7 @@ def record_alert_with_metadata(
             top10_concentration, bundlers_percent, insiders_percent,
             sol_price_usd, feed_source, dex_name,
             price_change_1h, price_change_24h
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         token_address,
         now,
@@ -379,7 +382,8 @@ def record_alert_with_metadata(
         metadata.get('name') or stats.get('name'),
         metadata.get('symbol') or stats.get('symbol'),
         alert_metadata.get('token_age_minutes'),
-        holders_data.get('holder_count') or holders_data.get('holders'),
+        initial_holder_count,
+        initial_holder_count,  # Store as initial_holder_count for growth tracking
         alert_metadata.get('unique_traders_15m'),
         alert_metadata.get('smart_money_involved', False),
         alert_metadata.get('smart_wallet_address'),
