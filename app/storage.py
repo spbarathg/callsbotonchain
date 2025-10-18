@@ -363,8 +363,9 @@ def record_alert_with_metadata(
             lp_locked, mint_revoked,
             top10_concentration, bundlers_percent, insiders_percent,
             sol_price_usd, feed_source, dex_name,
-            price_change_1h, price_change_24h
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            price_change_1h, price_change_24h,
+            ml_enhanced, ml_predicted_gain, ml_winner_probability
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         token_address,
         now,
@@ -403,6 +404,10 @@ def record_alert_with_metadata(
         alert_metadata.get('dex_name'),
         (price_data.get('change', {}) or {}).get('1h') or price_data.get('price_change_1h') or stats.get('change', {}).get('1h'),
         (price_data.get('change', {}) or {}).get('24h') or price_data.get('price_change_24h') or stats.get('change', {}).get('24h'),
+        # ML predictions
+        alert_metadata.get('ml_enhanced', False),
+        alert_metadata.get('ml_predicted_gain'),
+        alert_metadata.get('ml_winner_probability'),
     ))
     
     conn.commit()
