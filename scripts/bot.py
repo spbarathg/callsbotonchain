@@ -25,35 +25,13 @@ try:
 except Exception:
     pass
 
-# Relay functionality removed - not currently used
+# REMOVED: Redundant functions - relay functionality and tx_has_smart_money now in SignalProcessor
+# These stub functions kept for backward compatibility only if referenced elsewhere
 def relay_enabled() -> bool:
     return False
 
 def relay_contract_address_sync(*_args, **_kwargs) -> bool:
     return False
-
-
-def tx_has_smart_money(tx: dict) -> bool:
-    try:
-        if any(bool(tx.get(k)) for k in ("smart_money", "is_smart", "isTopWallet")):
-            return True
-        if tx.get("top_wallets"):
-            return True
-        # Wallet realized PnL heuristic
-        try:
-            # Consider as smart money only when realized PnL is substantial
-            if float(tx.get("wallet_pnl", 0)) >= 1000:
-                return True
-        except Exception:
-            pass
-        labels = tx.get("labels") or tx.get("wallet_labels")
-        if labels:
-            text = ",".join(labels) if isinstance(labels, (list, tuple)) else str(labels)
-            text = text.lower()
-            return any(tag in text for tag in ("smart", "top", "alpha", "elite"))
-        return False
-    except Exception:
-        return False
 
 # OPTIMIZED: Use SignalProcessor for all feed processing (removed 870 lines of duplicate logic)
 
@@ -314,50 +292,14 @@ def handle_cooldown(feed_error: Optional[str], retry_after_sec: int) -> None:
 # All signal detection logic is now in app/signal_processor.py (single source of truth)
 
 def run_periodic_tasks(last_track_time: float) -> float:
-	"""Pruning and tracking tasks; returns updated last_track_time."""
-	# Disabled - tracking functions not yet implemented
-	# try:
-	# 	deleted = prune_old_activity()
-	# 	if deleted:
-	# 		_out(f"Pruned {deleted} old activity rows")
-	# except Exception:
-	# 	pass
-	# from config import TRACK_INTERVAL_MIN, TRACK_BATCH_SIZE
-	# now = time.time()
-	# if now - last_track_time > TRACK_INTERVAL_MIN * 60:
-	# 	to_check = get_alerted_tokens_batch(limit=TRACK_BATCH_SIZE, older_than_minutes=TRACK_INTERVAL_MIN)
-	# 	if to_check:
-	# 		_out(f"Tracking {len(to_check)} alerted tokens for price updates")
-	# 	for ca in to_check:
-	# 		try:
-	# 			stats = get_token_stats(ca)
-	# 			price = float((stats or {}).get('price_usd') or 0.0)
-	# 			mcap = (stats or {}).get('market_cap_usd')
-	# 			liq = (stats or {}).get('liquidity_usd') or ((stats or {}).get('liquidity', {}) or {}).get('usd')
-	# 			vol24obj = ((stats or {}).get('volume', {}) or {}).get('24h', {}) or {}
-	# 			vol24 = vol24obj.get('volume_usd')
-	# 			update_token_tracking(ca, price, mcap, liq, vol24)
-	# 			try:
-	# 				snap = get_tracking_snapshot(ca) or {}
-	# 				log_tracking({
-	# 					"token": ca,
-	# 					"price": price,
-	# 					"market_cap": mcap,
-	# 					"liquidity": liq,
-	# 					"vol24": vol24,
-	# 					"peak_price": snap.get('peak_price'),
-	# 					"peak_mcap": snap.get('peak_mcap'),
-	# 					"time_to_peak_price_s": snap.get('time_to_peak_price_s'),
-	# 					"time_to_peak_mcap_s": snap.get('time_to_peak_mcap_s'),
-	# 					"peak_x_price": snap.get('peak_x_price'),
-	# 					"peak_x_mcap": snap.get('peak_x_mcap'),
-	# 					"data_source": ((stats or {}).get("_source") if isinstance(stats, dict) else None) or "unknown",
-	# 				})
-	# 			except Exception:
-	# 				pass
-	# 		except Exception:
-	# 			continue
-	# 	last_track_time = now
+	"""
+	Run periodic maintenance tasks.
+	
+	Currently minimal - tracking functions are handled separately via dedicated scripts.
+	Returns updated last_track_time for future use.
+	"""
+	# NOTE: Token performance tracking is handled by scripts/track_performance.py
+	# This function is kept for future periodic maintenance tasks
 	return last_track_time
 
 

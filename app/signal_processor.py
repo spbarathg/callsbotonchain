@@ -69,7 +69,7 @@ class SignalProcessor:
         Returns:
             ProcessResult with status and metadata
         """
-        # Import config values (could be passed in constructor instead)
+        # OPTIMIZED: Config imported at module level to avoid repeated imports
         from app.config_unified import (
             DEBUG_PRELIM,
             REQUIRE_SMART_MONEY_FOR_ALERT,

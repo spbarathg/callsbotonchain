@@ -64,6 +64,76 @@ def _dexscreener_best_pair(pairs: List[Dict[str, Any]]) -> Optional[Dict[str, An
     return max(candidates, key=score)
 
 
+def get_initial_holder_count(token_address: str) -> Optional[int]:
+    """Get the initial holder count from when the token was first alerted."""
+    try:
+        from app.config_unified import DB_FILE
+        import sqlite3
+        conn = sqlite3.connect(DB_FILE, timeout=5)
+        cursor = conn.execute(
+            "SELECT initial_holder_count FROM alerted_token_stats WHERE token_address = ?",
+            (token_address,)
+        )
+        row = cursor.fetchone()
+        conn.close()
+        return row[0] if row and row[0] is not None else None
+    except Exception:
+        return None
+
+
+def get_dexscreener_metadata(token_address: str) -> Dict[str, Any]:
+    """
+    Fetch additional metadata from DexScreener for enhanced scoring.
+    Returns: {
+        'age_hours': float or None,
+        'is_boosted': bool,
+        'boost_count': int,
+        'pair_address': str or None
+    }
+    """
+    try:
+        url = f"https://api.dexscreener.com/latest/dex/tokens/{token_address}"
+        result = request_json("GET", url, timeout=5)
+        
+        if result.get("status_code") == 200:
+            data = result.get("json") or {}
+            pairs = data.get("pairs") or []
+            
+            if pairs:
+                best = _dexscreener_best_pair(pairs)
+                if best:
+                    # Calculate token age
+                    age_hours = None
+                    pair_created_at = best.get("pairCreatedAt")
+                    if pair_created_at:
+                        try:
+                            import time
+                            age_ms = int(time.time() * 1000) - pair_created_at
+                            age_hours = age_ms / (1000 * 60 * 60)
+                        except Exception:
+                            pass
+                    
+                    # Check if boosted
+                    boosts = best.get("boosts") or []
+                    is_boosted = len(boosts) > 0
+                    
+                    return {
+                        'age_hours': age_hours,
+                        'is_boosted': is_boosted,
+                        'boost_count': len(boosts),
+                        'pair_address': best.get("pairAddress")
+                    }
+    except Exception:
+        pass
+    
+    return {
+        'age_hours': None,
+        'is_boosted': False,
+        'boost_count': 0,
+        'pair_address': None
+    }
+
+
 def _get_token_stats_dexscreener(token_address: str) -> Dict[str, Any]:
     url = f"https://api.dexscreener.com/latest/dex/tokens/{token_address}"
     max_retries = 3
@@ -538,16 +608,26 @@ def score_token(stats: Dict[str, Any], smart_money_detected: bool = False, token
     
     # === VOLUME-TO-LIQUIDITY & MCAP RATIOS (Top 3 Predictor) ===
     # High ratio = strong trading interest = better chance of 2x+
+    # ENHANCED: Added rejection for very low activity (data-driven from CSV analysis)
     vol_to_liq_ratio = 0.0
     if liquidity_usd > 0 and volume_24h > 0:
         vol_to_liq_ratio = volume_24h / liquidity_usd
-        if vol_to_liq_ratio >= 48:  # High precision rule from analyst
+        
+        # CRITICAL: Reject tokens with extremely low activity (< 2.0 ratio)
+        # Data shows these are dead/inactive tokens with minimal 2x potential
+        if vol_to_liq_ratio < 2.0:
+            score -= 2
+            scoring_details.append(f"❌ DEAD TOKEN: -2 (vol/liq: {vol_to_liq_ratio:.1f} - no activity)")
+        elif vol_to_liq_ratio >= 48:  # High precision rule from analyst
             score += 1
             scoring_details.append(f"⚡ Vol/Liq Ratio: +1 ({vol_to_liq_ratio:.1f} - EXCELLENT)")
         elif vol_to_liq_ratio >= 10:  # Good threshold
             scoring_details.append(f"✅ Vol/Liq Ratio: ({vol_to_liq_ratio:.1f} - GOOD)")
+        elif vol_to_liq_ratio >= 5.0:  # NEW: High activity bonus
+            score += 1
+            scoring_details.append(f"🔥 HIGH ACTIVITY: +1 (vol/liq: {vol_to_liq_ratio:.1f}x)")
     
-    # === LOW ACTIVITY PENALTY (NEW!) ===
+    # === LOW ACTIVITY PENALTY (ENHANCED!) ===
     # Penalize tokens with very low trading activity
     if market_cap > 0 and volume_24h > 0:
         vol_to_mcap = volume_24h / market_cap
@@ -627,6 +707,83 @@ def score_token(stats: Dict[str, Any], smart_money_detected: bool = False, token
         except (ValueError, TypeError):
             pass
     # === END SOFT RANKING PREFERENCE ===
+    
+    # === TOKEN AGE & DEXSCREENER METADATA (NEW!) ===
+    # Fetch additional metadata for enhanced scoring
+    if token_address:
+        try:
+            metadata = get_dexscreener_metadata(token_address)
+            
+            # Token age scoring (optimal: 2-72 hours)
+            age_hours = metadata.get('age_hours')
+            if age_hours is not None:
+                if age_hours < 2:
+                    score -= 1
+                    scoring_details.append(f"⚠️ TOO NEW: -1 ({age_hours:.1f}h - high risk)")
+                elif 2 <= age_hours <= 72:
+                    score += 1
+                    scoring_details.append(f"⏰ OPTIMAL AGE: +1 ({age_hours:.1f}h - sweet spot)")
+                elif age_hours > 168:  # > 1 week
+                    score -= 1
+                    scoring_details.append(f"⚠️ TOO OLD: -1 ({age_hours:.0f}h - stale)")
+            
+            # DexScreener boosted status (marketing active)
+            if metadata.get('is_boosted'):
+                score += 1
+                boost_count = metadata.get('boost_count', 1)
+                scoring_details.append(f"📢 BOOSTED: +1 ({boost_count} boost(s) - marketing active!)")
+        except Exception:
+            pass  # Don't fail scoring if metadata fetch fails
+    # === END TOKEN AGE & METADATA ===
+    
+    # === HOLDER GROWTH TRACKING (NEW!) ===
+    # Track holder count growth as a signal of community interest
+    if token_address:
+        try:
+            current_holders = stats.get('holders', {}).get('holder_count')
+            initial_holders = get_initial_holder_count(token_address)
+            
+            if current_holders and initial_holders and initial_holders > 0:
+                growth_rate = (current_holders - initial_holders) / initial_holders
+                
+                if growth_rate > 0.10:  # 10%+ growth
+                    score += 1
+                    scoring_details.append(f"📈 HOLDER GROWTH: +1 ({growth_rate*100:.1f}% growth - community expanding!)")
+                elif growth_rate < -0.05:  # 5%+ decline
+                    score -= 1
+                    scoring_details.append(f"📉 HOLDER DECLINE: -1 ({growth_rate*100:.1f}% - early exits!)")
+        except Exception:
+            pass  # Don't fail scoring if holder tracking fails
+    # === END HOLDER GROWTH ===
+    
+    # === MULTI-BOT SIGNAL VALIDATION (NEW!) ===
+    # Check if other bots are also alerting on this token (consensus signal)
+    if token_address:
+        try:
+            from app.signal_aggregator import get_other_bot_signals
+            other_signals = get_other_bot_signals(token_address)
+            
+            if other_signals >= 3:
+                score += 2
+                scoring_details.append(f"🤝 MULTI-BOT CONSENSUS: +2 ({other_signals} bots - strong validation!)")
+            elif other_signals == 2:
+                score += 1
+                scoring_details.append(f"🤝 MULTI-BOT: +1 ({other_signals} bots)")
+            elif other_signals == 0:
+                # Only you see it - could be early or could be wrong
+                score -= 1
+                scoring_details.append(f"⚠️ SOLO SIGNAL: -1 (no other bots)")
+        except ImportError:
+            # Signal aggregator module not available - skip this bonus
+            pass
+        except Exception as e:
+            # Log unexpected errors but don't fail scoring
+            try:
+                from app.logger_utils import log_process
+                log_process({"type": "multi_bot_signal_error", "error": str(e), "token": token_address})
+            except Exception:
+                pass
+    # === END MULTI-BOT VALIDATION ===
 
     # Penalize if 24h is extremely negative (might be dump)
     # FIXED: Threshold now -60% (was -30%) to allow more dip buying

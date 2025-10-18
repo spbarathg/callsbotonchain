@@ -280,5 +280,17 @@ def get_signals_migrations() -> MigrationRunner:
     
     runner.register(4, "add_transaction_wallet_tracking", migration_4_add_tx_tracking)
     
+    # Migration 5: Add initial holder count for growth tracking
+    def migration_5_add_initial_holder_count(conn: sqlite3.Connection) -> None:
+        """Add initial_holder_count column to alerted_token_stats table."""
+        cursor = conn.execute("PRAGMA table_info(alerted_token_stats)")
+        columns = [row[1] for row in cursor.fetchall()]
+        
+        if "initial_holder_count" not in columns:
+            conn.execute("ALTER TABLE alerted_token_stats ADD COLUMN initial_holder_count INTEGER")
+            conn.commit()
+    
+    runner.register(5, "add_initial_holder_count", migration_5_add_initial_holder_count)
+    
     return runner
 
