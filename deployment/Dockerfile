@@ -33,7 +33,8 @@ EXPOSE 9108
 
 # Default environment (override in runtime)
 ENV CALLSBOT_LOG_STDOUT=true \
-    CALLSBOT_METRICS_ENABLED=false
+    CALLSBOT_METRICS_ENABLED=false \
+    PYTHONPATH=/app
 
 # Entrypoint runs the bot
 CMD ["python", "scripts/bot.py"]
