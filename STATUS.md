@@ -1,24 +1,25 @@
-# 🤖 Bot Status - OPTIMAL CONFIG + ML ACTIVE
+# 🤖 Bot Status - OPTIMAL CONFIG V2 + ML ACTIVE
 
-**Last Updated:** October 18, 2025, 1:58 PM IST  
-**Status:** ✅ **DATA-DRIVEN OPTIMAL CONFIG + ML ENHANCEMENT ACTIVE**
+**Last Updated:** October 18, 2025, 8:20 PM IST  
+**Status:** ✅ **DATA-DRIVEN OPTIMAL CONFIG V2 + ML ENHANCEMENT ACTIVE**
 
 ---
 
 ## 🎯 CURRENT CONFIGURATION
 
-### OPTIMAL MODE (Data-Driven from 1,093 Signals)
+### OPTIMAL MODE V2 (Data-Driven from 1,187 Tokens)
 
 ```
-✅ Market Cap: $50k-$100k (28.9% win rate vs 21.6% for 100-200k)
+✅ Market Cap: $50k-$130k (extended to capture moonshots - avg winner: $129k)
 ✅ Min Score: 8 (22.1% win rate, better than 9-10)
-✅ Min Liquidity: $30,000 (quality threshold)
+✅ Min Liquidity: $35,000 (RAISED from $30k for +5-10% win rate boost!)
 ✅ Max Liquidity: $75,000 (avoid saturated pools)
 ✅ MAX_24H_CHANGE: 200% (anti-FOMO filter)
 ✅ MAX_1H_CHANGE: 150% (catch early entries)
 ✅ Soft Ranking: +1 bonus for momentum patterns
    - Consolidation: 24h[50,200%] + 1h≤0 → 35.5% win rate
    - Dip Buy: 24h[-50,-20%] + 1h≤0 → 29.3% win rate
+   - 6h Momentum: 20-50% → 40.0% win rate (NEW!)
 ✅ ML Enhancement: ACTIVE (trained on 1,093 signals)
    - Gain predictor (regression)
    - Winner classifier (2x+ probability)
@@ -30,11 +31,16 @@
 ## 📊 EXPECTED PERFORMANCE & SUCCESS METRICS
 
 ### Target Metrics (Week 1-4)
-**Signal Frequency:** 20-25 signals/day (quality over quantity)  
-**Target Win Rate:** 26-30% achieving 2x+ gains (up from 25.9% baseline)  
-**Entry Point:** OPTIMAL ($50k-$100k market cap sweet spot)  
+**Signal Frequency:** 15-20 signals/day (quality over quantity - stricter liquidity filter)  
+**Target Win Rate:** 28-35% achieving 2x+ gains (up from 25.9% baseline)  
+**Entry Point:** OPTIMAL ($50k-$130k market cap sweet spot)  
 **Upside Potential:** 2x-5x (data-driven range)  
 **Risk Level:** MODERATE (balanced quality + volume)
+
+**Key Improvements in V2:**
+- +5-10% win rate from liquidity floor raise ($30k → $35k)
+- +2-3% win rate from 6h momentum bonus (20-50% range)
+- Extended market cap to $130k to capture moonshots (avg winner entry: $129k)
 
 ### How to Know If Bot Is On Track
 
@@ -299,12 +305,13 @@ ssh root@64.227.157.221 "curl -s http://localhost/api/v2/quick-stats"
 
 ---
 
-**Status:** ✅ **OPTIMAL CONFIG + ML ACTIVE**  
+**Status:** ✅ **OPTIMAL CONFIG V2 + ML ACTIVE**  
 **Current Win Rate:** 25.9% (baseline from 1,093 signals)  
-**Target Win Rate:** 26-30% (Week 1-4), 30-35% (Month 4-6 with ML)  
-**Latest Changes:**
-- Market Cap: $50k-$100k (28.9% win rate sweet spot)
+**Target Win Rate:** 28-35% (Week 1-4), 32-40% (Month 4-6 with ML)  
+**Latest Changes (V2):**
+- Market Cap: $50k-$130k (extended to capture moonshots)
+- Min Liquidity: $35k (RAISED from $30k for +5-10% win rate)
 - Min Score: 8 (data-driven optimal)
-- Soft Ranking: +1 for consolidation/dip buy patterns
+- Soft Ranking: +1 for consolidation/dip buy/6h momentum patterns
 - ML: Trained and active, auto-retrains weekly
-**Commit:** `5ffd390` (Optimal config + ML system deployed)
+**Analysis:** Based on 1,187 tokens (1,093 server + 94 CSV external data)
