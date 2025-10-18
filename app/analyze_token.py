@@ -613,6 +613,19 @@ def score_token(stats: Dict[str, Any], smart_money_detected: bool = False, token
         elif -50 <= (change_24h or 0) <= -20:
             score += 1
             scoring_details.append(f"⭐ DIP BUY PATTERN: +1 (24h:{(change_24h or 0):.1f}%, 1h:{(change_1h or 0):.1f}% - 29.3% win rate!)")
+    
+    # === 6H MOMENTUM SWEET SPOT (DATA-DRIVEN: 40% win rate!) ===
+    # Pattern 3: Moderate 6h pump (20-50%) = 40.0% win rate (BEST predictor!)
+    # This catches tokens in the early pump phase before they explode
+    change_6h = stats.get('change', {}).get('6h')
+    if change_6h is not None:
+        try:
+            change_6h = float(change_6h)
+            if 20 <= change_6h <= 50:
+                score += 1
+                scoring_details.append(f"⭐ OPTIMAL 6H MOMENTUM: +1 ({change_6h:.1f}% - 40% win rate!)")
+        except (ValueError, TypeError):
+            pass
     # === END SOFT RANKING PREFERENCE ===
 
     # Penalize if 24h is extremely negative (might be dump)

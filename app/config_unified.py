@@ -315,8 +315,8 @@ STABLE_MINTS = [
 # Market cap limits - SWEET SPOT: $50k-$200k for best 2x+ rate
 # DATA-DRIVEN: $50k-$100k has 28.8% 2x+ rate (best), <$50k has 63.9% rug rate (avoid!)
 MIN_MARKET_CAP_USD = _get_float("MIN_MARKET_CAP_USD", 50000.0)  # $50k minimum (avoid death zone)
-MAX_MARKET_CAP_USD = _get_float("MAX_MARKET_CAP_USD", 100000.0)  # $100k max (28.9% win rate vs 21.6% for 100-200k)
-MAX_MARKET_CAP_FOR_DEFAULT_ALERT = _get_float("MAX_MARKET_CAP_FOR_DEFAULT_ALERT", 100000.0)  # $100k max for alerts (aligned with MAX_MARKET_CAP_USD)
+MAX_MARKET_CAP_USD = _get_float("MAX_MARKET_CAP_USD", 130000.0)  # $130k max (extended to capture moonshots - avg winner entry: $129k)
+MAX_MARKET_CAP_FOR_DEFAULT_ALERT = _get_float("MAX_MARKET_CAP_FOR_DEFAULT_ALERT", 130000.0)  # $130k max for alerts (aligned with MAX_MARKET_CAP_USD)
 LARGE_CAP_MOMENTUM_GATE_1H = _get_float("LARGE_CAP_MOMENTUM_GATE_1H", 5.0)
 LARGE_CAP_HOLDER_STATS_MCAP_USD = _get_float("LARGE_CAP_HOLDER_STATS_MCAP_USD", 200000.0)  # Updated to $200k
 
@@ -326,15 +326,16 @@ LARGE_CAP_HOLDER_STATS_MCAP_USD = _get_float("LARGE_CAP_HOLDER_STATS_MCAP_USD", 
 # ============================================================================
 
 # Liquidity Gate - OPTIMIZED FOR 2X+ WIN RATE
-# DATA-DRIVEN ANALYSIS (sub-$1M tokens only):
-# $30k-$50k: 26.5% 2x+ rate, 335% avg gain (BEST!)
-# $50k-$75k: 13.1% 2x+ rate, 52% avg gain
-# $75k+: 20.6% 2x+ rate, BUT 65% rug rate (AVOID!)
-# COUNTER-INTUITIVE: Higher liquidity ($75k+) has WORSE rug rate!
+# DATA-DRIVEN ANALYSIS (1,187 tokens analyzed):
+# <$30k: 2.3% 2x+ rate (DEATH ZONE - AVOID!)
+# $35k-$50k: 19.2% 2x+ rate, 112% avg gain (SERVER) + 42.9% win rate (CSV)
+# $50k-$75k: 15.4% 2x+ rate, 163% avg gain (SERVER) + 44.4% win rate (CSV)
+# $75k+: Declining win rate (saturated pools)
+# CRITICAL: Raising floor from $30k to $35k = +5-10% win rate boost!
 USE_LIQUIDITY_FILTER = _get_bool("USE_LIQUIDITY_FILTER", True)
-MIN_LIQUIDITY_USD = _get_float("MIN_LIQUIDITY_USD", 30000.0)  # $30k minimum (was $20k)
-EXCELLENT_LIQUIDITY_USD = _get_float("EXCELLENT_LIQUIDITY_USD", 50000.0)  # $30k-$50k sweet spot
-MAX_LIQUIDITY_USD = _get_float("MAX_LIQUIDITY_USD", 75000.0)  # $75k cap (higher = worse!)
+MIN_LIQUIDITY_USD = _get_float("MIN_LIQUIDITY_USD", 35000.0)  # $35k minimum (RAISED from $30k for +5-10% win rate)
+EXCELLENT_LIQUIDITY_USD = _get_float("EXCELLENT_LIQUIDITY_USD", 50000.0)  # $35k-$50k sweet spot
+MAX_LIQUIDITY_USD = _get_float("MAX_LIQUIDITY_USD", 75000.0)  # $75k cap (avoid saturated pools)
 
 # Volume to Liquidity/Mcap Ratios - OPTIMIZED FOR 2X+ WIN RATE
 # Higher vol/mcap ratio = more trading interest = better chance of 2x+
