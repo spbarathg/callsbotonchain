@@ -289,8 +289,12 @@ class SignalProcessor:
                     error_message="Failed nuanced check"
                 )
         
-        # ML Enhancement (optional)
-        score = self._apply_ml_enhancement(score, stats_raw, feed_tx.smart_money, conviction_type, scoring_details)
+        # ML Enhancement (optional) - capture predictions
+        ml_data = self._get_ml_predictions(score, stats_raw, feed_tx.smart_money, conviction_type)
+        score = ml_data['enhanced_score']
+        if ml_data['score_changed']:
+            self._log(f"  🤖 ML Adjustment: {ml_data['original_score']} → {score} ({ml_data['reason']})")
+            scoring_details.append(f"ML: {ml_data['reason']}")
         
         # Generate and send alert
         alert_success = self._send_alert(
@@ -302,7 +306,8 @@ class SignalProcessor:
             scoring_details,
             feed_tx,
             jr_strict_ok,
-            trader
+            trader,
+            ml_data  # Pass ML predictions to be saved
         )
         
         if alert_success:
@@ -501,20 +506,41 @@ class SignalProcessor:
         
         return True
     
-    def _apply_ml_enhancement(self, score: int, stats: dict, smart_money: bool, conviction: str, details: list) -> int:
-        """Apply ML score enhancement if available"""
+    def _get_ml_predictions(self, score: int, stats: dict, smart_money: bool, conviction: str) -> dict:
+        """Get ML predictions and enhancement"""
+        ml_data = {
+            'enhanced_score': score,
+            'original_score': score,
+            'score_changed': False,
+            'reason': '',
+            'predicted_gain': None,
+            'winner_probability': None,
+            'ml_enhanced': False
+        }
+        
         try:
             from app.ml_scorer import get_ml_scorer
             ml_scorer = get_ml_scorer()
             if ml_scorer.is_available():
+                # Get score enhancement
                 enhanced_score, ml_reason = ml_scorer.enhance_score(score, stats, smart_money, conviction)
-                if enhanced_score != score:
-                    self._log(f"  🤖 ML Adjustment: {score} → {enhanced_score} ({ml_reason})")
-                    details.append(f"ML: {ml_reason}")
-                    return enhanced_score
+                
+                # Get predictions
+                predicted_gain = ml_scorer.predict_gain(stats, smart_money, conviction)
+                winner_prob = ml_scorer.predict_winner_probability(stats, smart_money, conviction)
+                
+                ml_data.update({
+                    'enhanced_score': enhanced_score,
+                    'score_changed': enhanced_score != score,
+                    'reason': ml_reason,
+                    'predicted_gain': predicted_gain,
+                    'winner_probability': winner_prob,
+                    'ml_enhanced': True
+                })
         except Exception as e:
-            self._log(f"⚠️  ML enhancement failed: {e}")
-        return score
+            self._log(f"⚠️  ML prediction failed: {e}")
+        
+        return ml_data
     
     def _send_alert(
         self,
@@ -526,7 +552,8 @@ class SignalProcessor:
         details: list,
         feed_tx: FeedTransaction,
         jr_strict_ok: bool,
-        trader: Optional[str]
+        trader: Optional[str],
+        ml_data: Optional[dict] = None
     ) -> bool:
         """Generate and send alert via all configured channels"""
         # Build alert message
@@ -580,7 +607,8 @@ class SignalProcessor:
             stats,
             jr_strict_ok,
             trader,
-            feed_tx
+            feed_tx,
+            ml_data
         )
         
         # Push to Redis for traders
@@ -650,7 +678,7 @@ class SignalProcessor:
         return message
     
     def _record_alert_metadata(self, token_address: str, prelim: int, score: int, conviction: str, 
-                               stats: TokenStats, jr_strict_ok: bool, trader: Optional[str], feed_tx: FeedTransaction):
+                               stats: TokenStats, jr_strict_ok: bool, trader: Optional[str], feed_tx: FeedTransaction, ml_data: Optional[dict] = None):
         """Record comprehensive alert metadata"""
         try:
             token_age_minutes = None
@@ -677,6 +705,10 @@ class SignalProcessor:
                 'sol_price_usd': None,
                 'feed_source': stats.source,
                 'dex_name': feed_tx.dex,
+                # ML predictions
+                'ml_enhanced': ml_data.get('ml_enhanced', False) if ml_data else False,
+                'ml_predicted_gain': ml_data.get('predicted_gain') if ml_data else None,
+                'ml_winner_probability': ml_data.get('winner_probability') if ml_data else None,
             }
             
             record_alert_with_metadata(
