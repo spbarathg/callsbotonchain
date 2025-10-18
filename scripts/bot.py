@@ -234,21 +234,24 @@ def initialize_bot() -> bool:
 		return False
 	
 	# Start Telegram signal aggregator monitoring
-	try:
-		import asyncio
-		from app.signal_aggregator import start_monitoring
-		loop = asyncio.new_event_loop()
-		asyncio.set_event_loop(loop)
-		# Start monitoring in background thread
-		import threading
-		def run_aggregator():
-			loop.run_until_complete(start_monitoring())
-		aggregator_thread = threading.Thread(target=run_aggregator, daemon=True)
-		aggregator_thread.start()
-		_out("✅ Telegram signal aggregator started - monitoring 13 groups")
-	except Exception as e:
-		_out(f"⚠️ Failed to start signal aggregator: {e}")
-		# Don't fail bot startup if aggregator fails
+	# TEMPORARILY DISABLED: Conflicts with Telethon notifier (session lock)
+	# TODO: Fix session sharing issue
+	# try:
+	# 	import asyncio
+	# 	from app.signal_aggregator import start_monitoring
+	# 	loop = asyncio.new_event_loop()
+	# 	asyncio.set_event_loop(loop)
+	# 	# Start monitoring in background thread
+	# 	import threading
+	# 	def run_aggregator():
+	# 		loop.run_until_complete(start_monitoring())
+	# 	aggregator_thread = threading.Thread(target=run_aggregator, daemon=True)
+	# 	aggregator_thread.start()
+	# 	_out("✅ Telegram signal aggregator started - monitoring 13 groups")
+	# except Exception as e:
+	# 	_out(f"⚠️ Failed to start signal aggregator: {e}")
+	# 	# Don't fail bot startup if aggregator fails
+	_out("ℹ️  Signal aggregator disabled (session conflict - will be fixed)")
 	# Startup message
 	startup_message = (
 		"<b>SMART MONEY Enhanced Memecoin Bot Started</b>\n\n"
