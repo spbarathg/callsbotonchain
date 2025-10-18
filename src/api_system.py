@@ -5,8 +5,8 @@ import os
 import json
 import subprocess
 import sqlite3
-from typing import Dict, Any, List
-from datetime import datetime, timedelta
+from typing import Dict, Any
+from datetime import datetime
 import psutil
 
 

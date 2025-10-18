@@ -2,7 +2,7 @@ import re
 import time
 import json
 import os
-from typing import Iterator, Dict, Optional
+from typing import Iterator, Dict
 from .config import BOT_STDOUT_LOG
 
 

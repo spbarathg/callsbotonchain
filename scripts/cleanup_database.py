@@ -25,7 +25,7 @@ def cleanup_old_snapshots(db_path: str, retention_days: int = 30):
         retention_days: Number of days to keep (default: 30)
     """
     try:
-        _out(f"🧹 Starting database cleanup...")
+        _out("🧹 Starting database cleanup...")
         _out(f"Database: {db_path}")
         _out(f"Retention: {retention_days} days")
         
@@ -83,7 +83,7 @@ def cleanup_old_snapshots(db_path: str, retention_days: int = 30):
         
         conn.close()
         
-        _out(f"✅ Cleanup complete!")
+        _out("✅ Cleanup complete!")
         _out(f"   Deleted: {deleted:,} snapshots")
         _out(f"   Remaining: {total_after:,} snapshots")
         _out(f"   Database size: {db_size_mb:.2f} MB")
@@ -103,7 +103,7 @@ def cleanup_completed_tracking(db_path: str, retention_days: int = 7):
         retention_days: Number of days to keep completed tracking (default: 7)
     """
     try:
-        _out(f"🧹 Cleaning up completed tracking records...")
+        _out("🧹 Cleaning up completed tracking records...")
         
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
@@ -171,7 +171,7 @@ def main():
     saved = initial_size - final_size
     
     _out("="*60)
-    _out(f"✅ CLEANUP COMPLETE")
+    _out("✅ CLEANUP COMPLETE")
     _out(f"   Initial size: {initial_size:.2f} MB")
     _out(f"   Final size: {final_size:.2f} MB")
     _out(f"   Space saved: {saved:.2f} MB ({saved/initial_size*100:.1f}%)")

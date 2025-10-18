@@ -1,4 +1,3 @@
-import time
 
 from app.analyze_token import (
     calculate_preliminary_score,
@@ -7,7 +6,6 @@ from app.analyze_token import (
     check_junior_strict,
     check_senior_nuanced,
     check_junior_nuanced,
-    _normalize_stats_schema,
 )
 
 

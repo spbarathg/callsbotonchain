@@ -106,7 +106,7 @@ def compare_performance(backup_path: str):
             new_r2 = new_meta.get('gain_predictor', {}).get('test_r2', 0)
             diff_r2 = new_r2 - old_r2
             
-            print(f"Gain Predictor R²:")
+            print("Gain Predictor R²:")
             print(f"  Old: {old_r2:.3f}")
             print(f"  New: {new_r2:.3f}")
             print(f"  Δ:   {diff_r2:+.3f} {'📈' if diff_r2 > 0 else '📉'}")
@@ -116,7 +116,7 @@ def compare_performance(backup_path: str):
             new_acc = new_meta.get('winner_classifier', {}).get('test_accuracy', 0)
             diff_acc = new_acc - old_acc
             
-            print(f"\nWinner Classifier Accuracy:")
+            print("\nWinner Classifier Accuracy:")
             print(f"  Old: {old_acc:.3f}")
             print(f"  New: {new_acc:.3f}")
             print(f"  Δ:   {diff_acc:+.3f} {'📈' if diff_acc > 0 else '📉'}")

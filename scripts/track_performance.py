@@ -187,27 +187,27 @@ def print_summary():
             print("No alerted tokens tracked yet.")
             return
         
-        print(f"\n📈 Overall Statistics:")
+        print("\n📈 Overall Statistics:")
         print(f"  Total Alerts: {total}")
         print(f"  Avg Max Gain: {summary.get('avg_max_gain', 0):.1f}%")
         print(f"  Avg 1h Change: {summary.get('avg_1h', 0):.1f}%")
         print(f"  Avg 6h Change: {summary.get('avg_6h', 0):.1f}%")
         print(f"  Avg 24h Change: {summary.get('avg_24h', 0):.1f}%")
         
-        print(f"\n🎯 Success Metrics:")
+        print("\n🎯 Success Metrics:")
         print(f"  50%+ Pumps: {summary.get('pumps_50plus', 0)} ({summary.get('pumps_50plus', 0)/total*100:.1f}%)")
         print(f"  100%+ Pumps: {summary.get('pumps_100plus', 0)} ({summary.get('pumps_100plus', 0)/total*100:.1f}%)")
         print(f"  Rugs: {summary.get('rugs', 0)} ({summary.get('rugs', 0)/total*100:.1f}%)")
         print(f"  -20%+ Dumps: {summary.get('dumps_20plus', 0)} ({summary.get('dumps_20plus', 0)/total*100:.1f}%)")
         
-        print(f"\n🏆 Performance by Conviction Type:")
+        print("\n🏆 Performance by Conviction Type:")
         for conv_type, data in summary.get('by_conviction', {}).items():
             print(f"  {conv_type}:")
             print(f"    Count: {data['count']}")
             print(f"    Avg Gain: {data.get('avg_gain', 0):.1f}%")
             print(f"    Rugs: {data['rug_count']}")
         
-        print(f"\n🔍 Feature Performance:")
+        print("\n🔍 Feature Performance:")
         for feature in ['smart_money_involved', 'lp_locked', 'mint_revoked', 'passed_senior_strict']:
             key = f'{feature}_performance'
             if key in summary:

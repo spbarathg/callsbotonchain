@@ -7,7 +7,6 @@ import sys
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 
-from scripts.ml.feature_engineer import extract_features
 from app.ml_scorer import get_ml_scorer
 import sqlite3
 

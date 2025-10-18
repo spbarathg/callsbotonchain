@@ -5,7 +5,12 @@ import signal
 import sys
 import os
 from datetime import datetime
-from typing import Optional, Tuple
+from typing import Optional
+from app.logger_utils import log_process, log_heartbeat, mirror_stdout_line
+from app.toggles import signals_enabled
+from app.storage import init_db
+from app.notify import send_telegram_alert
+from app.signal_processor import SignalProcessor
 
 # Ensure project root is importable when running this script directly
 CURRENT_DIR = os.path.dirname(__file__)
@@ -27,14 +32,30 @@ def relay_enabled() -> bool:
 def relay_contract_address_sync(*_args, **_kwargs) -> bool:
     return False
 
-from app.logger_utils import log_alert, log_tracking, log_process, log_heartbeat, mirror_stdout_line
-import html
-from app.toggles import signals_enabled
-from app.storage import init_db
-from app.notify import send_telegram_alert
+
+def tx_has_smart_money(tx: dict) -> bool:
+    try:
+        if any(bool(tx.get(k)) for k in ("smart_money", "is_smart", "isTopWallet")):
+            return True
+        if tx.get("top_wallets"):
+            return True
+        # Wallet realized PnL heuristic
+        try:
+            # Consider as smart money only when realized PnL is substantial
+            if float(tx.get("wallet_pnl", 0)) >= 1000:
+                return True
+        except Exception:
+            pass
+        labels = tx.get("labels") or tx.get("wallet_labels")
+        if labels:
+            text = ",".join(labels) if isinstance(labels, (list, tuple)) else str(labels)
+            text = text.lower()
+            return any(tag in text for tag in ("smart", "top", "alpha", "elite"))
+        return False
+    except Exception:
+        return False
 
 # OPTIMIZED: Use SignalProcessor for all feed processing (removed 870 lines of duplicate logic)
-from app.signal_processor import SignalProcessor
 
 # Optional Prometheus metrics (enable with CALLSBOT_METRICS_ENABLED=true)
 METRICS_ENABLED = (os.getenv("CALLSBOT_METRICS_ENABLED", "false").strip().lower() == "true")
@@ -366,7 +387,7 @@ def run_bot():
     cursor_smart = None
     processed_count = 0
     alert_count = 0
-    last_alert_time = 0
+    # last_alert_time was unused; keep for future rate-limit logic only if needed
     api_calls_saved = 0  # Track credit optimization
     session_alerted_tokens = set()
     last_track_time = 0

@@ -6,10 +6,10 @@ Processes feed items and decides whether to send alerts.
 """
 import time
 import html
-from typing import Optional, Tuple, Dict, Any
+from typing import Optional, Dict, Any
 from datetime import datetime
 
-from app.models import FeedTransaction, TokenStats, TokenAlert, ProcessResult
+from app.models import FeedTransaction, TokenStats, ProcessResult
 from app.analyze_token import (
     get_token_stats,
     score_token,
@@ -72,15 +72,9 @@ class SignalProcessor:
         # Import config values (could be passed in constructor instead)
         from app.config_unified import (
             DEBUG_PRELIM,
-            TELEGRAM_ALERT_MIN_INTERVAL,
             REQUIRE_SMART_MONEY_FOR_ALERT,
-            REQUIRE_VELOCITY_MIN_SCORE_FOR_ALERT,
             PRELIM_DETAILED_MIN,
             GENERAL_CYCLE_MIN_SCORE,
-            REQUIRE_MULTI_SIGNAL,
-            MULTI_SIGNAL_WINDOW_SEC,
-            MULTI_SIGNAL_MIN_COUNT,
-            MIN_TOKEN_AGE_MINUTES,
             MIN_LIQUIDITY_USD,
             USE_LIQUIDITY_FILTER,
             EXCELLENT_LIQUIDITY_USD,
@@ -179,6 +173,19 @@ class SignalProcessor:
                     preliminary_score=preliminary_score,
                     error_message="Liquidity check failed"
                 )
+            # Enforce maximum liquidity early to avoid extra work on saturated pools
+            try:
+                from app.config_unified import MAX_LIQUIDITY_USD
+                liq_usd = float(stats.liquidity_usd or 0.0)
+                if (MAX_LIQUIDITY_USD or 0) > 0 and liq_usd > MAX_LIQUIDITY_USD:
+                    return ProcessResult(
+                        status="skipped",
+                        token_address=token_address,
+                        preliminary_score=preliminary_score,
+                        error_message="Liquidity above max cap"
+                    )
+            except Exception:
+                pass
         
         # EARLY GATE: Market cap filter ($50k-$200k sweet spot)
         # DATA-DRIVEN: <$50k = 63.9% rug rate, $50k-$100k = 28.8% 2x+ rate (best!)
@@ -211,7 +218,6 @@ class SignalProcessor:
             )
         
         # Score token
-        velocity_bonus = 0  # Disabled for now
         score, scoring_details = score_token(stats_raw, smart_money_detected=feed_tx.smart_money, token_address=token_address)
         
         # Post-score gates
@@ -506,8 +512,8 @@ class SignalProcessor:
                     self._log(f"  🤖 ML Adjustment: {score} → {enhanced_score} ({ml_reason})")
                     details.append(f"ML: {ml_reason}")
                     return enhanced_score
-        except Exception:
-            pass
+        except Exception as e:
+            self._log(f"⚠️  ML enhancement failed: {e}")
         return score
     
     def _send_alert(
@@ -544,16 +550,23 @@ class SignalProcessor:
         if os.getenv('DRY_RUN', 'false').strip().lower() != 'true':
             try:
                 telegram_ok = send_telegram_alert(message)
-            except Exception:
-                pass
+            except Exception as e:
+                log_process({
+                    "type": "alert_error",
+                    "channel": "telegram",
+                    "error": str(e),
+                })
         
         # Send to group via Telethon
-        group_ok = False
         if os.getenv('DRY_RUN', 'false').strip().lower() != 'true':
             try:
-                group_ok = send_group_message(message)
-            except Exception:
-                pass
+                send_group_message(message)
+            except Exception as e:
+                log_process({
+                    "type": "alert_error",
+                    "channel": "telethon",
+                    "error": str(e),
+                })
         
         # Mark as alerted
         mark_alerted(token_address, score, feed_tx.smart_money, conviction)

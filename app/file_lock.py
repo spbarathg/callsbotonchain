@@ -80,7 +80,7 @@ def file_lock(path: str) -> Generator[None, None, None]:
                     owner = f.read(64).decode("utf-8", errors="ignore").strip()
                     raise RuntimeError(f"Lock held by: {owner}")
                 except Exception:
-                    raise RuntimeError(f"Lock held by another process")
+                    raise RuntimeError("Lock held by another process")
         except ImportError:
             # Windows: use msvcrt locking on the first byte
             import msvcrt  # type: ignore
@@ -95,7 +95,7 @@ def file_lock(path: str) -> Generator[None, None, None]:
                     owner = f.read(64).decode("utf-8", errors="ignore").strip()
                     raise RuntimeError(f"Lock held by: {owner}")
                 except Exception:
-                    raise RuntimeError(f"Lock held by another process")
+                    raise RuntimeError("Lock held by another process")
         
         # Write PID and hostname for debugging (fixed-length header)
         if locked:

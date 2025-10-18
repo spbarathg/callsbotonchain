@@ -11,7 +11,6 @@ Tests the new modular components:
 import pytest
 import os
 import tempfile
-from datetime import datetime, timedelta
 
 
 # ============================================================================
@@ -402,7 +401,6 @@ def test_end_to_end_alert_flow(temp_db):
     4. Retrieve data
     """
     from app.repositories import DatabaseConnection, AlertRepository, PerformanceRepository, initialize_schema
-    from app.models import TokenStats
     
     db_conn = DatabaseConnection(temp_db)
     initialize_schema(db_conn)

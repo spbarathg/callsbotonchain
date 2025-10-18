@@ -1,4 +1,3 @@
-import types
 
 from app.analyze_token import _normalize_stats_schema
 

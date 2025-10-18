@@ -4,7 +4,7 @@ Sends trading signals to a Telegram group using user account (not bot).
 """
 import asyncio
 import os
-from typing import Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING
 from app.config_unified import (
     TELEGRAM_USER_API_ID as API_ID,
     TELEGRAM_USER_API_HASH as API_HASH,
@@ -15,11 +15,10 @@ from app.config_unified import (
 
 # Lazy imports for Telethon (expensive imports, only load when needed)
 if TYPE_CHECKING:
-    from telethon import TelegramClient
-    from telethon.errors import FloodWaitError, ChatWriteForbiddenError
+    pass
 
 # Global client instance (initialized on first use)
-_client = None  # type: Optional[TelegramClient]
+_client = None  # Telethon client instance (lazy)
 _client_lock = asyncio.Lock()
 IS_TESTING = "PYTEST_CURRENT_TEST" in os.environ
 

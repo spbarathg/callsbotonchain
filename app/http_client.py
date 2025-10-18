@@ -45,7 +45,7 @@ class CircuitBreaker:
             if self._should_attempt_reset():
                 self.state = "HALF_OPEN"
             else:
-                raise Exception(f"Circuit breaker OPEN - service temporarily unavailable")
+                raise Exception("Circuit breaker OPEN - service temporarily unavailable")
     
     def on_success(self) -> None:
         """Reset on successful call"""

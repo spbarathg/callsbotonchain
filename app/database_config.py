@@ -5,7 +5,6 @@ Provides a single source of truth for all database paths,
 ensuring consistency across the application.
 """
 import os
-from typing import Optional
 
 
 # Base directory for all database files

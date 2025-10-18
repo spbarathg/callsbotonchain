@@ -14,9 +14,9 @@ import json
 import os
 import sqlite3
 import time
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Dict, Optional, List, Tuple
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 
 from .config_optimized import (
     get_position_size,

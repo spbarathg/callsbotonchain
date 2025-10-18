@@ -67,7 +67,7 @@ async def setup_session():
         # Verify we're authorized
         if await client.is_user_authorized():
             me = await client.get_me()
-            print(f"\n✅ Successfully authorized!")
+            print("\n✅ Successfully authorized!")
             print(f"   Name: {me.first_name} {me.last_name or ''}")
             print(f"   Username: @{me.username or 'N/A'}")
             print(f"   Phone: {me.phone}")
@@ -82,7 +82,7 @@ async def setup_session():
             except Exception as e:
                 print(f"\n⚠️  Warning: Cannot access group {group_id}")
                 print(f"   Error: {e}")
-                print(f"   Make sure your account is a member of this group!")
+                print("   Make sure your account is a member of this group!")
             
             await client.disconnect()
             return True

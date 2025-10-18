@@ -28,7 +28,6 @@ from .config_optimized import (
     SLIPPAGE_BPS,
     PRIORITY_FEE_MICROLAMPORTS,
     BASE_MINT,
-    MAX_SLIPPAGE_PCT,
     MAX_PRICE_IMPACT_PCT,
 )
 

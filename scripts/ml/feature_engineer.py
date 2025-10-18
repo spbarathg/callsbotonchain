@@ -6,7 +6,7 @@ import sqlite3
 import pandas as pd
 import numpy as np
 import os
-from typing import Dict, List, Tuple
+from typing import Dict, List
 
 
 def extract_features(db_path='var/alerted_tokens.db') -> pd.DataFrame:
@@ -191,7 +191,7 @@ def summarize_dataset(df: pd.DataFrame) -> Dict:
     print(f"Total Signals: {summary['total_signals']}")
     print(f"Avg Gain: {summary['avg_gain']:.1f}%")
     print(f"Median Gain: {summary['median_gain']:.1f}%")
-    print(f"\nWin Rates:")
+    print("\nWin Rates:")
     print(f"  1.5x+: {summary['win_rate_1.5x']:.1f}%")
     print(f"  2x+:   {summary['win_rate_2x']:.1f}%")
     print(f"  5x+:   {summary['win_rate_5x']:.1f}%")
@@ -211,7 +211,7 @@ if __name__ == '__main__':
         
         print("✅ Feature engineering complete!")
         print(f"📊 Generated {len(get_feature_list())} features")
-        print(f"🎯 Ready for model training")
+        print("🎯 Ready for model training")
         
         # Show sample
         print("\nSample Features (first 3 rows):")

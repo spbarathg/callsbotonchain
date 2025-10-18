@@ -9,7 +9,6 @@ OPTIMIZED TRADER - Proper Risk Management
 import json
 import os
 import threading
-import time
 from datetime import datetime, date
 from typing import Dict, Optional
 

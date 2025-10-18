@@ -12,7 +12,7 @@ Test coverage:
 
 import pytest
 import time
-from tradingSystem.momentum_ranker import MomentumRanker, MomentumMetrics
+from tradingSystem.momentum_ranker import MomentumRanker
 
 
 class TestMomentumCalculation:
