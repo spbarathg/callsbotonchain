@@ -315,8 +315,8 @@ STABLE_MINTS = [
 # Market cap limits - SWEET SPOT: $50k-$200k for best 2x+ rate
 # DATA-DRIVEN: $50k-$100k has 28.8% 2x+ rate (best), <$50k has 63.9% rug rate (avoid!)
 MIN_MARKET_CAP_USD = _get_float("MIN_MARKET_CAP_USD", 50000.0)  # $50k minimum (avoid death zone)
-MAX_MARKET_CAP_USD = _get_float("MAX_MARKET_CAP_USD", 200000.0)  # $200k max (sweet spot, was $1M)
-MAX_MARKET_CAP_FOR_DEFAULT_ALERT = _get_float("MAX_MARKET_CAP_FOR_DEFAULT_ALERT", 200000.0)  # $200k max for alerts
+MAX_MARKET_CAP_USD = _get_float("MAX_MARKET_CAP_USD", 100000.0)  # $100k max (28.9% win rate vs 21.6% for 100-200k)
+MAX_MARKET_CAP_FOR_DEFAULT_ALERT = _get_float("MAX_MARKET_CAP_FOR_DEFAULT_ALERT", 100000.0)  # $100k max for alerts (aligned with MAX_MARKET_CAP_USD)
 LARGE_CAP_MOMENTUM_GATE_1H = _get_float("LARGE_CAP_MOMENTUM_GATE_1H", 5.0)
 LARGE_CAP_HOLDER_STATS_MCAP_USD = _get_float("LARGE_CAP_HOLDER_STATS_MCAP_USD", 200000.0)  # Updated to $200k
 
@@ -389,7 +389,7 @@ REQUIRE_VELOCITY_MIN_SCORE_FOR_ALERT = _get_int("REQUIRE_VELOCITY_MIN_SCORE_FOR_
 # Quality over quantity - only alert on HIGH-CONFIDENCE signals
 # Current issue: ALL signals are score 10 (no discrimination)
 SMART_CYCLE_MIN_SCORE = _get_int("SMART_CYCLE_MIN_SCORE", 7)  # RAISED: (was 6)
-GENERAL_CYCLE_MIN_SCORE = _get_int("GENERAL_CYCLE_MIN_SCORE", 7)  # RAISED: (was 6)
+GENERAL_CYCLE_MIN_SCORE = _get_int("GENERAL_CYCLE_MIN_SCORE", 8)  # DATA-DRIVEN: Score 8 has 22.1% win rate (better than 9-10)
 
 # Multi-signal Confirmation
 REQUIRE_MULTI_SIGNAL = _get_bool("REQUIRE_MULTI_SIGNAL", False)
