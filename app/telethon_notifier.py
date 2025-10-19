@@ -17,49 +17,99 @@ from app.config_unified import (
 if TYPE_CHECKING:
     pass
 
-# Global client instance (initialized on first use)
-_client = None  # Telethon client instance (lazy)
-_client_lock = asyncio.Lock()
+# Thread-local storage for Telethon clients (one per thread/event loop)
+import threading
+_thread_local = threading.local()
 IS_TESTING = "PYTEST_CURRENT_TEST" in os.environ
 
 
-async def _get_client():  # -> Optional[TelegramClient] but can't annotate due to lazy import
-    """Get or create the Telethon client (singleton pattern)."""
-    global _client
+async def initialize_client_async() -> bool:
+    """
+    Pre-initialize the Telethon client to avoid database lock issues.
     
+    This should be called BEFORE starting the Signal Aggregator to ensure
+    the notifier client is initialized first, preventing SQLite lock contention.
+    
+    Returns:
+        True if initialized successfully, False otherwise
+    """
+    if not TELETHON_ENABLED:
+        return False
+    
+    try:
+        client = await _get_client()
+        return client is not None
+    except Exception as e:
+        print(f"❌ Telethon: Pre-initialization failed: {e}")
+        return False
+
+
+def initialize_client() -> bool:
+    """
+    Synchronous wrapper for initialize_client_async.
+    
+    Pre-initializes the Telethon notifier client to prevent database lock issues
+    when Signal Aggregator is running.
+    
+    Returns:
+        True if initialized successfully, False otherwise
+    """
+    try:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            result = loop.run_until_complete(initialize_client_async())
+            return result
+        finally:
+            # Don't close the loop - keep it for future use
+            pass
+    except Exception as e:
+        print(f"❌ Telethon: Client initialization error: {e}")
+        return False
+
+
+async def _get_client():  # -> Optional[TelegramClient] but can't annotate due to lazy import
+    """
+    Get or create a Telethon client for the current event loop.
+    
+    FIXED: Uses thread-local storage to ensure each event loop has its own
+    client instance, preventing "event loop must not change" errors.
+    """
     if not TELETHON_ENABLED:
         return None
     
-    # Lazy import Telethon only when actually needed
-    from telethon import TelegramClient
+    # Get or create client for this thread
+    if not hasattr(_thread_local, 'client'):
+        _thread_local.client = None
     
-    async with _client_lock:
-        if _client is None:
-            try:
-                _client = TelegramClient(SESSION_FILE, API_ID, API_HASH)
-                await _client.connect()
-                
-                if not await _client.is_user_authorized():
-                    print("❌ Telethon: Session not authorized. Run setup_telethon_session.py first.")
-                    _client = None
-                    return None
-                
-                # Verify access to target group
-                try:
-                    entity = await _client.get_entity(TARGET_CHAT_ID)
-                    print(f"✅ Telethon connected to: {entity.title}")
-                except Exception as e:
-                    print(f"❌ Telethon: Cannot access group {TARGET_CHAT_ID}: {e}")
-                    await _client.disconnect()
-                    _client = None
-                    return None
-                    
-            except Exception as e:
-                print(f"❌ Telethon client initialization failed: {e}")
-                _client = None
-                return None
+    if _thread_local.client is None:
+        # Lazy import Telethon only when actually needed
+        from telethon import TelegramClient
         
-        return _client
+        try:
+            client = TelegramClient(SESSION_FILE, API_ID, API_HASH)
+            await client.connect()
+            
+            if not await client.is_user_authorized():
+                print("❌ Telethon: Session not authorized. Run setup_telethon_session.py first.")
+                return None
+            
+            # Verify access to target group
+            try:
+                entity = await client.get_entity(TARGET_CHAT_ID)
+                print(f"✅ Telethon connected to: {entity.title}")
+            except Exception as e:
+                print(f"❌ Telethon: Cannot access group {TARGET_CHAT_ID}: {e}")
+                await client.disconnect()
+                return None
+            
+            _thread_local.client = client
+                
+        except Exception as e:
+            print(f"❌ Telethon client initialization failed: {e}")
+            return None
+    
+    return _thread_local.client
 
 
 async def send_group_message_async(message: str) -> bool:
@@ -115,31 +165,59 @@ def send_group_message(message: str) -> bool:
     """
     Synchronous wrapper for send_group_message_async.
     
+    FIXED: Properly handles event loop conflicts by using a dedicated thread
+    with its own event loop instead of asyncio.run() which conflicts with
+    Signal Aggregator's event loop.
+    
     Args:
         message: The message text to send
     
     Returns:
         True if sent successfully, False otherwise
     """
-    try:
-        # Try to get existing event loop, otherwise create a new one
+    import threading
+    import queue
+    
+    result_queue = queue.Queue()
+    
+    def run_in_thread():
+        """Run async code in a dedicated thread with its own event loop."""
         try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                # If loop is already running, we need to use nest_asyncio or run_until_complete won't work
-                # Instead, create a new event loop in a thread
-                import concurrent.futures
-                with concurrent.futures.ThreadPoolExecutor() as executor:
-                    future = executor.submit(asyncio.run, send_group_message_async(message))
-                    return future.result(timeout=30)
+            # Create a new event loop for this thread
+            new_loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(new_loop)
+            try:
+                result = new_loop.run_until_complete(send_group_message_async(message))
+                result_queue.put(('success', result))
+            finally:
+                new_loop.close()
+        except Exception as e:
+            result_queue.put(('error', e))
+    
+    try:
+        # Run async code in a separate thread to avoid event loop conflicts
+        thread = threading.Thread(target=run_in_thread, daemon=True)
+        thread.start()
+        thread.join(timeout=30)  # 30 second timeout
+        
+        if thread.is_alive():
+            print("❌ Telethon: Send operation timed out")
+            return False
+        
+        # Get result from queue
+        try:
+            status, value = result_queue.get_nowait()
+            if status == 'success':
+                return value
             else:
-                # Loop exists but not running, safe to use run_until_complete
-                return loop.run_until_complete(send_group_message_async(message))
-        except RuntimeError:
-            # No event loop exists, create one with asyncio.run
-            return asyncio.run(send_group_message_async(message))
+                print(f"❌ Telethon sync wrapper error: {value}")
+                return False
+        except queue.Empty:
+            print("❌ Telethon: No result received from thread")
+            return False
+            
     except Exception as e:
-        print(f"❌ Telethon sync wrapper error: {e}")
+        print(f"❌ Telethon thread creation error: {e}")
         return False
 
 

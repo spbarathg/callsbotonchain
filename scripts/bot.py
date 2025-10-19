@@ -233,6 +233,18 @@ def initialize_bot() -> bool:
 		_out(f"Failed to initialize database: {e}")
 		return False
 	
+	# CRITICAL: Initialize Telethon notifier FIRST to prevent database lock issues
+	# This must happen BEFORE Signal Aggregator starts to avoid SQLite lock contention
+	try:
+		from app.telethon_notifier import initialize_client
+		if initialize_client():
+			_out("✅ Telethon notifier pre-initialized (prevents database locks)")
+		else:
+			_out("⚠️ Telethon notifier not initialized (may be disabled)")
+	except Exception as e:
+		_out(f"⚠️ Failed to pre-initialize Telethon notifier: {e}")
+		# Don't fail bot startup if notifier fails to initialize
+	
 	# Start Telegram signal aggregator monitoring
 	# Now using separate session files to avoid conflicts
 	try:
