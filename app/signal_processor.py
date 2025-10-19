@@ -595,8 +595,18 @@ class SignalProcessor:
                     "error": str(e),
                 })
         
-        # Mark as alerted
-        mark_alerted(token_address, score, feed_tx.smart_money, conviction)
+        # Mark as alerted (CRITICAL: This must not fail silently!)
+        try:
+            mark_alerted(token_address, score, feed_tx.smart_money, conviction)
+        except Exception as e:
+            self._log(f"❌ CRITICAL ERROR: Failed to mark token as alerted in database: {e}")
+            log_process({
+                "type": "database_error",
+                "function": "mark_alerted",
+                "token": token_address,
+                "error": str(e),
+            })
+            # Continue anyway - alert was already sent
         
         # Record comprehensive metadata
         self._record_alert_metadata(
@@ -720,7 +730,13 @@ class SignalProcessor:
                 alert_metadata=alert_metadata
             )
         except Exception as e:
-            self._log(f"Warning: Could not record alert metadata: {e}")
+            self._log(f"❌ CRITICAL ERROR: Could not record alert metadata: {e}")
+            log_process({
+                "type": "database_error",
+                "function": "record_alert_with_metadata",
+                "token": token_address,
+                "error": str(e),
+            })
     
     def _push_to_redis(self, token: str, stats: TokenStats, score: int, prelim: int, conviction: str, smart: bool):
         """Push signal to Redis for real-time trader consumption"""

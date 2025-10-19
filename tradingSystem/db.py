@@ -1,7 +1,7 @@
 import os
 import sqlite3
 from typing import Optional, Tuple
-from .config import DB_PATH
+from .config_optimized import DB_PATH
 
 
 def _conn() -> sqlite3.Connection:

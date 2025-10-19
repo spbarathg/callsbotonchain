@@ -3,7 +3,9 @@ import time
 import json
 import os
 from typing import Iterator, Dict
-from .config import BOT_STDOUT_LOG
+
+# Legacy stdout log path (deprecated - use Redis instead)
+BOT_STDOUT_LOG = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "logs", "stdout.log")
 
 
 _FINAL_RE = re.compile(r"Token\s+([A-Za-z0-9]{20,64})\s+FINAL:\s+(\d+)/(\d+)\s+\(prelim:\s*(\d+),\s*velocity:\s*\+(\d+)\)")

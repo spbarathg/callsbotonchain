@@ -290,12 +290,15 @@ def mark_alerted(token_address: str, final_score: int, smart_money_detected: boo
     
     Also updates the cache for subsequent lookups.
     """
+    import time
     conn = _get_conn()
     c = conn.cursor()
+    # FIXED: Explicitly set alerted_at as Unix timestamp (not SQLite's CURRENT_TIMESTAMP which is text)
+    now = time.time()
     c.execute("""
-        INSERT OR IGNORE INTO alerted_tokens (token_address, final_score, smart_money_detected, conviction_type)
-        VALUES (?, ?, ?, ?)
-    """, (token_address, final_score, smart_money_detected, conviction_type))
+        INSERT OR IGNORE INTO alerted_tokens (token_address, alerted_at, final_score, smart_money_detected, conviction_type)
+        VALUES (?, ?, ?, ?, ?)
+    """, (token_address, now, final_score, smart_money_detected, conviction_type))
     conn.commit()
     conn.close()
     

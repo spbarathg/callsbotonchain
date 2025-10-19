@@ -14,7 +14,7 @@ from typing import Optional, Dict
 
 import requests
 
-from .watcher import follow_decisions
+from .watcher import follow_decisions, follow_signals_redis
 from .strategy_optimized import decide_trade, get_expected_win_rate, get_expected_avg_gain
 from .trader_optimized import TradeEngine
 from app.toggles import trading_enabled
@@ -181,7 +181,8 @@ def run() -> None:
     """Main trading loop"""
     parser = argparse.ArgumentParser(description="Optimized trading system with proven performance")
     parser.add_argument("--dry", action="store_true", help="Dry run mode")
-    parser.parse_args()
+    parser.add_argument("--legacy", action="store_true", help="Use legacy file watcher (not recommended)")
+    args = parser.parse_args()
 
     engine = TradeEngine()
     mode = "dry_run" if engine.broker._dry else "LIVE"
@@ -201,8 +202,24 @@ def run() -> None:
     positions_opened = 0
     last_health_log = time.time()
 
+    # Choose signal source (Redis by default for real-time, fallback to file watcher)
+    use_redis = not args.legacy and os.getenv("REDIS_URL")
+    
+    if use_redis:
+        engine._log("signal_source", source="redis", real_time=True)
+        print("📡 Using Redis for real-time signal consumption (recommended)")
+        signal_source = follow_signals_redis(block_timeout=5)
+    else:
+        if args.legacy:
+            engine._log("signal_source", source="file_watcher", real_time=False, reason="user_requested")
+            print("⚠️  Using legacy file watcher (polling mode - slower)")
+        else:
+            engine._log("signal_source", source="file_watcher", real_time=False, reason="no_redis")
+            print("⚠️  Redis not configured, falling back to file watcher")
+        signal_source = follow_decisions(start_at_end=True)
+
     try:
-        for ev in follow_decisions(start_at_end=True):
+        for ev in signal_source:
             try:
                 signals_processed += 1
                 
