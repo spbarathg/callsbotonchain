@@ -120,10 +120,9 @@ services:
       - .env
     environment:
       - CALLSBOT_LOG_STDOUT=true
-      - SIGNAL_AGGREGATOR_SESSION_FILE=sessions/memecoin_session.session
+      - SIGNAL_AGGREGATOR_SESSION_FILE=var/relay_user.session
     volumes:
       - ./var:/app/var
-      - aggregator_sessions:/app/sessions
       - ./data/logs:/app/data/logs
     depends_on:
       - redis
