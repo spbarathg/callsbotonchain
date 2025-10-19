@@ -20,7 +20,7 @@ shutdown_flag = False
 def signal_handler(sig, frame):
     """Handle shutdown signals gracefully."""
     global shutdown_flag
-    print(f"\n🛑 Received signal {sig}, shutting down gracefully...")
+    print(f"\n🛑 Received signal {sig}, shutting down gracefully...", flush=True)
     shutdown_flag = True
 
 
@@ -30,29 +30,29 @@ async def main():
     system_signal.signal(system_signal.SIGINT, signal_handler)
     system_signal.signal(system_signal.SIGTERM, signal_handler)
     
-    print("=" * 80)
-    print("🚀 SIGNAL AGGREGATOR DAEMON STARTING")
-    print("=" * 80)
-    print("Running in separate container for 100% isolation")
-    print("No database lock conflicts with main bot!")
-    print("=" * 80)
+    print("=" * 80, flush=True)
+    print("🚀 SIGNAL AGGREGATOR DAEMON STARTING", flush=True)
+    print("=" * 80, flush=True)
+    print("Running in separate container for 100% isolation", flush=True)
+    print("No database lock conflicts with main bot!", flush=True)
+    print("=" * 80, flush=True)
     
     try:
         # Start monitoring (this runs indefinitely)
         await start_monitoring()
     except KeyboardInterrupt:
-        print("\n🛑 Keyboard interrupt received, shutting down...")
+        print("\n🛑 Keyboard interrupt received, shutting down...", flush=True)
     except Exception as e:
-        print(f"❌ Error in Signal Aggregator: {e}")
+        print(f"❌ Error in Signal Aggregator: {e}", flush=True)
         import traceback
         traceback.print_exc()
     finally:
-        print("👋 Signal Aggregator daemon stopped")
+        print("👋 Signal Aggregator daemon stopped", flush=True)
 
 
 if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        print("\n👋 Goodbye!")
+        print("\n👋 Goodbye!", flush=True)
 
