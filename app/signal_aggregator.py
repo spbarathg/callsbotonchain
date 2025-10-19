@@ -40,11 +40,11 @@ def _init_redis():
         _redis_client = redis.from_url(redis_url, decode_responses=True, socket_timeout=5, socket_connect_timeout=5)
         _redis_client.ping()
         _redis_status = "connected"
-        print(f"✅ Signal Aggregator: Connected to Redis at {redis_url}")
+        print(f"✅ Signal Aggregator: Connected to Redis at {redis_url}", flush=True)
         return _redis_client
     except Exception as e:
         _redis_status = f"error: {e}"
-        print(f"❌ Signal Aggregator: Failed to connect to Redis: {e}")
+        print(f"❌ Signal Aggregator: Failed to connect to Redis: {e}", flush=True)
         return None
 
 # Fallback in-memory cache for when Redis is unavailable
@@ -160,12 +160,12 @@ async def validate_token_quality(token_address: str) -> bool:
         
         if not is_valid:
             print(f"⚠️  Signal Aggregator: Rejected {token_address[:8]}... "
-                  f"(liq: ${liquidity:,.0f}, vol: ${volume_24h:,.0f})")
+                  f"(liq: ${liquidity:,.0f}, vol: ${volume_24h:,.0f})", flush=True)
         
         return is_valid
         
     except Exception as e:
-        print(f"❌ Signal Aggregator: Validation error for {token_address[:8]}...: {e}")
+        print(f"❌ Signal Aggregator: Validation error for {token_address[:8]}...: {e}", flush=True)
         return False
 
 
@@ -201,7 +201,7 @@ async def record_signal(token_address: str, group_name: str = "unknown", skip_va
             
             return
         except Exception as e:
-            print(f"⚠️ Redis error, falling back to memory: {e}")
+            print(f"⚠️ Redis error, falling back to memory: {e}", flush=True)
     
     # Fallback to in-memory cache
     async with _cache_lock:
@@ -296,7 +296,7 @@ def cleanup_old_signals() -> None:
             pattern = "signal_aggregator:token:*"
             keys = redis.keys(pattern)
             if keys:
-                print(f"📊 Signal Aggregator: {len(keys)} tokens with active signals in Redis")
+                print(f"📊 Signal Aggregator: {len(keys)} tokens with active signals in Redis", flush=True)
         except Exception:
             pass
 
@@ -307,7 +307,7 @@ async def start_monitoring():
     This should be called once when the bot starts.
     """
     if not MONITORED_CHANNELS:
-        print("⚠️  Signal Aggregator: No channels configured to monitor")
+        print("⚠️  Signal Aggregator: No channels configured to monitor", flush=True)
         return
     
     try:
@@ -320,14 +320,14 @@ async def start_monitoring():
         import os
         
         if not TELETHON_ENABLED:
-            print("⚠️  Signal Aggregator: Telethon not enabled")
+            print("⚠️  Signal Aggregator: Telethon not enabled", flush=True)
             return
         
         # Use separate session file for monitoring to avoid conflicts with alert sender
         SIGNAL_AGGREGATOR_SESSION_FILE = os.getenv("SIGNAL_AGGREGATOR_SESSION_FILE", "var/memecoin_session.session")
         
-        print(f"✅ Signal Aggregator: Starting to monitor {len(MONITORED_CHANNELS)} channels...")
-        print(f"   Using session: {SIGNAL_AGGREGATOR_SESSION_FILE}")
+        print(f"✅ Signal Aggregator: Starting to monitor {len(MONITORED_CHANNELS)} channels...", flush=True)
+        print(f"   Using session: {SIGNAL_AGGREGATOR_SESSION_FILE}", flush=True)
         
         async with TelegramClient(
             SIGNAL_AGGREGATOR_SESSION_FILE,
@@ -349,28 +349,28 @@ async def start_monitoring():
                         group_name = "unknown"
                     
                     # Log all messages (for debugging)
-                    print(f"📨 Signal Aggregator: New message from @{group_name}")
+                    print(f"📨 Signal Aggregator: New message from @{group_name}", flush=True)
                     if message_text:
                         # Show first 100 chars of message
                         preview = message_text[:100].replace('\n', ' ')
-                        print(f"   Message preview: {preview}...")
+                        print(f"   Message preview: {preview}...", flush=True)
                     
                     # Extract token address
                     token_address = extract_token_address(message_text)
                     
                     if token_address:
-                        print(f"🔍 Signal Aggregator: Extracted token {token_address[:8]}... from @{group_name}")
+                        print(f"🔍 Signal Aggregator: Extracted token {token_address[:8]}... from @{group_name}", flush=True)
                         await record_signal(token_address, group_name)
                         signal_count = get_signal_count(token_address)
                         
                         if signal_count > 0:  # Only log if validated
                             print(f"✅ Signal Aggregator: {group_name} → {token_address[:8]}... "
-                                  f"(total groups: {signal_count})")
+                                  f"(total groups: {signal_count})", flush=True)
                     else:
-                        print(f"   No token address found in message")
+                        print(f"   No token address found in message", flush=True)
                 
                 except Exception as e:
-                    print(f"❌ Signal Aggregator: Error processing message: {e}")
+                    print(f"❌ Signal Aggregator: Error processing message: {e}", flush=True)
             
             # Cleanup task (every 5 minutes)
             async def cleanup_task():
@@ -381,13 +381,13 @@ async def start_monitoring():
             # Start cleanup task
             asyncio.create_task(cleanup_task())
             
-            print("✅ Signal Aggregator: Monitoring active")
+            print("✅ Signal Aggregator: Monitoring active", flush=True)
             
             # Keep running
             await client.run_until_disconnected()
     
     except Exception as e:
-        print(f"❌ Signal Aggregator: Failed to start monitoring: {e}")
+        print(f"❌ Signal Aggregator: Failed to start monitoring: {e}", flush=True)
 
 
 # Synchronous wrapper for use in scoring
