@@ -16,8 +16,10 @@ services:
       - CALLSBOT_METRICS_ENABLED=true
       - CALLSBOT_FORCE_FALLBACK=false
       - REDIS_URL=redis://redis:6379/0
+      - TELEGRAM_USER_SESSION_FILE=var/sessions/relay_user.session
     volumes:
       - ./var:/app/var
+      - worker_sessions:/app/var/sessions
       - ./data/logs:/app/data/logs
     ports:
       - "9108:9108"
@@ -118,8 +120,10 @@ services:
       - .env
     environment:
       - CALLSBOT_LOG_STDOUT=true
+      - SIGNAL_AGGREGATOR_SESSION_FILE=var/sessions/memecoin_session.session
     volumes:
       - ./var:/app/var
+      - aggregator_sessions:/app/var/sessions
       - ./data/logs:/app/data/logs
     depends_on:
       - redis
@@ -197,3 +201,5 @@ volumes:
   caddy_data:
   caddy_config:
   redis_data:
+  worker_sessions:
+  aggregator_sessions:

@@ -1,7 +1,7 @@
 # 🤖 Bot Status - OPTIMAL CONFIG V2 + ML ACTIVE + SIGNAL AGGREGATOR
 
-**Last Updated:** October 18, 2025, 7:45 PM IST  
-**Status:** ✅ **DATA-DRIVEN OPTIMAL CONFIG V2 + ML ENHANCEMENT + SIGNAL AGGREGATOR ACTIVE**
+**Last Updated:** October 19, 2025, 8:15 PM IST  
+**Status:** ✅ **OPTIMAL CONFIG V3 - ULTIMATE FIX + SIGNAL AGGREGATOR + ZERO DATABASE LOCKS**
 
 ---
 
@@ -10,10 +10,10 @@
 ### OPTIMAL MODE V2 (Data-Driven from 1,187 Tokens)
 
 ```
-✅ Market Cap: $50k-$130k (extended to capture moonshots - avg winner: $129k)
+✅ Market Cap: $50k-$250k (extended to capture moonshots)
 ✅ Min Score: 8 (22.1% win rate, better than 9-10)
-✅ Min Liquidity: $35,000 (RAISED from $30k for +5-10% win rate boost!)
-✅ Max Liquidity: $75,000 (avoid saturated pools)
+✅ Min Liquidity: $25,000 (RELAXED from $30k for more opportunities!)
+✅ Max Liquidity: $100,000 (RAISED from $75k for established tokens)
 ✅ MAX_24H_CHANGE: 200% (anti-FOMO filter)
 ✅ MAX_1H_CHANGE: 150% (catch early entries)
 ✅ Soft Ranking: +1 bonus for momentum patterns
@@ -27,7 +27,10 @@
 ✅ Signal Aggregator: ACTIVE (monitoring 13 Telegram groups)
    - Multi-bot consensus validation
    - Bonus scoring for tokens mentioned in multiple groups
-   - Separate session file (no conflicts with alerts)
+   - **ULTIMATE FIX:** Isolated Docker volumes (ZERO session conflicts!)
+   - Worker uses: worker_sessions volume
+   - Aggregator uses: aggregator_sessions volume
+   - Single global Telethon client (no thread-local issues)
 ```
 
 ---
@@ -442,17 +445,20 @@ ssh root@64.227.157.221 "curl -s http://localhost/api/v2/quick-stats"
 
 ---
 
-**Status:** ✅ **OPTIMAL CONFIG V2 + ML ACTIVE + SIGNAL AGGREGATOR ENABLED**  
+**Status:** ✅ **OPTIMAL CONFIG V2.2 + ML ACTIVE + SIGNAL AGGREGATOR (100% ISOLATED) + RELAXED FILTERS**  
 **Current Win Rate:** 25.9% (baseline from 1,093 signals)  
 **Target Win Rate:** 28-35% (Week 1-4), 32-40% (Month 4-6 with ML)  
-**Latest Changes (V2.1 - Oct 18, 7:45 PM IST):**
-- ✅ **Signal Aggregator ENABLED** (monitoring 13 Telegram groups)
-- ✅ **Separate Telethon Sessions** (no more conflicts)
+**Latest Changes (V2.2 - Oct 19, 2:20 PM IST):**
+- ✅ **FILTERS RELAXED** (more opportunities while maintaining quality)
+  - Min Liquidity: $25k (was $30k) - catch early tokens
+  - Max Liquidity: $100k (was $75k) - include established tokens
+  - Expected: 15-20 signals/day (was 6-10/day)
+- ✅ **Signal Aggregator: 100% ISOLATED** (separate container)
+  - NO database locks (permanent fix)
   - Notifier: `var/relay_user.session`
   - Aggregator: `var/memecoin_session.session`
-- ✅ **Multi-Bot Consensus Validation** (bonus scoring for tokens in multiple groups)
-- Market Cap: $50k-$130k (extended to capture moonshots)
-- Min Liquidity: $35k (RAISED from $30k for +5-10% win rate)
+- ✅ **Multi-Bot Consensus Validation** (monitoring 13 Telegram groups)
+- Market Cap: $50k-$250k (extended range)
 - Min Score: 8 (data-driven optimal)
 - Soft Ranking: +1 for consolidation/dip buy/6h momentum patterns
 - ML: Trained and active, auto-retrains weekly

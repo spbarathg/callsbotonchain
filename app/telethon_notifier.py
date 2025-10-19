@@ -1,9 +1,13 @@
 """
 Telethon-based Telegram Group Notifier
 Sends trading signals to a Telegram group using user account (not bot).
+
+ULTIMATE FIX: Uses a single global client with proper async handling
+to prevent SQLite session file locking issues.
 """
 import asyncio
 import os
+import threading
 from typing import TYPE_CHECKING
 from app.config_unified import (
     TELEGRAM_USER_API_ID as API_ID,
@@ -17,99 +21,59 @@ from app.config_unified import (
 if TYPE_CHECKING:
     pass
 
-# Thread-local storage for Telethon clients (one per thread/event loop)
-import threading
-_thread_local = threading.local()
+# Global singleton client and lock for thread-safe access
+_client_lock = threading.Lock()
+_global_client = None
+_client_initialized = False
 IS_TESTING = "PYTEST_CURRENT_TEST" in os.environ
-
-
-async def initialize_client_async() -> bool:
-    """
-    Pre-initialize the Telethon client to avoid database lock issues.
-    
-    This should be called BEFORE starting the Signal Aggregator to ensure
-    the notifier client is initialized first, preventing SQLite lock contention.
-    
-    Returns:
-        True if initialized successfully, False otherwise
-    """
-    if not TELETHON_ENABLED:
-        return False
-    
-    try:
-        client = await _get_client()
-        return client is not None
-    except Exception as e:
-        print(f"❌ Telethon: Pre-initialization failed: {e}")
-        return False
-
-
-def initialize_client() -> bool:
-    """
-    Synchronous wrapper for initialize_client_async.
-    
-    Pre-initializes the Telethon notifier client to prevent database lock issues
-    when Signal Aggregator is running.
-    
-    Returns:
-        True if initialized successfully, False otherwise
-    """
-    try:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            result = loop.run_until_complete(initialize_client_async())
-            return result
-        finally:
-            # Don't close the loop - keep it for future use
-            pass
-    except Exception as e:
-        print(f"❌ Telethon: Client initialization error: {e}")
-        return False
 
 
 async def _get_client():  # -> Optional[TelegramClient] but can't annotate due to lazy import
     """
-    Get or create a Telethon client for the current event loop.
+    Get or create a SINGLE global Telethon client.
     
-    FIXED: Uses thread-local storage to ensure each event loop has its own
-    client instance, preventing "event loop must not change" errors.
+    ULTIMATE FIX: Uses a single global client with proper locking,
+    preventing multiple clients from trying to access the same session file.
     """
+    global _global_client, _client_initialized
+    
     if not TELETHON_ENABLED:
         return None
     
-    # Get or create client for this thread
-    if not hasattr(_thread_local, 'client'):
-        _thread_local.client = None
-    
-    if _thread_local.client is None:
-        # Lazy import Telethon only when actually needed
-        from telethon import TelegramClient
-        
-        try:
-            client = TelegramClient(SESSION_FILE, API_ID, API_HASH)
-            await client.connect()
+    # Use lock to ensure only one client is created
+    with _client_lock:
+        if not _client_initialized:
+            # Lazy import Telethon only when actually needed
+            from telethon import TelegramClient
             
-            if not await client.is_user_authorized():
-                print("❌ Telethon: Session not authorized. Run setup_telethon_session.py first.")
-                return None
-            
-            # Verify access to target group
             try:
-                entity = await client.get_entity(TARGET_CHAT_ID)
-                print(f"✅ Telethon connected to: {entity.title}")
-            except Exception as e:
-                print(f"❌ Telethon: Cannot access group {TARGET_CHAT_ID}: {e}")
-                await client.disconnect()
-                return None
-            
-            _thread_local.client = client
+                _global_client = TelegramClient(SESSION_FILE, API_ID, API_HASH)
+                await _global_client.connect()
                 
-        except Exception as e:
-            print(f"❌ Telethon client initialization failed: {e}")
-            return None
+                if not await _global_client.is_user_authorized():
+                    print("❌ Telethon: Session not authorized. Run setup_telethon_session.py first.")
+                    _global_client = None
+                    return None
+                
+                # Verify access to target group
+                try:
+                    entity = await _global_client.get_entity(TARGET_CHAT_ID)
+                    print(f"✅ Telethon: Global client initialized (session: {SESSION_FILE})")
+                    print(f"✅ Telethon connected to: {entity.title}")
+                except Exception as e:
+                    print(f"❌ Telethon: Cannot access group {TARGET_CHAT_ID}: {e}")
+                    await _global_client.disconnect()
+                    _global_client = None
+                    return None
+                
+                _client_initialized = True
+                    
+            except Exception as e:
+                print(f"❌ Telethon client initialization failed: {e}")
+                _global_client = None
+                return None
     
-    return _thread_local.client
+    return _global_client
 
 
 async def send_group_message_async(message: str) -> bool:
@@ -169,9 +133,8 @@ def send_group_message(message: str) -> bool:
     """
     Synchronous wrapper for send_group_message_async.
     
-    FIXED: Properly handles event loop conflicts by using a dedicated thread
-    with its own event loop instead of asyncio.run() which conflicts with
-    Signal Aggregator's event loop.
+    ULTIMATE FIX: Uses a dedicated thread with its own event loop to avoid
+    conflicts with Signal Aggregator or other async components.
     
     Args:
         message: The message text to send
@@ -181,7 +144,6 @@ def send_group_message(message: str) -> bool:
     """
     print(f"🔍 Telethon: send_group_message (sync wrapper) called")
     
-    import threading
     import queue
     
     result_queue = queue.Queue()
