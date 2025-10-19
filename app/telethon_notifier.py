@@ -2,8 +2,8 @@
 Telethon-based Telegram Group Notifier
 Sends trading signals to a Telegram group using user account (not bot).
 
-ULTIMATE FIX: Uses a single global client with proper async handling
-to prevent SQLite session file locking issues.
+PERMANENT FIX: Each thread gets its own event loop and Telethon client instance.
+This prevents "event loop must not change" errors while still sharing the session file safely.
 """
 import asyncio
 import os
@@ -21,59 +21,38 @@ from app.config_unified import (
 if TYPE_CHECKING:
     pass
 
-# Global singleton client and lock for thread-safe access
-_client_lock = threading.Lock()
-_global_client = None
-_client_initialized = False
 IS_TESTING = "PYTEST_CURRENT_TEST" in os.environ
 
 
-async def _get_client():  # -> Optional[TelegramClient] but can't annotate due to lazy import
+async def _create_and_connect_client():
     """
-    Get or create a SINGLE global Telethon client.
+    Create a NEW Telethon client for the current event loop.
     
-    ULTIMATE FIX: Uses a single global client with proper locking,
-    preventing multiple clients from trying to access the same session file.
+    PERMANENT FIX: Each call creates a fresh client in the current event loop.
+    This prevents "event loop must not change" errors. The session file is
+    safely shared between clients (SQLite handles concurrent reads).
     """
-    global _global_client, _client_initialized
-    
     if not TELETHON_ENABLED:
         return None
     
-    # Use lock to ensure only one client is created
-    with _client_lock:
-        if not _client_initialized:
-            # Lazy import Telethon only when actually needed
-            from telethon import TelegramClient
-            
-            try:
-                _global_client = TelegramClient(SESSION_FILE, API_ID, API_HASH)
-                await _global_client.connect()
-                
-                if not await _global_client.is_user_authorized():
-                    print("❌ Telethon: Session not authorized. Run setup_telethon_session.py first.")
-                    _global_client = None
-                    return None
-                
-                # Verify access to target group
-                try:
-                    entity = await _global_client.get_entity(TARGET_CHAT_ID)
-                    print(f"✅ Telethon: Global client initialized (session: {SESSION_FILE})")
-                    print(f"✅ Telethon connected to: {entity.title}")
-                except Exception as e:
-                    print(f"❌ Telethon: Cannot access group {TARGET_CHAT_ID}: {e}")
-                    await _global_client.disconnect()
-                    _global_client = None
-                    return None
-                
-                _client_initialized = True
-                    
-            except Exception as e:
-                print(f"❌ Telethon client initialization failed: {e}")
-                _global_client = None
-                return None
+    # Lazy import Telethon only when actually needed
+    from telethon import TelegramClient
     
-    return _global_client
+    try:
+        # Create a NEW client for THIS event loop
+        client = TelegramClient(SESSION_FILE, API_ID, API_HASH)
+        await client.connect()
+        
+        if not await client.is_user_authorized():
+            print("❌ Telethon: Session not authorized. Run setup_telethon_session.py first.")
+            await client.disconnect()
+            return None
+        
+        return client
+            
+    except Exception as e:
+        print(f"❌ Telethon client initialization failed: {e}")
+        return None
 
 
 async def send_group_message_async(message: str) -> bool:
@@ -86,8 +65,6 @@ async def send_group_message_async(message: str) -> bool:
     Returns:
         True if sent successfully, False otherwise
     """
-    print(f"🔍 Telethon: send_group_message_async called (TELETHON_ENABLED={TELETHON_ENABLED})")
-    
     if not TELETHON_ENABLED:
         if not IS_TESTING:
             print("⚠️  Telethon not enabled (missing credentials)")
@@ -97,13 +74,13 @@ async def send_group_message_async(message: str) -> bool:
         print("❌ Telethon: Empty message provided")
         return False
     
-    print(f"🔍 Telethon: Attempting to send message to {TARGET_CHAT_ID}")
-    
     # Lazy import Telethon errors only when actually needed
     from telethon.errors import FloodWaitError, ChatWriteForbiddenError
     
+    client = None
     try:
-        client = await _get_client()
+        # Create a fresh client for THIS event loop
+        client = await _create_and_connect_client()
         if client is None:
             return False
         
@@ -127,14 +104,22 @@ async def send_group_message_async(message: str) -> bool:
     except Exception as e:
         print(f"❌ Telethon: Failed to send message: {e}")
         return False
+    finally:
+        # CRITICAL: Disconnect client after use to clean up event loop tasks
+        if client is not None:
+            try:
+                await client.disconnect()
+            except Exception as e:
+                print(f"⚠️  Telethon: Error disconnecting client: {e}")
 
 
 def send_group_message(message: str) -> bool:
     """
     Synchronous wrapper for send_group_message_async.
     
-    ULTIMATE FIX: Uses a dedicated thread with its own event loop to avoid
-    conflicts with Signal Aggregator or other async components.
+    PERMANENT FIX: Creates a fresh event loop for each call. Each client
+    is created, used, and disconnected within the same event loop, preventing
+    "event loop must not change" errors.
     
     Args:
         message: The message text to send
@@ -142,50 +127,30 @@ def send_group_message(message: str) -> bool:
     Returns:
         True if sent successfully, False otherwise
     """
-    print(f"🔍 Telethon: send_group_message (sync wrapper) called")
-    
-    import queue
-    
-    result_queue = queue.Queue()
-    
-    def run_in_thread():
-        """Run async code in a dedicated thread with its own event loop."""
-        try:
-            # Create a new event loop for this thread
-            new_loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(new_loop)
-            try:
-                result = new_loop.run_until_complete(send_group_message_async(message))
-                result_queue.put(('success', result))
-            finally:
-                new_loop.close()
-        except Exception as e:
-            result_queue.put(('error', e))
-    
     try:
-        # Run async code in a separate thread to avoid event loop conflicts
-        thread = threading.Thread(target=run_in_thread, daemon=True)
-        thread.start()
-        thread.join(timeout=30)  # 30 second timeout
-        
-        if thread.is_alive():
-            print("❌ Telethon: Send operation timed out")
-            return False
-        
-        # Get result from queue
+        # Create a fresh event loop for this call
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
         try:
-            status, value = result_queue.get_nowait()
-            if status == 'success':
-                return value
-            else:
-                print(f"❌ Telethon sync wrapper error: {value}")
-                return False
-        except queue.Empty:
-            print("❌ Telethon: No result received from thread")
-            return False
+            result = loop.run_until_complete(send_group_message_async(message))
+            return result
+        finally:
+            # Clean up: close the loop and all pending tasks
+            try:
+                # Cancel all pending tasks
+                pending = asyncio.all_tasks(loop)
+                for task in pending:
+                    task.cancel()
+                # Wait for all tasks to be cancelled
+                if pending:
+                    loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+            except Exception:
+                pass  # Ignore cleanup errors
+            finally:
+                loop.close()
             
     except Exception as e:
-        print(f"❌ Telethon thread creation error: {e}")
+        print(f"❌ Telethon: Sync wrapper error: {e}")
         return False
 
 
