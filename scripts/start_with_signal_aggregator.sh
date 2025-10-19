@@ -140,3 +140,6 @@ echo ""
 echo "=== LIVE LOGS (Ctrl+C to stop) ==="
 tail -f data/logs/signal_aggregator.log data/logs/bot.log
 
+
+
+

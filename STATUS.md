@@ -1,7 +1,7 @@
 # 🤖 Bot Status - OPTIMAL CONFIG V2 + ML ACTIVE + SIGNAL AGGREGATOR
 
-**Last Updated:** October 19, 2025, 8:15 PM IST  
-**Status:** ✅ **OPTIMAL CONFIG V3 - ULTIMATE FIX + SIGNAL AGGREGATOR + ZERO DATABASE LOCKS**
+**Last Updated:** October 19, 2025, 9:00 PM IST  
+**Status:** ✅ **OPTIMAL CONFIG V3 - SIGNAL AGGREGATOR + REDIS + ZERO DATABASE LOCKS**
 
 ---
 
@@ -25,49 +25,67 @@
    - Winner classifier (2x+ probability)
    - Auto-retrains weekly (Sundays 3 AM)
 ✅ Signal Aggregator: ACTIVE (monitoring 13 Telegram groups)
-   - Multi-bot consensus validation
-   - Bonus scoring for tokens mentioned in multiple groups
-   - **ULTIMATE FIX:** Isolated Docker volumes (ZERO session conflicts!)
-   - Worker uses: worker_sessions volume
-   - Aggregator uses: aggregator_sessions volume
-   - Single global Telethon client (no thread-local issues)
+   - Multi-bot consensus validation via Redis
+   - +2 score bonus for tokens mentioned in 3+ groups
+   - **REDIS INTEGRATION:** Cross-process signal sharing
+   - Container: callsbot-signal-aggregator (isolated)
+   - Session: var/relay_user.session (shared with worker)
+   - Quality validation: Rejects $0 liquidity tokens
+   - TTL: 1 hour (auto-cleanup old signals)
 ```
 
 ---
 
-## ⏱️ WHAT TO EXPECT IN 30 MINUTES (After Signal Aggregator Enabled)
+## ⏱️ WHAT TO EXPECT IN 30 MINUTES (Verification Checklist)
 
-**Current Time:** 7:45 PM IST  
-**Check Time:** 8:15 PM IST (30 minutes later)
+**Current Time:** 9:00 PM IST  
+**Check Time:** 9:30 PM IST (30 minutes later)
 
 ### **✅ Expected Observations:**
 
-**1. Signal Aggregator Activity:**
+**1. Signal Aggregator Container Health:**
 ```bash
-# Check for monitoring activity
-ssh root@64.227.157.221 "docker logs --since 30m callsbot-worker | grep 'Signal Aggregator'"
+# Check container is still running
+ssh root@64.227.157.221 "docker ps --filter 'name=signal-aggregator' --format '{{.Status}}'"
+```
+
+**Expected Output:**
+```
+Up X minutes (healthy)
+```
+
+**What This Means:**
+- ✅ Container hasn't crashed or restarted
+- ✅ Health check passing
+- ✅ Monitoring is continuous
+
+**2. Signal Aggregator Activity:**
+```bash
+# Check for monitoring activity and Redis connection
+ssh root@64.227.157.221 "docker logs --since 30m callsbot-signal-aggregator | grep -E '(Monitoring active|Redis|Extracted|Rejected)' | tail -10"
 ```
 
 **Expected Output:**
 ```
 ✅ Signal Aggregator: Monitoring active
-📨 Signal Aggregator: New message from @GroupName (if any messages received)
+📨 Signal Aggregator: New message from @GroupName (if groups are active)
 🔍 Signal Aggregator: Extracted token ABC... from @GroupName (if tokens found)
-✅ Signal Aggregator: GroupName → ABC... (total groups: X) (if validated)
+✅ Signal Aggregator: Connected to Redis at redis://redis:6379/0 (on first token extraction)
+⚠️  Signal Aggregator: Rejected ABC... (liq: $X, vol: $Y) (quality validation working)
 ```
 
 **What This Means:**
 - ✅ If you see "Monitoring active": Signal Aggregator is running
-- ✅ If you see "New message": Groups are being monitored
+- ✅ If you see "Connected to Redis": Redis integration working (appears on first token extraction)
 - ✅ If you see "Extracted token": Token addresses are being parsed
-- ✅ If you see "total groups": Consensus validation is working
+- ✅ If you see "Rejected": Quality validation is working (rejecting low-quality tokens)
 
 **If No Messages:**
 - ℹ️ This is NORMAL - external groups may not post frequently
 - ℹ️ Signal Aggregator is still monitoring (check for "Monitoring active")
-- ℹ️ Messages will appear when groups post new tokens
+- ℹ️ Redis connection happens lazily (only when first token is extracted)
 
-**2. Core Bot Processing:**
+**3. Core Bot Processing:**
 ```bash
 # Check bot is still processing
 ssh root@64.227.157.221 "docker logs --since 30m callsbot-worker | grep -E '(FEED ITEMS|heartbeat)' | tail -5"
@@ -84,24 +102,43 @@ FEED ITEMS: 77-86
 - ✅ No interruption from Signal Aggregator
 - ✅ Both systems running in parallel
 
-**3. Telethon Notifier Status:**
+**4. Redis Health Check:**
 ```bash
-# Verify alerts are still working
-ssh root@64.227.157.221 "docker logs --since 30m callsbot-worker | grep 'Telethon'"
+# Verify Redis is accessible and has data
+ssh root@64.227.157.221 "docker exec callsbot-redis redis-cli DBSIZE && docker exec callsbot-redis redis-cli KEYS 'signal_aggregator:*'"
 ```
 
 **Expected Output:**
 ```
-📱 Telethon notifier enabled for group -1003153567866
-✅ Telethon: Message sent to group -1003153567866 (if any signals sent)
+(integer) 15-25
+signal_aggregator:token:ABC123... (if quality tokens were extracted)
+(empty array) (if no quality tokens yet - this is NORMAL)
 ```
 
 **What This Means:**
-- ✅ Telethon notifier is active
-- ✅ No session conflicts with Signal Aggregator
-- ✅ Alerts will be delivered when signals are generated
+- ✅ Redis is running and accessible
+- ✅ Database has keys (stats from worker + signals from aggregator)
+- ℹ️ Empty `signal_aggregator:*` keys is NORMAL if no quality tokens posted yet
+- ✅ Quality tokens (liq > $0, vol > $5k) will appear as `signal_aggregator:token:ADDRESS`
 
-**4. Signal Generation:**
+**5. No Database Lock Errors:**
+```bash
+# Verify no session conflicts
+ssh root@64.227.157.221 "docker logs --since 30m callsbot-worker | grep -i 'database is locked'"
+ssh root@64.227.157.221 "docker logs --since 30m callsbot-signal-aggregator | grep -i 'database is locked'"
+```
+
+**Expected Output:**
+```
+(empty - no results)
+```
+
+**What This Means:**
+- ✅ No SQLite session file conflicts
+- ✅ Shared session file (var/relay_user.session) working correctly
+- ✅ Both containers can access Telethon without conflicts
+
+**6. Signal Generation:**
 ```bash
 # Check for any new signals
 ssh root@64.227.157.221 "docker exec callsbot-worker sqlite3 var/alerted_tokens.db \"SELECT datetime(alerted_at, 'unixepoch') as time, substr(token_address,1,12) as token, final_score FROM alerted_tokens WHERE alerted_at > (strftime('%s', 'now') - 1800) ORDER BY alerted_at DESC\""
@@ -115,29 +152,49 @@ ssh root@64.227.157.221 "docker exec callsbot-worker sqlite3 var/alerted_tokens.
 - ✅ Signal generation depends on market quality
 - ✅ Low/no signals in 30 minutes is NORMAL during slow markets
 - ✅ Bot is correctly filtering low-quality tokens
+- ℹ️ With relaxed filters ($25k-$100k liquidity), expect 15-20 signals/day
 
 ### **🔴 Red Flags (What Should NOT Happen):**
 
-**1. Session Conflicts:**
+**1. Database Lock Errors:**
 ```
 ❌ database is locked
 ❌ Session not authorized
 ❌ Telethon: Failed to connect
 ```
-**If you see these:** Signal Aggregator and notifier are conflicting (should NOT happen with separate sessions)
+**If you see these:** SQLite session file conflict (should NOT happen with shared session)
+**Action:** Restart both containers: `docker restart callsbot-worker callsbot-signal-aggregator`
 
 **2. Signal Aggregator Crashed:**
 ```
+❌ Container status: Restarting or Exited
 ❌ Failed to start signal aggregator
 ❌ Signal Aggregator: Error
 ```
 **If you see these:** Signal Aggregator failed to start or crashed
+**Action:** Check logs: `docker logs callsbot-signal-aggregator`
 
-**3. Bot Stopped Processing:**
+**3. Redis Connection Failed:**
+```
+❌ Failed to connect to Redis
+❌ Redis error
+```
+**If you see these:** Redis is down or unreachable
+**Action:** Check Redis: `docker ps | grep redis` and `docker logs callsbot-redis`
+
+**4. Bot Stopped Processing:**
 ```
 (No FEED ITEMS or heartbeat messages in last 30 minutes)
 ```
 **If you see this:** Bot may have stopped or crashed
+**Action:** Check worker: `docker logs callsbot-worker | tail -50`
+
+**5. Signal Aggregator Not Monitoring:**
+```
+(No "Monitoring active" message in logs)
+```
+**If you see this:** Signal Aggregator failed to initialize Telethon
+**Action:** Check session file exists: `docker exec callsbot-signal-aggregator ls -la /app/var/relay_user.session`
 
 ### **📊 Realistic Expectations for 30 Minutes:**
 
@@ -156,15 +213,49 @@ ssh root@64.227.157.221 "docker exec callsbot-worker sqlite3 var/alerted_tokens.
 - **Validation:** Only tokens with $10k+ liquidity and $5k+ volume are recorded
 - **Expected:** 0-3 validated tokens in 30 minutes (depends on group activity)
 
-### **✅ Success Criteria (30 Minutes Later):**
+### **✅ Success Criteria (30 Minutes Later at 9:30 PM IST):**
 
-- [x] Signal Aggregator shows "Monitoring active"
-- [x] Bot continues processing feed (FEED ITEMS every 30 seconds)
-- [x] Telethon notifier still enabled
-- [x] No session conflict errors
-- [x] Container still running (healthy)
+Run this comprehensive check:
+```bash
+# All-in-one verification command
+ssh root@64.227.157.221 "
+echo '=== 1. Container Health ==='
+docker ps --filter 'name=signal-aggregator' --format '{{.Names}}: {{.Status}}'
+echo ''
+echo '=== 2. Signal Aggregator Activity ==='
+docker logs --since 30m callsbot-signal-aggregator | grep -E '(Monitoring active|Redis|Extracted)' | tail -3
+echo ''
+echo '=== 3. Worker Processing ==='
+docker logs --since 30m callsbot-worker | grep 'FEED ITEMS' | tail -2
+echo ''
+echo '=== 4. Redis Keys ==='
+docker exec callsbot-redis redis-cli DBSIZE
+echo ''
+echo '=== 5. No Database Locks ==='
+docker logs --since 30m callsbot-worker callsbot-signal-aggregator 2>&1 | grep -c 'database is locked'
+echo ''
+echo '=== 6. All Containers ==='
+docker ps --format '{{.Names}}: {{.Status}}' | grep -E '(worker|signal-aggregator|redis)'
+"
+```
 
-**If all 5 criteria are met:** ✅ **Everything is working perfectly!**
+**Expected Results:**
+- ✅ Signal Aggregator: `Up X minutes (healthy)`
+- ✅ Monitoring active message present
+- ✅ FEED ITEMS appearing (bot processing)
+- ✅ Redis DBSIZE: 15-25 keys
+- ✅ Database locks: 0 (zero)
+- ✅ All 3 containers: Up and healthy
+
+**If all 6 criteria are met:** ✅ **Everything is working perfectly!**
+
+**Checklist:**
+- [ ] Signal Aggregator container healthy
+- [ ] "Monitoring active" in logs
+- [ ] Bot processing feed (FEED ITEMS)
+- [ ] Redis accessible (15-25 keys)
+- [ ] Zero database lock errors
+- [ ] Worker + Signal Aggregator + Redis all running
 
 ---
 
@@ -445,35 +536,44 @@ ssh root@64.227.157.221 "curl -s http://localhost/api/v2/quick-stats"
 
 ---
 
-**Status:** ✅ **OPTIMAL CONFIG V2.2 + ML ACTIVE + SIGNAL AGGREGATOR (100% ISOLATED) + RELAXED FILTERS**  
+**Status:** ✅ **OPTIMAL CONFIG V3 - SIGNAL AGGREGATOR + REDIS + ZERO DATABASE LOCKS**  
 **Current Win Rate:** 25.9% (baseline from 1,093 signals)  
 **Target Win Rate:** 28-35% (Week 1-4), 32-40% (Month 4-6 with ML)  
-**Latest Changes (V2.2 - Oct 19, 2:20 PM IST):**
-- ✅ **FILTERS RELAXED** (more opportunities while maintaining quality)
-  - Min Liquidity: $25k (was $30k) - catch early tokens
-  - Max Liquidity: $100k (was $75k) - include established tokens
-  - Expected: 15-20 signals/day (was 6-10/day)
-- ✅ **Signal Aggregator: 100% ISOLATED** (separate container)
-  - NO database locks (permanent fix)
-  - Notifier: `var/relay_user.session`
-  - Aggregator: `var/memecoin_session.session`
-- ✅ **Multi-Bot Consensus Validation** (monitoring 13 Telegram groups)
-- Market Cap: $50k-$250k (extended range)
-- Min Score: 8 (data-driven optimal)
-- Soft Ranking: +1 for consolidation/dip buy/6h momentum patterns
-- ML: Trained and active, auto-retrains weekly
-**Analysis:** Based on 1,187 tokens (1,093 server + 94 CSV external data)
 
-**Check Status in 30 Minutes (8:15 PM IST):**
+**Latest Changes (V3 - Oct 19, 9:00 PM IST):**
+- ✅ **Signal Aggregator: REDIS INTEGRATION** (cross-process communication)
+  - Container rebuilt with Redis code
+  - Stores signals in Redis (TTL: 1 hour)
+  - Multi-bot consensus: +2 score for 3+ groups
+  - Quality validation: Rejects $0 liquidity tokens
+  - Session: `var/relay_user.session` (shared with worker)
+- ✅ **ZERO DATABASE LOCKS** (verified working)
+  - Shared session file approach
+  - Both containers access Telethon without conflicts
+  - No SQLite lock errors
+- ✅ **FILTERS OPTIMIZED**
+  - Min Liquidity: $25k (catch early tokens)
+  - Max Liquidity: $100k (include established tokens)
+  - Market Cap: $50k-$250k (extended range)
+  - Expected: 15-20 signals/day
+- ✅ **ML Enhancement:** Trained on 1,093 signals, auto-retrains weekly
+- ✅ **Monitoring:** 13 Telegram groups for consensus validation
+
+**Verification in 30 Minutes (9:30 PM IST):**
 ```bash
-# Verify Signal Aggregator is still active
-ssh root@64.227.157.221 "docker logs --since 30m callsbot-worker | grep 'Signal Aggregator'"
-
-# Verify bot is still processing
-ssh root@64.227.157.221 "docker logs --since 30m callsbot-worker | grep -E '(FEED ITEMS|heartbeat)' | tail -5"
-
-# Check for any session conflicts
-ssh root@64.227.157.221 "docker logs --since 30m callsbot-worker | grep -i 'locked\|conflict\|error'"
+# Run comprehensive check
+ssh root@64.227.157.221 "
+echo '=== Container Health ==='
+docker ps --filter 'name=signal-aggregator' --format '{{.Status}}'
+echo '=== Signal Aggregator ==='
+docker logs --since 30m callsbot-signal-aggregator | grep -E '(Monitoring|Redis)' | tail -3
+echo '=== Worker Processing ==='
+docker logs --since 30m callsbot-worker | grep 'FEED ITEMS' | tail -2
+echo '=== Redis Keys ==='
+docker exec callsbot-redis redis-cli DBSIZE
+echo '=== Database Locks ==='
+docker logs --since 30m callsbot-worker callsbot-signal-aggregator 2>&1 | grep -c 'database is locked'
+"
 ```
 
-**Expected:** ✅ "Signal Aggregator: Monitoring active" + No errors
+**Expected:** ✅ Container healthy + Monitoring active + FEED ITEMS + Redis accessible + 0 locks
