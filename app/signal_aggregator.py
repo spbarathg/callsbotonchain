@@ -8,14 +8,46 @@ Quality Control:
 - Only counts signals from tokens that meet basic quality thresholds
 - Validates token exists and has minimum liquidity/volume
 - Filters out spam/scam addresses
+
+ARCHITECTURE:
+- Uses Redis for cross-process data sharing (can run as separate daemon)
+- Stores signals in Redis sorted sets with TTL for automatic cleanup
+- Main bot reads from Redis to get consensus scores
 """
 import asyncio
 import re
+import json
+import time
+import os
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 from collections import defaultdict
 
-# Global signal cache: {token_address: [(timestamp, group_name), ...]}
+# Redis client for cross-process signal sharing
+_redis_client = None
+_redis_status = "not_initialized"
+
+def _init_redis():
+    """Initialize Redis client for signal aggregator."""
+    global _redis_client, _redis_status
+    
+    if _redis_client is not None:
+        return _redis_client
+    
+    try:
+        import redis
+        redis_url = os.getenv("REDIS_URL") or os.getenv("CALLSBOT_REDIS_URL") or "redis://localhost:6379/0"
+        _redis_client = redis.from_url(redis_url, decode_responses=True, socket_timeout=5, socket_connect_timeout=5)
+        _redis_client.ping()
+        _redis_status = "connected"
+        print(f"✅ Signal Aggregator: Connected to Redis at {redis_url}")
+        return _redis_client
+    except Exception as e:
+        _redis_status = f"error: {e}"
+        print(f"❌ Signal Aggregator: Failed to connect to Redis: {e}")
+        return None
+
+# Fallback in-memory cache for when Redis is unavailable
 _signal_cache: Dict[str, List[Tuple[datetime, str]]] = defaultdict(list)
 _validated_tokens: Dict[str, bool] = {}  # Cache of validated tokens
 _cache_lock = asyncio.Lock()
@@ -137,14 +169,41 @@ async def validate_token_quality(token_address: str) -> bool:
         return False
 
 
-async def record_signal(token_address: str, group_name: str = "unknown") -> None:
-    """Record a signal from a group (with quality validation)."""
-    # Validate token quality first
-    is_valid = await validate_token_quality(token_address)
+async def record_signal(token_address: str, group_name: str = "unknown", skip_validation: bool = False) -> None:
+    """
+    Record a signal from a group (with quality validation).
     
-    if not is_valid:
-        return  # Silently reject low-quality signals
+    Args:
+        token_address: Solana token address
+        group_name: Name of the group/channel that signaled
+        skip_validation: If True, skip quality checks (for testing only)
+    """
+    # Validate token quality first (unless skipped for testing)
+    if not skip_validation:
+        is_valid = await validate_token_quality(token_address)
+        
+        if not is_valid:
+            return  # Silently reject low-quality signals
     
+    # Try Redis first (cross-process sharing)
+    redis = _init_redis()
+    if redis:
+        try:
+            now = time.time()
+            signal_key = f"signal_aggregator:token:{token_address}"
+            
+            # Store signal as sorted set: {group_name: timestamp}
+            # This automatically handles deduplication per group
+            redis.zadd(signal_key, {group_name: now})
+            
+            # Set TTL to 1 hour (auto-cleanup old signals)
+            redis.expire(signal_key, 3600)
+            
+            return
+        except Exception as e:
+            print(f"⚠️ Redis error, falling back to memory: {e}")
+    
+    # Fallback to in-memory cache
     async with _cache_lock:
         now = datetime.now()
         
@@ -162,7 +221,29 @@ async def record_signal(token_address: str, group_name: str = "unknown") -> None
 
 
 def get_signal_count(token_address: str) -> int:
-    """Get number of validated group signals in last hour."""
+    """
+    Get number of validated group signals in last hour.
+    
+    This function is synchronous and safe to call from scoring logic.
+    Tries Redis first (cross-process), falls back to memory cache.
+    """
+    # Try Redis first (works across processes)
+    redis = _init_redis()
+    if redis:
+        try:
+            signal_key = f"signal_aggregator:token:{token_address}"
+            now = time.time()
+            one_hour_ago = now - 3600
+            
+            # Count unique groups that signaled in last hour
+            # ZRANGEBYSCORE returns members (group names) with score >= one_hour_ago
+            groups = redis.zrangebyscore(signal_key, one_hour_ago, now)
+            return len(groups) if groups else 0
+        except Exception as e:
+            # Redis unavailable - fall back to memory
+            pass
+    
+    # Fallback to in-memory cache
     now = datetime.now()
     
     if token_address not in _signal_cache:
@@ -181,7 +262,13 @@ def get_signal_count(token_address: str) -> int:
 
 
 def cleanup_old_signals() -> None:
-    """Remove signals older than 1 hour."""
+    """
+    Remove signals older than 1 hour.
+    
+    Note: When using Redis, cleanup is automatic via TTL (EXPIRE command).
+    This function only cleans up in-memory fallback cache.
+    """
+    # Clean in-memory cache
     now = datetime.now()
     
     for token_address in list(_signal_cache.keys()):
@@ -200,6 +287,18 @@ def cleanup_old_signals() -> None:
         keys_to_remove = list(_validated_tokens.keys())[:-500]
         for key in keys_to_remove:
             del _validated_tokens[key]
+    
+    # Redis cleanup happens automatically via TTL, but we can log stats
+    redis = _init_redis()
+    if redis:
+        try:
+            # Count how many tokens have active signals
+            pattern = "signal_aggregator:token:*"
+            keys = redis.keys(pattern)
+            if keys:
+                print(f"📊 Signal Aggregator: {len(keys)} tokens with active signals in Redis")
+        except Exception:
+            pass
 
 
 async def start_monitoring():
