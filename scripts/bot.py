@@ -245,26 +245,10 @@ def initialize_bot() -> bool:
 		_out(f"⚠️ Failed to pre-initialize Telethon notifier: {e}")
 		# Don't fail bot startup if notifier fails to initialize
 	
-	# TEMPORARILY DISABLED: Signal Aggregator causing session lock
-	# TODO: Move to separate container for 100% isolation
-	# Start Telegram signal aggregator monitoring
-	# Now using separate session files to avoid conflicts
-	# try:
-	# 	import asyncio
-	# 	from app.signal_aggregator import start_monitoring
-	# 	loop = asyncio.new_event_loop()
-	# 	asyncio.set_event_loop(loop)
-	# 	# Start monitoring in background thread
-	# 	import threading
-	# 	def run_aggregator():
-	# 		loop.run_until_complete(start_monitoring())
-	# 	aggregator_thread = threading.Thread(target=run_aggregator, daemon=True)
-	# 	aggregator_thread.start()
-	# 	_out("✅ Telegram signal aggregator started - monitoring 13 groups")
-	# except Exception as e:
-	# 	_out(f"⚠️ Failed to start signal aggregator: {e}")
-	# 	# Don't fail bot startup if aggregator fails
-	_out("⚠️ Signal Aggregator temporarily disabled to fix Telethon delivery")
+	# Signal Aggregator now runs in SEPARATE CONTAINER for 100% isolation
+	# See: callsbot-signal-aggregator service in docker-compose.yml
+	# This eliminates ALL database lock issues permanently!
+	_out("ℹ️  Signal Aggregator runs in separate container (100% isolation)")
 	# Startup message
 	startup_message = (
 		"<b>SMART MONEY Enhanced Memecoin Bot Started</b>\n\n"

@@ -105,6 +105,30 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  # Signal Aggregator - Monitors external Telegram groups (100% isolated)
+  signal-aggregator:
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile
+    container_name: callsbot-signal-aggregator
+    user: root
+    command: ["python", "scripts/signal_aggregator_daemon.py"]
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - CALLSBOT_LOG_STDOUT=true
+    volumes:
+      - ./var:/app/var
+      - ./data/logs:/app/data/logs
+    depends_on:
+      - redis
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
   tracker:
     build:
       context: ..
