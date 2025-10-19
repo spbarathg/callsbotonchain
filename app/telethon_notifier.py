@@ -122,6 +122,8 @@ async def send_group_message_async(message: str) -> bool:
     Returns:
         True if sent successfully, False otherwise
     """
+    print(f"🔍 Telethon: send_group_message_async called (TELETHON_ENABLED={TELETHON_ENABLED})")
+    
     if not TELETHON_ENABLED:
         if not IS_TESTING:
             print("⚠️  Telethon not enabled (missing credentials)")
@@ -130,6 +132,8 @@ async def send_group_message_async(message: str) -> bool:
     if not message or not message.strip():
         print("❌ Telethon: Empty message provided")
         return False
+    
+    print(f"🔍 Telethon: Attempting to send message to {TARGET_CHAT_ID}")
     
     # Lazy import Telethon errors only when actually needed
     from telethon.errors import FloodWaitError, ChatWriteForbiddenError
@@ -175,6 +179,8 @@ def send_group_message(message: str) -> bool:
     Returns:
         True if sent successfully, False otherwise
     """
+    print(f"🔍 Telethon: send_group_message (sync wrapper) called")
+    
     import threading
     import queue
     
