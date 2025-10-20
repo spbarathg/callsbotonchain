@@ -145,3 +145,4 @@ tail -f data/logs/signal_aggregator.log data/logs/bot.log
 
 
 
+
