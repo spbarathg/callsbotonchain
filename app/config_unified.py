@@ -333,7 +333,7 @@ LARGE_CAP_HOLDER_STATS_MCAP_USD = _get_float("LARGE_CAP_HOLDER_STATS_MCAP_USD", 
 # $75k+: Declining win rate (saturated pools)
 # CRITICAL: Raising floor from $30k to $35k = +5-10% win rate boost!
 USE_LIQUIDITY_FILTER = _get_bool("USE_LIQUIDITY_FILTER", True)
-MIN_LIQUIDITY_USD = _get_float("MIN_LIQUIDITY_USD", 35000.0)  # $35k minimum (RAISED from $30k for +5-10% win rate)
+MIN_LIQUIDITY_USD = _get_float("MIN_LIQUIDITY_USD", 30000.0)  # $30k minimum (DATA-DRIVEN: Moonshots had $117k median, losers $30k)
 EXCELLENT_LIQUIDITY_USD = _get_float("EXCELLENT_LIQUIDITY_USD", 50000.0)  # $35k-$50k sweet spot
 MAX_LIQUIDITY_USD = _get_float("MAX_LIQUIDITY_USD", 75000.0)  # $75k cap (avoid saturated pools)
 
@@ -389,8 +389,8 @@ REQUIRE_VELOCITY_MIN_SCORE_FOR_ALERT = _get_int("REQUIRE_VELOCITY_MIN_SCORE_FOR_
 # RAISED to 7+ for quality signals - reduce noise from marginal tokens
 # Quality over quantity - only alert on HIGH-CONFIDENCE signals
 # Current issue: ALL signals are score 10 (no discrimination)
-SMART_CYCLE_MIN_SCORE = _get_int("SMART_CYCLE_MIN_SCORE", 7)  # RAISED: (was 6)
-GENERAL_CYCLE_MIN_SCORE = _get_int("GENERAL_CYCLE_MIN_SCORE", 8)  # DATA-DRIVEN: Score 8 has 22.1% win rate (better than 9-10)
+SMART_CYCLE_MIN_SCORE = _get_int("SMART_CYCLE_MIN_SCORE", 7)  # DATA-DRIVEN: Score 7 had 20% win rate
+GENERAL_CYCLE_MIN_SCORE = _get_int("GENERAL_CYCLE_MIN_SCORE", 7)  # DATA-DRIVEN: Lower scores (4-7) caught moonshots (8.57x avg for score 4)
 
 # Multi-signal Confirmation
 REQUIRE_MULTI_SIGNAL = _get_bool("REQUIRE_MULTI_SIGNAL", False)
