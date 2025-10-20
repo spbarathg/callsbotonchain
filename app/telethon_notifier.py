@@ -115,11 +115,11 @@ async def send_group_message_async(message: str) -> bool:
 
 def send_group_message(message: str) -> bool:
     """
-    Synchronous wrapper for send_group_message_async.
+    Synchronous wrapper for send_group_message_async with retry logic.
     
-    PERMANENT FIX: Creates a fresh event loop for each call. Each client
-    is created, used, and disconnected within the same event loop, preventing
-    "event loop must not change" errors.
+    PERMANENT FIX: Creates a fresh event loop for each call with retries
+    on event loop errors. Each client is created, used, and disconnected 
+    within the same event loop.
     
     Args:
         message: The message text to send
@@ -127,31 +127,52 @@ def send_group_message(message: str) -> bool:
     Returns:
         True if sent successfully, False otherwise
     """
-    try:
-        # Create a fresh event loop for this call
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
+    import time
+    
+    max_retries = 3
+    for attempt in range(max_retries):
         try:
-            result = loop.run_until_complete(send_group_message_async(message))
-            return result
-        finally:
-            # Clean up: close the loop and all pending tasks
-            try:
-                # Cancel all pending tasks
-                pending = asyncio.all_tasks(loop)
-                for task in pending:
-                    task.cancel()
-                # Wait for all tasks to be cancelled
-                if pending:
-                    loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
-            except Exception:
-                pass  # Ignore cleanup errors
-            finally:
-                loop.close()
+            # Small delay between retries to let previous cleanup finish
+            if attempt > 0:
+                time.sleep(0.5 * attempt)  # 0.5s, 1s delays
             
-    except Exception as e:
-        print(f"❌ Telethon: Sync wrapper error: {e}")
-        return False
+            # Create a completely fresh event loop for this call
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                result = loop.run_until_complete(send_group_message_async(message))
+                return result
+            finally:
+                # Aggressive cleanup: close the loop and all pending tasks
+                try:
+                    # Cancel all pending tasks
+                    pending = asyncio.all_tasks(loop)
+                    for task in pending:
+                        task.cancel()
+                    # Wait for all tasks to be cancelled
+                    if pending:
+                        loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+                except Exception:
+                    pass  # Ignore cleanup errors
+                finally:
+                    try:
+                        loop.close()
+                    except Exception:
+                        pass
+                    # Clear the event loop reference
+                    asyncio.set_event_loop(None)
+                
+        except Exception as e:
+            error_str = str(e)
+            # Retry on event loop errors
+            if "event loop" in error_str.lower() and attempt < max_retries - 1:
+                print(f"⚠️  Telethon: Event loop error (attempt {attempt + 1}/{max_retries}), retrying...")
+                continue
+            else:
+                print(f"❌ Telethon: Sync wrapper error: {e}")
+                return False
+    
+    return False
 
 
 # Module initialization check (skip during tests to avoid noise)

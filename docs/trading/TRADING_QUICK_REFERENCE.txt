@@ -1,0 +1,230 @@
+╔═══════════════════════════════════════════════════════════════╗
+║    V4 MOONSHOT HUNTER - CONSERVATIVE TRADING REFERENCE        ║
+║              CAPITAL PRESERVATION FIRST!                      ║
+╚═══════════════════════════════════════════════════════════════╝
+
+┌─────────────────────────────────────────────────────────────┐
+│ CURRENT CAPITAL: $________ (Update Daily!)                  │
+│ STARTING CAPITAL: $________ (Track total gain!)             │
+└─────────────────────────────────────────────────────────────┘
+
+═══════════════════════════════════════════════════════════════
+  CONSERVATIVE POSITION SIZING CALCULATOR
+═══════════════════════════════════════════════════════════════
+
+🚀 TIER 1: MOONSHOT HUNTER (MCap $10k-$50k)
+   ├─ Position Size: 5-8% = $________ (SMALL bet, BIG win!)
+   ├─ Stop Loss: -70% (max capital risk: ~5%)
+   ├─ Target: 5x-100x+ (HOLD for moonshots!)
+   ├─ Max Positions: 1-2 ONLY
+   ├─ Exit Plan: NEVER before 5x
+   │             25% at 10x, 25% at 20x, 25% at 50x
+   │             Let 25% ride to 100x+
+   └─ Expected: 30-40% hit rate, but MASSIVE gains!
+
+💎 TIER 2: AGGRESSIVE GROWTH (MCap $50k-$150k)
+   ├─ Position Size: 8-12% = $________ (bread & butter)
+   ├─ Stop Loss: -50% (max capital risk: ~6%)
+   ├─ Target: 5x-20x (sweet spot!)
+   ├─ Max Positions: 2-3
+   ├─ Exit Plan: 50% at 5x (lock profits)
+   │             Rest at 10x or trail
+   └─ Expected: This is your main income generator!
+
+📊 TIER 3: CALCULATED PLAYS (MCap $150k-$500k)
+   ├─ Position Size: 5-8% = $________ (quick flips)
+   ├─ Stop Loss: -40% (max capital risk: ~3%)
+   ├─ Target: 2x-5x (fast profits)
+   ├─ Max Positions: 1-2
+   ├─ Exit Plan: 50% at 2x, rest at 3x
+   └─ Expected: Quick profits to recover from losses
+
+💵 CASH RESERVE: 50% = $________ (ALWAYS KEEP!)
+
+═══════════════════════════════════════════════════════════════
+  PORTFOLIO LIMITS (STRICT - NEVER EXCEED!)
+═══════════════════════════════════════════════════════════════
+✓ Max Total Positions: 4-6 tokens (not more!)
+✓ Max Capital Deployed: 50% (keep 50% cash)
+✓ Max Tier 1 Positions: 1-2 at once
+✓ Max Tier 2 Positions: 2-3 at once
+✓ Max Tier 3 Positions: 1-2 at once
+
+═══════════════════════════════════════════════════════════════
+  LOSS LIMITS (MANDATORY - PROTECT CAPITAL!)
+═══════════════════════════════════════════════════════════════
+🚨 Daily Loss: -10% of capital → STOP trading for the day
+🚨 Weekly Loss: -20% of capital → STOP trading for the week
+🚨 3 Losses in a Row: → Cut position sizes by 50%
+🚨 -25% Total Loss: → Stop 3-7 days, review strategy
+
+═══════════════════════════════════════════════════════════════
+  DAILY CHECKLIST
+═══════════════════════════════════════════════════════════════
+□ Check Telegram for new signals
+□ Identify signal tier (bot tells you!)
+□ Calculate CONSERVATIVE position size (5-12%)
+□ Verify 50% cash reserve maintained
+□ Enter position immediately (speed matters!)
+□ Set stop loss alert (-70%/-50%/-40%)
+□ Monitor profit targets
+□ Take profits per tier strategy
+□ Update capital total (for compounding!)
+□ Check if daily loss limit hit (-10%)
+□ Log trade in spreadsheet
+
+═══════════════════════════════════════════════════════════════
+  THE GOLDEN RULES (NEVER BREAK!)
+═══════════════════════════════════════════════════════════════
+❌ NEVER exceed 12% per position (8% for Tier 1)
+❌ NEVER deploy more than 50% of capital
+❌ NEVER have more than 6 positions
+❌ NEVER skip the 50% cash reserve
+❌ NEVER trade after hitting daily loss limit (-10%)
+❌ NEVER trade after hitting weekly loss limit (-20%)
+❌ NEVER skip stop losses
+❌ NEVER add to losing positions (no averaging down!)
+❌ NEVER sell Tier 1 before 5x (patience!)
+❌ NEVER chase pumps (only bot signals)
+❌ NEVER FOMO into larger positions
+❌ NEVER ignore rug indicators (exit fast!)
+
+✅ ALWAYS use exact CONSERVATIVE position sizes
+✅ ALWAYS set stop losses immediately
+✅ ALWAYS keep 50% cash reserve minimum
+✅ ALWAYS stop after daily/weekly loss limits
+✅ ALWAYS compound (increase positions as capital grows!)
+✅ ALWAYS trust the system (moonshots cover losses!)
+✅ ALWAYS take partial profits at milestones
+✅ ALWAYS track capital daily
+
+═══════════════════════════════════════════════════════════════
+  RUG PULL INDICATORS - EXIT IMMEDIATELY!
+═══════════════════════════════════════════════════════════════
+🚨 Liquidity drops >50% suddenly
+🚨 Dev wallet dumps >10% supply
+🚨 LP tokens unlocked/removed
+🚨 Volume drops to <$1k/hour
+🚨 Price tanks >80% in minutes
+
+═══════════════════════════════════════════════════════════════
+  PROFIT TARGETS CHEAT SHEET
+═══════════════════════════════════════════════════════════════
+
+TIER 1 (Moonshot):
+  5x  = HOLD (minimum target!)
+  10x = Sell 25% → Lock gains, let rest run
+  20x = Sell 25% more → Lock more profits
+  50x = Sell 25% more → Secure huge gains
+  100x+ = Let final 25% moonbag ride!
+
+TIER 2 (Aggressive):
+  2x  = HOLD (target is higher!)
+  5x  = Sell 50% → Lock 2.5x profit
+  10x = Sell 30% more → Lock additional
+  15x = Exit rest or trail stop
+
+TIER 3 (Calculated):
+  2x  = Sell 50% → Recover capital
+  3x  = Sell rest → Take profit, move on
+
+═══════════════════════════════════════════════════════════════
+  THE WINNING MATH (WHY SMALL POSITIONS WORK!)
+═══════════════════════════════════════════════════════════════
+
+Example: 33 trades, $70 avg position, 25% win rate
+
+Losers: 25 × $70 × -45% avg = -$788 total loss
+Medium Winners: 6 × $70 × 5x = $2,100 total gain  
+Moonshots: 2 × $70 × 30x = $4,200 total gain
+─────────────────────────────────────────────
+NET PROFIT: $5,512 (551% ROI!)
+
+You only need 1-2 moonshots per 25 trades to be profitable!
+
+Real Example: ONE $70 position hitting 50x = $3,500 gain
+            This covers 22 full stop losses (-$70 each)!
+
+═══════════════════════════════════════════════════════════════
+  30-DAY TARGETS (Starting $1,000)
+═══════════════════════════════════════════════════════════════
+Conservative (25% WR):  $3,500-$4,500  (250-350% gain)
+Target (30% WR):        $7,000-$10,000 (600-900% gain)
+Best Case (35% WR):     $18,000-$30,000 (1,700-2,900% gain)
+
+═══════════════════════════════════════════════════════════════
+  COMPOUNDING EXAMPLE (Conservative Approach)
+═══════════════════════════════════════════════════════════════
+Week 1: $1,000 → $2,200 (2-3 wins, position = $70-$100)
+Week 2: $2,200 → $4,000 (1 moonshot, position = $154-$220)
+Week 3: $4,000 → $6,500 (steady wins, position = $280-$400)
+Week 4: $6,500 → $12,000 (1 big moonshot, position = $455-$650)
+
+Your Tier 1 positions grew: $70 → $650 (9.3x larger!)
+If you hit 30x moonshot on $650: $19,500 gain! 🚀
+
+═══════════════════════════════════════════════════════════════
+  EXAMPLE PORTFOLIO ($1,000 capital) - CONSERVATIVE
+═══════════════════════════════════════════════════════════════
+Cash:    $550 (55%)  ✅ Large safety buffer!
+
+Position 1: $70 Tier 1 (ABC...) - Down 30%, HOLDING (max loss: $49)
+Position 2: $100 Tier 2 (XYZ...) - Up 3x, targeting 5x
+Position 3: $100 Tier 2 (DEF...) - Up 2x, HOLDING
+Position 4: $60 Tier 3 (GHI...) - Up 2x, taking 50% profit
+Position 5: $60 Tier 3 (JKL...) - Flat, monitoring
+
+Total Deployed: $390 (39%)  ✅ Well under 50% limit!
+Max Potential Loss: -$170 (17% if ALL stop out)  ✅ Manageable!
+Diversification: 5 tokens, 3 tiers  ✅ Good spread!
+
+If Tier 1 hits 50x: $70 → $3,500 = $4,110 total capital (311% gain!)
+Even with other positions breaking even!
+
+═══════════════════════════════════════════════════════════════
+  WEEKLY PROGRESS TRACKER
+═══════════════════════════════════════════════════════════════
+
+WEEK 1:
+Starting: $________
+Ending: $________ (______% gain)
+Win Rate: ____ wins / ____ total = ____%
+Best Win: ____x on $____
+Worst Loss: -____% on $____
+Lessons: _________________________________
+
+WEEK 2:
+Starting: $________
+Ending: $________ (______% gain)
+...
+
+═══════════════════════════════════════════════════════════════
+  RECOVERY MODE (After Bad Streak)
+═══════════════════════════════════════════════════════════════
+
+If you lose 15%+ in one day:
+→ STOP trading for the day
+→ Next day: Cut position sizes by 50%
+→ Example: Tier 1 = 4%, Tier 2 = 5%, Tier 3 = 3%
+→ Rebuild slowly until profitable again
+
+If you have 3 losses in a row:
+→ Take 24-hour break
+→ Review what went wrong (rug pulls? bad timing?)
+→ Restart with 50% position sizes
+
+If you lose 25%+ total:
+→ STOP trading for 3-7 days
+→ Review entire strategy
+→ Restart with MINIMUM positions (3-5% each)
+
+═══════════════════════════════════════════════════════════════
+
+📖 Full Strategy: CAPITAL_MANAGEMENT_STRATEGY.md
+🤖 Bot Status: STATUS.md
+🔧 Verification: Run checks in STATUS.md every 30-60 min
+
+═══════════════════════════════════════════════════════════════
+   Protect capital first. Let moonshots run. Compound smart. 🚀
+      Even 3x in 30 days is EXTRAORDINARY - don't get greedy!
+═══════════════════════════════════════════════════════════════

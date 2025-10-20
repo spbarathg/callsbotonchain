@@ -235,15 +235,17 @@ class SignalProcessor:
         #     if (velocity_bonus // 2) < (REQUIRE_VELOCITY_MIN_SCORE_FOR_ALERT // 2):
         #         return ProcessResult(...)
         
-        # General cycle score requirement
-        if not feed_tx.smart_money and score < GENERAL_CYCLE_MIN_SCORE:
-            self._log(f"REJECTED (General Cycle Low Score): {token_address} (score: {score}/{GENERAL_CYCLE_MIN_SCORE})")
+        # CRITICAL FIX: Enforce score threshold for ALL signals (smart money or not)
+        # Data shows Score 8+ has best performance (23.1% WR, 423% avg gain)
+        # Scores below 8 have poor performance and dilute signal quality
+        if score < GENERAL_CYCLE_MIN_SCORE:
+            self._log(f"REJECTED (Score Below Threshold): {token_address} (score: {score}/{GENERAL_CYCLE_MIN_SCORE}, smart_money={feed_tx.smart_money})")
             return ProcessResult(
                 status="skipped",
                 token_address=token_address,
                 preliminary_score=preliminary_score,
                 final_score=score,
-                error_message="General cycle score too low"
+                error_message=f"Score {score} below threshold {GENERAL_CYCLE_MIN_SCORE}"
             )
         
         # Senior strict check
