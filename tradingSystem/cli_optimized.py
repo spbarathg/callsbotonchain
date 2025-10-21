@@ -263,13 +263,15 @@ def _exit_loop(engine: TradeEngine, stop_event: threading.Event) -> None:
                     if not pid:
                         continue
                     
+                    # Throttle price checks to reduce Jupiter calls under 429 pressure
+                    time.sleep(0.1)
                     price = _get_last_price_usd(token)
                     if price > 0:
-                        if iteration % 30 == 0:
+                        if iteration % 300 == 0:
                             print(f"[EXIT_LOOP] Checking exit for {token[:8]}... at price ${price:.8f}", flush=True)
                         engine.check_exits(token, price)
                     else:
-                        if iteration % 30 == 0:
+                        if iteration % 300 == 0:
                             print(f"[EXIT_LOOP] No price data for {token[:8]}...", flush=True)
                 except Exception as e:
                     engine._log("exit_check_error", token=token, error=str(e))
