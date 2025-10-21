@@ -97,6 +97,8 @@ class Broker:
             "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v": 6,
             # USDT
             "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB": 6,
+            # BONK
+            "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263": 5,
         }
         if mint in HARDCODED:
             self._token_meta[mint] = HARDCODED[mint]
