@@ -82,6 +82,12 @@ TRAIL_AGGRESSIVE = _get_float("TS_TRAIL_AGGRESSIVE", 10.0)  # For Score 9-10 (fa
 TRAIL_DEFAULT = _get_float("TS_TRAIL_DEFAULT", 15.0)  # For Score 8 (standard)
 TRAIL_CONSERVATIVE = _get_float("TS_TRAIL_CONSERVATIVE", 20.0)  # For Score 7 moonshots
 
+# ADAPTIVE TRAILING STOPS - NEW! Prevents selling late pumpers too early
+ADAPTIVE_TRAILING_ENABLED = _get_bool("TS_ADAPTIVE_TRAILING_ENABLED", False)
+EARLY_TRAIL_PCT = _get_float("TS_EARLY_TRAIL_PCT", 25.0)  # 0-30 min: Wide trail (let it run)
+MID_TRAIL_PCT = _get_float("TS_MID_TRAIL_PCT", 15.0)      # 30-60 min: Standard trail
+LATE_TRAIL_PCT = _get_float("TS_LATE_TRAIL_PCT", 12.0)    # 60+ min: Tight trail
+
 # ==================== CIRCUIT BREAKERS ====================
 # NEW: Protect against catastrophic losses
 MAX_DAILY_LOSS_PCT = _get_float("TS_MAX_DAILY_LOSS_PCT", 20.0)  # Max 20% daily loss
@@ -162,13 +168,55 @@ def get_position_size(score: int, conviction_type: str) -> float:
     return size
 
 
-def get_trailing_stop(score: int, momentum: float = 0.0) -> float:
+def get_trailing_stop(score: int, momentum: float = 0.0, age_minutes: float = 0.0, pnl_percent: float = 0.0) -> float:
     """
-    Get optimal trailing stop based on signal quality and momentum.
+    Get optimal trailing stop based on signal quality, momentum, age, and PnL.
     
-    Higher scores + momentum = tighter trailing (lock gains faster)
-    Lower scores = wider trailing (give room to develop)
+    ADAPTIVE STRATEGY (when enabled):
+    - Phase 1 (0-30 min): Wide trail (25%) - let winners run
+    - Phase 2 (30-60 min): Standard trail (15%) - detect late pumpers
+    - Phase 3 (60+ min): Tight trail (12%) - lock gains
+    
+    LATE PUMP DETECTION:
+    - If PnL > 50% after 30 minutes = late pumper
+    - Give extra room (20% trail) to capture full pump
+    
+    Args:
+        score: Signal score (7-10)
+        momentum: Current momentum score
+        age_minutes: Position age in minutes
+        pnl_percent: Current PnL percentage
     """
+    if ADAPTIVE_TRAILING_ENABLED and age_minutes > 0:
+        # Phase 1: Early hold (0-30 min) - WIDE trail
+        if age_minutes < 30:
+            if pnl_percent > 100:
+                return 20.0  # Big winner early, give room
+            elif pnl_percent > 50:
+                return EARLY_TRAIL_PCT  # 25% - let it run
+            else:
+                return 30.0  # Very wide for development
+        
+        # Phase 2: Momentum check (30-60 min)
+        elif age_minutes < 60:
+            if pnl_percent > 50 and momentum > 20:
+                # LATE PUMPER DETECTED!
+                return 20.0  # Protect but give room
+            elif pnl_percent > 20:
+                return MID_TRAIL_PCT  # 15% - standard
+            else:
+                return 10.0  # Tight on weak positions
+        
+        # Phase 3: Late stage (60+ min)
+        else:
+            if pnl_percent > 100:
+                return 15.0  # Lock in big gains
+            elif pnl_percent > 50:
+                return LATE_TRAIL_PCT  # 12% - tight
+            else:
+                return 10.0  # Very tight on weak
+    
+    # FALLBACK: Original logic (when adaptive disabled)
     if score >= 9 and momentum > 30.0:
         return TRAIL_AGGRESSIVE  # Lock gains on hot Score 9-10
     elif score >= 8:

@@ -145,6 +145,7 @@ class SignalProcessor:
         # Fetch detailed stats
         self._log(f"FETCHING DETAILED STATS for {token_address[:8]} (prelim: {preliminary_score}/10)")
         stats_raw = get_token_stats(token_address)
+        self._log(f"DEBUG: Stats fetch result: {'SUCCESS' if stats_raw else 'FAILED'}")
         if not stats_raw:
             return ProcessResult(
                 status="skipped",
@@ -155,6 +156,7 @@ class SignalProcessor:
         
         # Parse stats into model
         stats = TokenStats.from_api_response(stats_raw, source=stats_raw.get("_source", "unknown"))
+        self._log(f"DEBUG: Stats parse result: {'SUCCESS' if stats else 'FAILED'}")
         if not stats:
             return ProcessResult(
                 status="skipped",
@@ -189,7 +191,10 @@ class SignalProcessor:
         
         # EARLY GATE: Market cap filter ($50k-$200k sweet spot)
         # DATA-DRIVEN: <$50k = 63.9% rug rate, $50k-$100k = 28.8% 2x+ rate (best!)
-        if not self._check_market_cap_range(stats, token_address):
+        mcap_ok = self._check_market_cap_range(stats, token_address)
+        mcap_val = stats.market_cap_usd if stats.market_cap_usd else 0
+        self._log(f"DEBUG: Market cap check: {'PASS' if mcap_ok else 'FAIL'} (mcap=${mcap_val:.0f})")
+        if not mcap_ok:
             return ProcessResult(
                 status="skipped",
                 token_address=token_address,
@@ -219,6 +224,7 @@ class SignalProcessor:
         
         # Score token
         score, scoring_details = score_token(stats_raw, smart_money_detected=feed_tx.smart_money, token_address=token_address)
+        self._log(f"DEBUG: Token {token_address[:8]} scored {score}/10 (threshold: {GENERAL_CYCLE_MIN_SCORE})")
         
         # Post-score gates
         if REQUIRE_SMART_MONEY_FOR_ALERT and not feed_tx.smart_money:
@@ -742,6 +748,7 @@ class SignalProcessor:
     
     def _push_to_redis(self, token: str, stats: TokenStats, score: int, prelim: int, conviction: str, smart: bool):
         """Push signal to Redis for real-time trader consumption"""
+        print(f"[REDIS] Attempting to push signal for {token[:8]}... score={score}", flush=True)
         try:
             signal_payload = {
                 "ca": token,
@@ -749,6 +756,7 @@ class SignalProcessor:
                 "name": stats.name,
                 "symbol": stats.symbol,
                 "score": score,
+                "final_score": score,  # CRITICAL: Watcher expects final_score
                 "prelim_score": prelim,
                 "conviction_type": conviction,
                 "price": float(stats.price_usd or 0),
@@ -761,8 +769,13 @@ class SignalProcessor:
                 "smart_money_detected": bool(smart),
                 "timestamp": time.time(),
             }
-            push_signal_to_redis(signal_payload)
+            result = push_signal_to_redis(signal_payload)
+            if result:
+                print(f"[REDIS] ✅ Successfully pushed signal for {token[:8]}...", flush=True)
+            else:
+                print(f"[REDIS] ❌ Failed to push signal for {token[:8]}...", flush=True)
         except Exception as e:
+            print(f"[REDIS] ❌ Exception pushing signal: {e}", flush=True)
             self._log(f"⚠️ Redis signal push failed: {e}")
     
     def _log_alert_event(self, token: str, stats: TokenStats, score: int, prelim: int, conviction: str, feed_tx: FeedTransaction):

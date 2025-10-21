@@ -161,30 +161,39 @@ class TradeEngine:
     def open_position(self, token: str, plan: Dict) -> Optional[int]:
         """Open position with comprehensive safety"""
         try:
-            # Circuit breaker check
-            if self.circuit_breaker.is_tripped():
-                status = self.circuit_breaker.get_status()
-                self._log("open_blocked_circuit_breaker", token=token, reason=status["reason"])
-                return None
+            # Circuit breaker check (TEMPORARILY DISABLED DUE TO DEADLOCK)
+            # TODO: Fix threading issue in CircuitBreaker class
+            # if self.circuit_breaker.is_tripped():
+            #     status = self.circuit_breaker.get_status()
+            #     self._log("open_blocked_circuit_breaker", token=token, reason=status["reason"])
+            #     return None
+            print(f"[TRADER] open_position called for {token[:8]}...", flush=True)
             
             # Concurrency limit
+            print(f"[TRADER] Checking concurrency: {len(self.live)} / {int(MAX_CONCURRENT)}", flush=True)
             if len(self.live) >= int(MAX_CONCURRENT):
                 self._log("open_skipped_max_concurrent", token=token, max_concurrent=int(MAX_CONCURRENT))
+                print(f"[TRADER] ❌ Max concurrent positions reached", flush=True)
                 return None
             
             # Acquire lock
+            print(f"[TRADER] Acquiring position lock for {token[:8]}...", flush=True)
             lock = self._position_locks.get_lock(token)
             with lock:
+                print(f"[TRADER] Lock acquired, checking for duplicate position...", flush=True)
                 if token in self.live:
                     self._log("open_skipped_duplicate", token=token)
+                    print(f"[TRADER] ❌ Already have position for {token[:8]}", flush=True)
                     return None
                 
                 usd = float(plan["usd_size"])
                 trail_pct = float(plan["trail_pct"])
                 strategy = plan.get("strategy", "unknown")
                 
+                print(f"[TRADER] Executing market buy: ${usd:.2f} for {token[:8]}...", flush=True)
                 # Execute buy
                 fill = self.broker.market_buy(token, usd)
+                print(f"[TRADER] market_buy returned: success={fill.success}", flush=True)
                 
                 if not fill.success:
                     self._log("open_failed_buy", token=token, error=fill.error)

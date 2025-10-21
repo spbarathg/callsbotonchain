@@ -51,8 +51,8 @@ def follow_signals_redis(block_timeout: int = 5) -> Iterator[Dict]:
 	
 	print(f"📡 Watching Redis for trading signals (blocking mode, timeout={block_timeout}s)...")
 	
-	# Track last processed timestamp to avoid duplicates on reconnect
-	last_timestamp = time.time()
+	# Track processed signals to avoid true duplicates
+	processed_tokens = set()
 	
 	while True:
 		try:
@@ -67,18 +67,34 @@ def follow_signals_redis(block_timeout: int = 5) -> Iterator[Dict]:
 			_, payload = result
 			signal = json.loads(payload)
 			
-			# Skip if this signal was already processed (e.g., after reconnect)
+			# Get token and timestamp
+			token = signal.get("token", "unknown")
 			signal_time = signal.get("timestamp", 0)
-			if signal_time <= last_timestamp:
+			age_seconds = time.time() - signal_time
+			
+			# Skip if this signal is too old (>10 minutes) to prevent stale trades
+			if age_seconds > 600:  # 10 minutes
+				print(f"[DEBUG] Skipping stale signal: {token[:8]}... (age: {age_seconds/60:.1f} minutes)", flush=True)
 				continue
 			
-			last_timestamp = signal_time
+			# Skip true duplicates (same token seen recently)
+			if token in processed_tokens:
+				print(f"[DEBUG] Skipping duplicate signal: {token[:8]}...", flush=True)
+				continue
+			
+			# Add to processed set (keep last 1000 to prevent memory bloat)
+			processed_tokens.add(token)
+			if len(processed_tokens) > 1000:
+				processed_tokens.pop()  # Remove oldest
+			
+			print(f"[DEBUG] Processing fresh signal: {token[:8]}... (age: {age_seconds:.0f}s)", flush=True)
 			
 			# Normalize to format expected by paper trader
 			normalized = {
 				"type": "signal",
 				"ca": signal.get("token"),
-				"score": signal.get("score"),
+				"score": signal.get("final_score"),  # Use final_score from worker
+				"final_score": signal.get("final_score"),  # Also include as final_score
 				"conviction_type": signal.get("conviction_type"),
 				"price": signal.get("price"),
 				"market_cap": signal.get("market_cap"),

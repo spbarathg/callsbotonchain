@@ -18,10 +18,20 @@ HOST_HEADERS: Dict[str, Dict[str, str]] = {
     "dexscreener.com": {
         "referer": "https://dexscreener.com/",
         "origin": "https://dexscreener.com",
+        "accept": "application/json, text/plain, */*",
+        "accept-language": "en-US,en;q=0.9",
+        "sec-fetch-dest": "empty",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-site": "same-site",
     },
     "api.dexscreener.com": {
         "referer": "https://dexscreener.com/",
         "origin": "https://dexscreener.com",
+        "accept": "application/json, text/plain, */*",
+        "accept-language": "en-US,en;q=0.9",
+        "sec-fetch-dest": "empty",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-site": "same-site",
     },
     "cielo.finance": {
         # Cielo API - use clean headers
@@ -32,6 +42,21 @@ HOST_HEADERS: Dict[str, Dict[str, str]] = {
     },
     "feed-api.cielo.finance": {
         "accept": "application/json",
+    },
+    "jup.ag": {
+        "accept": "application/json",
+        "origin": "https://jup.ag",
+        "referer": "https://jup.ag/",
+    },
+    "quote-api.jup.ag": {
+        "accept": "application/json",
+        "origin": "https://jup.ag",
+        "referer": "https://jup.ag/",
+    },
+    "token.jup.ag": {
+        "accept": "application/json",
+        "origin": "https://jup.ag",
+        "referer": "https://jup.ag/",
     },
 }
 
