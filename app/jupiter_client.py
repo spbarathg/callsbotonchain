@@ -20,7 +20,12 @@ class JupiterClient:
     """
     
     def __init__(self):
-        self.base_url = "https://quote-api.jup.ag"
+        self.hostname = "quote-api.jup.ag"
+        self.fallback_ips = ["104.26.11.139", "104.26.10.139", "172.67.133.245"]  # Cloudflare IPs
+        self.base_url = f"https://{self.hostname}"
+        self.using_ip_fallback = False
+        self._current_ip = None
+        
         self.session = requests.Session()
         self._dns_cache = {}
         self._dns_cache_timeout = timedelta(minutes=5)
@@ -34,7 +39,16 @@ class JupiterClient:
         self.session.mount('https://', adapter)
         self.session.mount('http://', adapter)
         
-        logger.info("Jupiter client initialized")
+        # Try DNS resolution - if fails, switch to IP mode
+        try:
+            socket.gethostbyname(self.hostname)
+            logger.info(f"Jupiter client initialized with DNS resolution")
+        except socket.gaierror:
+            logger.warning(f"DNS resolution failed for {self.hostname}, switching to IP fallback mode")
+            self.using_ip_fallback = True
+            self._current_ip = self.fallback_ips[0]
+            self.base_url = f"https://{self._current_ip}"
+            logger.info(f"Using IP fallback: {self._current_ip}")
     
     def _resolve_dns(self, domain: str) -> Optional[str]:
         """
@@ -79,21 +93,30 @@ class JupiterClient:
         """
         url = f"{self.base_url}{path}"
         
+        # If using IP fallback, we need to set the Host header for SSL/TLS
+        headers = {}
+        if self.using_ip_fallback:
+            headers["Host"] = self.hostname
+        
         for attempt in range(retries):
             try:
                 if method == "GET":
+                    headers["Accept"] = "application/json"
                     response = self.session.get(
                         url,
                         params=params,
                         timeout=timeout,
-                        headers={"Accept": "application/json"}
+                        headers=headers,
+                        verify=True  # Keep SSL verification
                     )
                 elif method == "POST":
+                    headers["Content-Type"] = "application/json"
                     response = self.session.post(
                         url,
                         json=json,
                         timeout=timeout,
-                        headers={"Content-Type": "application/json"}
+                        headers=headers,
+                        verify=True  # Keep SSL verification
                     )
                 else:
                     raise ValueError(f"Unsupported method: {method}")
@@ -114,6 +137,13 @@ class JupiterClient:
                     
             except requests.exceptions.RequestException as e:
                 logger.warning(f"Jupiter API attempt {attempt + 1}/{retries} failed: {e}")
+                
+                # Try next IP if using fallback
+                if self.using_ip_fallback and attempt < len(self.fallback_ips) - 1:
+                    self._current_ip = self.fallback_ips[attempt + 1]
+                    self.base_url = f"https://{self._current_ip}"
+                    url = f"{self.base_url}{path}"
+                    logger.info(f"Trying fallback IP: {self._current_ip}")
                 
                 if attempt == retries - 1:
                     return {
