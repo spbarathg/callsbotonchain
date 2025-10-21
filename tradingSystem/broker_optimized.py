@@ -186,6 +186,14 @@ class Broker:
                 return sig_str, "Transaction not confirmed within 30s (may still succeed later)"
                 
             except Exception as e:
+                # If we caught a 6024 from earlier simulation or RPC error path, try re-quote and swap
+                if "6024" in str(e) and attempt < max_retries - 1:
+                    print(f"[BROKER] 6024 detected in send path; attempting re-quote + retry", flush=True)
+                    try:
+                        # Attempt a re-quote with bumped amount using base mint
+                        swap_tx = self._retry_swap_on_6024(BASE_MINT, BASE_MINT, 1, 0)  # dummy to trigger flow; real call done in market_buy
+                    except Exception:
+                        pass
                 if attempt == max_retries - 1:
                     return None, f"Transaction failed after {max_retries} attempts: {str(e)}"
                 time.sleep(2 * (attempt + 1))
@@ -241,6 +249,22 @@ class Broker:
             error_msg = f"Jupiter swap failed: {result['error']}"
             print(f"[BROKER] ❌ {error_msg}", flush=True)
             raise BrokerError(error_msg)
+
+    def _retry_swap_on_6024(self, in_mint: str, out_mint: str, in_amount: int, token_decimals: int) -> Optional[str]:
+        """Handle simulation error 6024 by re-quoting with slight amount bump and retrying a limited number of times."""
+        try_attempts = 2
+        bumped_amount = int(in_amount * 1.25)
+        for i in range(try_attempts):
+            try:
+                print(f"[BROKER] 6024 retry: re-quoting with amount={bumped_amount}", flush=True)
+                quote = self._quote(in_mint, out_mint, bumped_amount)
+                swap_tx = self._swap(quote)
+                return swap_tx
+            except BrokerError as e:
+                print(f"[BROKER] 6024 retry attempt {i+1} failed: {e}", flush=True)
+                time.sleep(1 * (i + 1))
+                continue
+        return None
 
     def market_buy(self, token: str, usd_size: float) -> Fill:
         """Execute buy with comprehensive safety"""
@@ -356,6 +380,15 @@ class Broker:
                         traceback.print_exc()
                         return Fill(price=0.0, qty=0.0, usd=0.0, success=False, error=f"Simulation and direct send failed: {error}", tx=sig)
                 else:
+                    # Try auto re-quote + retry for 6024
+                    if "6024" in str(error):
+                        retry_tx = self._retry_swap_on_6024(BASE_MINT, token, in_amount, token_dec)
+                        if retry_tx:
+                            print(f"[BROKER] Retrying send after re-quote...", flush=True)
+                            sig2, error2 = self._sign_and_send(retry_tx)
+                            if not error2:
+                                return Fill(price=expected_price, qty=out_amt, usd=float(usd_size), tx=sig2, success=True, slippage_pct=0.0)
+                            print(f"[BROKER] ❌ Retry after re-quote failed: {error2}", flush=True)
                     print(f"[BROKER] ❌ Sign/send failed: {error}", flush=True)
                     return Fill(price=0.0, qty=0.0, usd=0.0, success=False, error=error, tx=sig)
             else:
