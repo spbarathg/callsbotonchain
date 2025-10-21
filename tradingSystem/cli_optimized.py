@@ -263,6 +263,14 @@ def _exit_loop(engine: TradeEngine, stop_event: threading.Event) -> None:
                     if not pid:
                         continue
                     
+                    # CRITICAL: Skip positions with quantity=0 (failed fills)
+                    # These are ghost entries that spam Jupiter and trigger rate limits
+                    pos = engine.live.get(token)
+                    if pos and pos.get("qty", 0) == 0:
+                        if iteration % 300 == 0:
+                            print(f"[EXIT_LOOP] Skipping {token[:8]}... (quantity=0, failed fill)", flush=True)
+                        continue
+                    
                     # Throttle price checks to reduce Jupiter calls under 429 pressure
                     time.sleep(0.1)
                     price = _get_last_price_usd(token)
