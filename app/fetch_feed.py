@@ -228,12 +228,18 @@ def fetch_solana_feed(cursor=None, smart_money_only: bool = False) -> Dict[str, 
 
 
 def _fallback_feed_from_dexscreener(limit: int = 30, smart_money_only: bool = False) -> list:
-    """OPTIMIZED: Simplified fallback feed from DexScreener"""
+    """OPTIMIZED: Simplified fallback feed from DexScreener
+    
+    NOTE: DexScreener trending endpoint may be blocked by Cloudflare.
+    This fallback is kept for redundancy but may not work reliably.
+    GeckoTerminal is the preferred fallback.
+    """
     from app.http_client import request_json as _rq
     
-    # Try trending first
+    # Try trending first (may get 403 from Cloudflare)
     r = _rq("GET", "https://api.dexscreener.com/latest/dex/trending", timeout=HTTP_TIMEOUT_FEED)
-    if r.get("status_code") != 200:
+    if r.get("status_code") not in [200, 201]:
+        # Silently fail and let caller try next fallback
         return []
     
     data = r.get("json", {})

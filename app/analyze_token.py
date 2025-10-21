@@ -330,13 +330,21 @@ def get_token_stats(token_address: str, force_refresh: bool = False) -> Dict[str
         b = get_budget()
         if b and not b.can_spend("stats"):
             ds = _get_token_stats_dexscreener(token_address)
-            return _normalize_stats_schema(ds) if ds else {}
+            stats = _normalize_stats_schema(ds) if ds else {}
+            # CRITICAL FIX: Inject token_address so TokenStats.from_api_response() can parse it
+            if stats and not stats.get("token_address"):
+                stats["token_address"] = token_address
+            return stats
     except Exception:
         pass
 
     # Skip Cielo if disabled or denied
     if CIELO_DISABLE_STATS or deny_is_denied() or not CIELO_API_KEY:
-        return _normalize_stats_schema(_get_token_stats_dexscreener(token_address) or {})
+        stats = _normalize_stats_schema(_get_token_stats_dexscreener(token_address) or {})
+        # CRITICAL FIX: Inject token_address so TokenStats.from_api_response() can parse it
+        if stats and not stats.get("token_address"):
+            stats["token_address"] = token_address
+        return stats
 
     # OPTIMIZED: Single URL and header (removed combinatorial explosion)
     url = "https://feed-api.cielo.finance/api/v1/token/stats"
@@ -370,6 +378,10 @@ def get_token_stats(token_address: str, force_refresh: bool = False) -> Dict[str
                         data["name"] = data.get("name") or ds.get("name")
                         data["_source"] = "cielo+ds"
                 
+                # CRITICAL FIX: Inject token_address so TokenStats.from_api_response() can parse it
+                if not data.get("token_address"):
+                    data["token_address"] = token_address
+                
                 _cache_set(token_address, data)
                 return data
             break
@@ -395,7 +407,11 @@ def get_token_stats(token_address: str, force_refresh: bool = False) -> Dict[str
             break
     
     # Fallback to DexScreener
-    return _normalize_stats_schema(_get_token_stats_dexscreener(token_address) or {})
+    stats = _normalize_stats_schema(_get_token_stats_dexscreener(token_address) or {})
+    # CRITICAL FIX: Inject token_address so TokenStats.from_api_response() can parse it
+    if stats and not stats.get("token_address"):
+        stats["token_address"] = token_address
+    return stats
 
 
 def _normalize_stats_schema(d: Dict[str, Any]) -> Dict[str, Any]:
@@ -475,7 +491,8 @@ def calculate_preliminary_score(tx_data: Dict[str, Any], smart_money_detected: b
 
     # USD value indicates serious activity; downweight synthetic fallback items
     # OPTIMIZED: Lowered thresholds for micro-cap focus
-    usd_value = tx_data.get('usd_value', 0) or 0
+    # FIX: Support both usd_value (Cielo) and token1_amount_usd (fallback feeds)
+    usd_value = tx_data.get('usd_value') or tx_data.get('token1_amount_usd', 0) or 0
     is_synthetic = bool(tx_data.get('is_synthetic')) or str(tx_data.get('tx_type') or '').endswith('_fallback')
     
     # MICRO-CAP MODE: Lower thresholds (was 50k/10k/1k, now 10k/2k/200)

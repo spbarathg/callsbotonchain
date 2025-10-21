@@ -33,6 +33,7 @@ class Position:
     signal_score: int
     name: str = ""
     symbol: str = ""
+    is_late_pumper: bool = False  # NEW: Mark positions that pump after 30 min
     
     @property
     def pnl_percent(self) -> float:
@@ -218,13 +219,31 @@ class PortfolioManager:
         """
         Update current prices for positions.
         
+        Also detects late pumpers (positions that pump >50% after 30 minutes).
+        
         Args:
             price_updates: Dict mapping token_address -> current_price
         """
+        import os
+        late_pump_threshold = float(os.getenv("PORTFOLIO_LATE_PUMP_THRESHOLD", "50"))
+        
         with self._lock:
             for token, price in price_updates.items():
                 if token in self._positions:
-                    self._positions[token].current_price = price
+                    position = self._positions[token]
+                    position.current_price = price
+                    
+                    # LATE PUMP DETECTION
+                    age_minutes = (time.time() - position.entry_time) / 60
+                    if age_minutes > 30 and not position.is_late_pumper:
+                        if position.pnl_percent > late_pump_threshold:
+                            # LATE PUMPER DETECTED!
+                            position.is_late_pumper = True
+                            self._log_event("late_pumper_detected", {
+                                "token": token[:8],
+                                "pnl": position.pnl_percent,
+                                "age_minutes": age_minutes,
+                            })
     
     def _remove_position_unsafe(self, token_address: str, reason: str = "manual") -> bool:
         """
@@ -324,6 +343,11 @@ class PortfolioManager:
         """
         Evaluate whether to rebalance portfolio for new signal.
         
+        LATE PUMP PROTECTION:
+        - Never rebalance positions marked as late pumpers
+        - Never rebalance positions with PnL > 100%
+        - Prioritize rebalancing weak/losing positions
+        
         Args:
             new_signal: Dict with token info and scores
         
@@ -348,6 +372,19 @@ class PortfolioManager:
                 self._rejected_signals_count += 1
                 return (False, None, "no_eligible_positions")
             
+            # PROTECTION: Never rebalance late pumpers
+            import os
+            protect_late_pumpers = os.getenv("PORTFOLIO_PROTECT_LATE_PUMPERS", "false").lower() == "true"
+            if protect_late_pumpers and weakest.is_late_pumper:
+                self._rejected_signals_count += 1
+                return (False, None, "weakest_is_late_pumper")
+            
+            # PROTECTION: Never rebalance big winners
+            never_rebalance_above = float(os.getenv("PORTFOLIO_NEVER_REBALANCE_ABOVE", "100"))
+            if weakest.pnl_percent > never_rebalance_above:
+                self._rejected_signals_count += 1
+                return (False, None, f"weakest_pnl_too_high_{weakest.pnl_percent:.1f}%")
+            
             # Calculate new signal's momentum score
             # For new signals, we only have the signal score (no price action yet)
             new_signal_score = new_signal.get("score", 0)
@@ -358,14 +395,24 @@ class PortfolioManager:
             if "High" in conviction or "Smart Money" in conviction:
                 new_momentum += 10
             
-            # Compare
+            # Compare with dynamic threshold based on weakest position state
+            weak_pnl = weakest.pnl_percent
+            if weak_pnl < -10:
+                threshold = 10  # Easy to replace losers
+            elif weak_pnl < 10:
+                threshold = self.min_momentum_advantage  # Standard threshold
+            elif weak_pnl < 50:
+                threshold = self.min_momentum_advantage + 15  # Harder to replace small winners
+            else:
+                threshold = self.min_momentum_advantage + 30  # Very hard to replace good winners
+            
             momentum_advantage = new_momentum - weakest.momentum_score
             
-            if momentum_advantage >= self.min_momentum_advantage:
+            if momentum_advantage >= threshold:
                 return (True, weakest.token_address, f"advantage_{momentum_advantage:.1f}")
             else:
                 self._rejected_signals_count += 1
-                return (False, None, f"insufficient_advantage_{momentum_advantage:.1f}")
+                return (False, None, f"insufficient_advantage_{momentum_advantage:.1f}_need_{threshold}")
     
     def execute_rebalance(
         self,

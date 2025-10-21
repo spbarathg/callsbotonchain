@@ -113,26 +113,47 @@ class Broker:
                 tx = VersionedTransaction.from_bytes(raw)
                 tx = VersionedTransaction(tx.message, [self._kp])
                 
-                sig: Signature = self._rpc.send_raw_transaction(
+                # First try simulation to catch errors early
+                try:
+                    sim_result = self._rpc.simulate_transaction(tx)
+                    if hasattr(sim_result, 'value') and hasattr(sim_result.value, 'err') and sim_result.value.err:
+                        error_detail = str(sim_result.value.err)
+                        print(f"[BROKER] ⚠️ Simulation error: {error_detail}", flush=True)
+                        # Try to extract more details
+                        if hasattr(sim_result.value, 'logs') and sim_result.value.logs:
+                            print(f"[BROKER] Transaction logs:", flush=True)
+                            for log in sim_result.value.logs[-10:]:  # Last 10 logs
+                                print(f"[BROKER]   {log}", flush=True)
+                        return None, f"Simulation failed: {error_detail}"
+                except Exception as sim_error:
+                    print(f"[BROKER] ⚠️ Simulation check failed: {sim_error}", flush=True)
+                
+                # Send transaction
+                sig_resp = self._rpc.send_raw_transaction(
                     bytes(tx),
-                    opts=TxOpts(skip_preflight=True, max_retries=2)
+                    opts=TxOpts(skip_preflight=False, max_retries=2)  # Changed to False to get better errors
                 )
+                # Extract signature from response
+                sig = sig_resp.value if hasattr(sig_resp, 'value') else sig_resp
                 sig_str = str(sig)
+                print(f"[BROKER] Transaction submitted: {sig_str}", flush=True)
                 
                 # Wait for confirmation (30s) with failure detection
                 confirmed = False
-                for attempt in range(15):
+                for conf_attempt in range(15):
                     try:
                         result = self._rpc.get_signature_statuses([sig])
                         if result and result.value and result.value[0]:
                             tx_status = result.value[0]
                             # solders RpcResponse has .err attr; handle failure explicitly
                             if hasattr(tx_status, 'err') and tx_status.err is not None:
-                                return sig_str, f"Transaction failed: {tx_status.err}"
+                                error_msg = f"Transaction failed: {tx_status.err}"
+                                print(f"[BROKER] ❌ {error_msg}", flush=True)
+                                return sig_str, error_msg
                             confirmed = True
                             break
                     except Exception as e:
-                        if attempt == 14:
+                        if conf_attempt == 14:
                             return sig_str, f"RPC error: {str(e)}"
                     time.sleep(2)
 
@@ -179,8 +200,9 @@ class Broker:
                     "quoteResponse": quote,
                     "userPublicKey": self._pubkey,
                     "wrapAndUnwrapSol": True,
-                    "computeUnitPriceMicroLamports": int(PRIORITY_FEE_MICROLAMPORTS or 0),
+                    "computeUnitPriceMicroLamports": int(PRIORITY_FEE_MICROLAMPORTS or 50000),  # Higher priority for fast memecoins
                     "dynamicComputeUnitLimit": True,
+                    "asLegacyTransaction": False,  # Use versioned transactions
                 }
                 r = request_json("POST", "https://quote-api.jup.ag/v6/swap", json=payload, timeout=15.0)
                 if r.get("status_code") != 200:
@@ -200,47 +222,96 @@ class Broker:
     def market_buy(self, token: str, usd_size: float) -> Fill:
         """Execute buy with comprehensive safety"""
         try:
+            print(f"[BROKER] market_buy called: ${usd_size:.2f} for {token[:8]}...", flush=True)
             # Validation
             if usd_size <= 0:
+                print(f"[BROKER] ❌ Invalid USD size: {usd_size}", flush=True)
                 return Fill(price=0.0, qty=0.0, usd=0.0, success=False, error="Invalid USD size")
             
             if not token or not self._is_valid_solana_address(token):
+                print(f"[BROKER] ❌ Invalid token address: {token[:8] if token else 'None'}", flush=True)
                 return Fill(price=0.0, qty=0.0, usd=0.0, success=False, error="Invalid token address")
             
+            print(f"[BROKER] Getting decimals for BASE_MINT and token...", flush=True)
             base_dec = self._get_decimals(BASE_MINT)
             token_dec = self._get_decimals(token)
-            in_amount = int(round(float(usd_size) * (10 ** base_dec)))
+            
+            # Convert USD to SOL amount if using SOL as base
+            if BASE_MINT == "So11111111111111111111111111111111111111112":
+                # Get SOL price (approximate - for exact, would need price oracle)
+                # For now, use Jupiter quote-api to get rough SOL price
+                sol_price_usd = 180.0  # Fallback price
+                try:
+                    # Get SOL/USDC quote to determine SOL price
+                    from app.http_client import request_json
+                    usdc_mint = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+                    test_amount = 1000000000  # 1 SOL in lamports
+                    price_quote = request_json("GET", "https://quote-api.jup.ag/v6/quote", 
+                                              params={"inputMint": BASE_MINT, "outputMint": usdc_mint, "amount": str(test_amount), "slippageBps": "50"},
+                                              timeout=5.0)
+                    if price_quote.get("status_code") == 200 and price_quote.get("json"):
+                        out_amount = float(price_quote["json"].get("outAmount", 0)) / 1e6  # USDC has 6 decimals
+                        if out_amount > 0:
+                            sol_price_usd = out_amount
+                            print(f"[BROKER] SOL price from Jupiter: ${sol_price_usd:.2f}", flush=True)
+                except Exception as e:
+                    print(f"[BROKER] Could not fetch SOL price, using fallback ${sol_price_usd}", flush=True)
+                
+                # Convert USD to SOL
+                sol_amount = float(usd_size) / sol_price_usd
+                in_amount = int(round(sol_amount * (10 ** base_dec)))
+                print(f"[BROKER] USD ${usd_size:.2f} = {sol_amount:.6f} SOL @ ${sol_price_usd:.2f}/SOL", flush=True)
+            else:
+                # For stablecoins (USDC), usd_size is already the amount
+                in_amount = int(round(float(usd_size) * (10 ** base_dec)))
+            
+            print(f"[BROKER] Decimals: base={base_dec}, token={token_dec}, in_amount={in_amount}", flush=True)
             
             # Get quote
+            print(f"[BROKER] Fetching Jupiter quote...", flush=True)
             quote = self._quote(BASE_MINT, token, in_amount)
             if not quote:
+                print(f"[BROKER] ❌ Failed to get quote", flush=True)
                 return Fill(price=0.0, qty=0.0, usd=0.0, success=False, error="Failed to get quote")
+            print(f"[BROKER] ✅ Quote received", flush=True)
             
             # Calculate expected fill
             out_amt = float(quote.get("outAmount") or 0) / (10 ** token_dec)
+            print(f"[BROKER] Expected output: {out_amt:.4f} tokens", flush=True)
             if out_amt <= 0:
+                print(f"[BROKER] ❌ Zero output amount", flush=True)
                 return Fill(price=0.0, qty=0.0, usd=0.0, success=False, error="Invalid quote: zero output amount")
             expected_price = usd_size / out_amt
             
             # Check price impact
             price_impact = abs(float(quote.get("priceImpactPct") or 0))
+            print(f"[BROKER] Price impact: {price_impact:.2f}%", flush=True)
             if price_impact > MAX_PRICE_IMPACT_PCT:
+                print(f"[BROKER] ❌ Price impact too high: {price_impact:.1f}%", flush=True)
                 return Fill(price=0.0, qty=0.0, usd=0.0, success=False, 
                            error=f"Price impact too high: {price_impact:.1f}%")
             
             # Dry run
+            print(f"[BROKER] DRY_RUN={self._dry}", flush=True)
             if self._dry:
+                print(f"[BROKER] 🎭 Dry run mode, simulating successful buy", flush=True)
                 return Fill(price=expected_price, qty=out_amt, usd=float(usd_size), 
                            success=True, slippage_pct=0.0)
             
             # Execute
+            print(f"[BROKER] Fetching swap transaction...", flush=True)
             swap_tx = self._swap(quote)
             if not swap_tx:
+                print(f"[BROKER] ❌ Failed to get swap transaction", flush=True)
                 return Fill(price=0.0, qty=0.0, usd=0.0, success=False, error="Failed to get swap transaction")
+            print(f"[BROKER] ✅ Swap transaction received", flush=True)
             
+            print(f"[BROKER] Signing and sending transaction...", flush=True)
             sig, error = self._sign_and_send(swap_tx)
             if error:
+                print(f"[BROKER] ❌ Sign/send failed: {error}", flush=True)
                 return Fill(price=0.0, qty=0.0, usd=0.0, success=False, error=error, tx=sig)
+            print(f"[BROKER] ✅ Transaction sent: {sig[:8]}...", flush=True)
             
             return Fill(price=expected_price, qty=out_amt, usd=float(usd_size), 
                        tx=sig, success=True, slippage_pct=0.0)
@@ -248,6 +319,9 @@ class Broker:
         except Exception as e:
             self._error_count += 1
             self._last_error_time = time.time()
+            print(f"[BROKER] ❌ EXCEPTION in market_buy: {type(e).__name__}: {str(e)}", flush=True)
+            import traceback
+            traceback.print_exc()
             return Fill(price=0.0, qty=0.0, usd=0.0, success=False, error=f"Buy failed: {str(e)}")
 
     def market_sell(self, token: str, qty: float) -> Fill:
