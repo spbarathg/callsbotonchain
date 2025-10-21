@@ -8,6 +8,10 @@ from typing import Dict, Optional, Any
 from datetime import datetime, timedelta
 import logging
 
+# Apply DNS patch for Jupiter API before any requests are made
+from app.dns_patch import apply_dns_patch
+apply_dns_patch()
+
 logger = logging.getLogger(__name__)
 
 class JupiterClient:
