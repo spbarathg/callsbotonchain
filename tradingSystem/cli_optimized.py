@@ -13,6 +13,7 @@ import time
 from typing import Optional, Dict
 
 import requests
+import base58 as b58
 
 from .watcher import follow_decisions, follow_signals_redis
 from .strategy_optimized import decide_trade, get_expected_win_rate, get_expected_avg_gain
@@ -30,17 +31,22 @@ def _get_last_price_usd(token: str) -> float:
     1) Internal tracked API via proxy (Docker network)
     2) DexScreener token endpoint
     """
+    print(f"[DEBUG] _get_last_price_usd: Starting for {token[:8]}...", flush=True)
     # 1) Tracked API via proxy
     try:
         api_url = os.getenv("API_URL", "http://callsbot-proxy/api/tracked")
+        print(f"[DEBUG] _get_last_price_usd: Calling proxy API: {api_url}", flush=True)
         resp = requests.get(f"{api_url}?limit=200", timeout=4)
+        print(f"[DEBUG] _get_last_price_usd: Proxy response status: {resp.status_code}", flush=True)
         resp.raise_for_status()
         rows = (resp.json() or {}).get("rows") or []
+        print(f"[DEBUG] _get_last_price_usd: Got {len(rows)} rows from proxy", flush=True)
         for r in rows:
             if r.get("token") == token:
                 lp = r.get("last_price") or r.get("peak_price") or r.get("first_price")
                 price = float(lp or 0.0)
                 if price > 0:
+                    print(f"[DEBUG] _get_last_price_usd: Found price via proxy: {price}", flush=True)
                     return price
                 break
     except Exception as e:
@@ -48,7 +54,9 @@ def _get_last_price_usd(token: str) -> float:
 
     # 2) DexScreener fallback
     try:
+        print(f"[DEBUG] _get_last_price_usd: Trying DexScreener fallback...", flush=True)
         ds = requests.get(f"https://api.dexscreener.com/latest/dex/tokens/{token}", timeout=4)
+        print(f"[DEBUG] _get_last_price_usd: DexScreener response status: {ds.status_code}", flush=True)
         if ds.status_code == 200:
             data = ds.json() or {}
             pairs = data.get("pairs") or []
@@ -61,6 +69,35 @@ def _get_last_price_usd(token: str) -> float:
         print(f"[DEBUG] Price via DexScreener failed for {token[:8]}...: {e}", flush=True)
 
     return 0.0
+
+
+def _is_valid_solana_address(address: str) -> bool:
+    """Validate Solana mint address (base58-decoded length 32)."""
+    try:
+        if not address:
+            return False
+        decoded = b58.b58decode(address)
+        return len(decoded) == 32
+    except Exception:
+        return False
+
+
+def _normalize_token_address(token: Optional[str]) -> Optional[str]:
+    """Normalize pump.fun-style token strings to a valid mint address.
+
+    Many upstream signals append a vanity suffix like 'pump' or 'bonk'.
+    This strips known suffixes if present and returns the valid mint.
+    """
+    if not token:
+        return token
+    t = token.strip()
+    for suffix in ("pump", "bonk"):
+        if t.endswith(suffix):
+            candidate = t[: -len(suffix)]
+            if _is_valid_solana_address(candidate):
+                return candidate
+    # If already valid or cannot be normalized, return original
+    return t
 
 
 def _fetch_real_stats(token: str) -> Optional[Dict]:
@@ -253,10 +290,34 @@ def run() -> None:
 
     engine = TradeEngine()
     mode = "dry_run" if engine.broker._dry else "LIVE"
+    
+    # Verify Jupiter API connectivity before starting trading
+    print("="*60)
+    print("🔍 JUPITER API HEALTH CHECK")
+    print("="*60)
+    from app.jupiter_client import get_jupiter_client
+    jup = get_jupiter_client()
+    
+    if not jup.health_check():
+        print("❌ Jupiter API is NOT reachable - Trading PAUSED")
+        print("   Please check network connectivity and DNS resolution")
+        print("   Waiting 60 seconds before retrying...")
+        time.sleep(60)
+        
+        # Retry once
+        if not jup.health_check():
+            print("❌ Jupiter API still unreachable after retry - EXITING")
+            print("   Please fix network issues before restarting")
+            return
+    
+    print("✅ Jupiter API is reachable - Trading system ready")
+    print("="*60)
+    
     engine._log("trading_system_start", mode=mode, 
                 circuit_breaker_enabled=True,
                 max_daily_loss_pct=engine.circuit_breaker.max_daily_loss_pct,
-                max_consecutive_losses=engine.circuit_breaker.max_consecutive_losses)
+                max_consecutive_losses=engine.circuit_breaker.max_consecutive_losses,
+                jupiter_api_healthy=True)
     
     # Start exit loop
     stop_event = threading.Event()
@@ -293,7 +354,11 @@ def run() -> None:
                 # DEBUG: Log every signal received
                 token = ev.get("ca")
                 score = ev.get("score")
-                print(f"[DEBUG] Signal received: token={token[:8] if token else 'None'}..., score={score}, type={ev.get('type')}", flush=True)
+                token_norm = _normalize_token_address(token)
+                print(
+                    f"[DEBUG] Signal received: token_raw={token[:8] if token else 'None'}..., token_norm={token_norm[:8] if token_norm else 'None'}..., score={score}, type={ev.get('type')}",
+                    flush=True,
+                )
                 engine._log("signal_received", token=token, score=score, event_type=ev.get("type"))
                 
                 # Log health every 10 minutes
@@ -333,14 +398,19 @@ def run() -> None:
                 event_type = ev.get("type")
                 print(f"[DEBUG] Event type: {event_type}", flush=True)
                 
-                if not token:
+                # Validate token
+                if not token_norm:
                     print("[DEBUG] No token in event, skipping...", flush=True)
+                    continue
+                if not _is_valid_solana_address(token_norm):
+                    print(f"[DEBUG] Invalid token address after normalization: {token_norm}", flush=True)
+                    engine._log("token_invalid", token=token_norm)
                     continue
                 
                 # Skip if already have position
-                print(f"[DEBUG] Checking if already have position for {token[:8]}...", flush=True)
-                if engine.has_position(token):
-                    print(f"[DEBUG] Already have position for {token[:8]}, skipping...", flush=True)
+                print(f"[DEBUG] Checking if already have position for {token_norm[:8]}...", flush=True)
+                if engine.has_position(token_norm):
+                    print(f"[DEBUG] Already have position for {token_norm[:8]}, skipping...", flush=True)
                     continue
                 print(f"[DEBUG] No existing position, continuing to trade logic...", flush=True)
                 
@@ -435,16 +505,10 @@ def run() -> None:
                 
                 print(f"[DEBUG] Starting trade execution for {token[:8]}...", flush=True)
                 
-                # FILTER: Only pump.fun tokens (bot generates these)
-                print(f"[DEBUG] Checking if token ends with 'pump': {token.endswith('pump')}", flush=True)
-                if not token.endswith("pump"):
-                    signals_filtered += 1
-                    engine._log("token_filtered", token=token, reason="not_pump_token")
-                    print(f"[DEBUG] Token {token[:8]} filtered: not a pump token", flush=True)
-                    continue
+                # Token is now validated as a Solana mint; proceed
                 
                 # Use stats from Redis signal (already contains everything we need!)
-                print(f"[DEBUG] Extracting stats from Redis signal for {token[:8]}...", flush=True)
+                print(f"[DEBUG] Extracting stats from Redis signal for {token_norm[:8]}...", flush=True)
                 stats = {
                     "market_cap_usd": float(ev.get("market_cap") or 0),
                     "liquidity_usd": float(ev.get("liquidity") or 0),
@@ -461,14 +525,14 @@ def run() -> None:
                 
                 # Validate we have minimum required data
                 if not stats.get("market_cap_usd") or stats.get("market_cap_usd") <= 0:
-                    print(f"[DEBUG] Invalid market cap for {token[:8]}, trying fallback fetch...", flush=True)
-                    stats_fallback = _fetch_real_stats(token)
+                    print(f"[DEBUG] Invalid market cap for {token_norm[:8]}, trying fallback fetch...", flush=True)
+                    stats_fallback = _fetch_real_stats(token_norm)
                     if stats_fallback:
                         stats.update(stats_fallback)
                     else:
                         signals_filtered += 1
-                        engine._log("stats_invalid", token=token, event_type=event_type)
-                        print(f"[DEBUG] Failed to get valid stats for {token[:8]}", flush=True)
+                        engine._log("stats_invalid", token=token_norm, event_type=event_type)
+                        print(f"[DEBUG] Failed to get valid stats for {token_norm[:8]}", flush=True)
                         continue
                 print(f"[DEBUG] Stats extracted successfully: MCap=${stats['market_cap_usd']:.0f}, Liq=${stats.get('liquidity_usd', 0):.0f}", flush=True)
                 
@@ -476,33 +540,72 @@ def run() -> None:
                 print(f"[DEBUG] Checking if signal is stale...", flush=True)
                 if _is_stale_signal(stats):
                     signals_filtered += 1
-                    engine._log("signal_stale", token=token, 
+                    engine._log("signal_stale", token=token_norm, 
                                alert_price=stats.get("price"),
-                               current_price=_get_last_price_usd(token))
-                    print(f"[DEBUG] Signal is stale for {token[:8]}", flush=True)
+                               current_price=_get_last_price_usd(token_norm))
+                    print(f"[DEBUG] Signal is stale for {token_norm[:8]}", flush=True)
                     continue
                 print(f"[DEBUG] Signal is fresh, continuing...", flush=True)
                 
                 # Get signal score and conviction
+                print(f"[DEBUG] Extracting signal_score and conviction_type from stats...", flush=True)
                 signal_score = int(stats.get("final_score", 7))
                 conviction_type = stats.get("conviction_type", "High Confidence (Strict)")
+                print(f"[DEBUG] signal_score={signal_score}, conviction_type={conviction_type}", flush=True)
+                
+                # Enforce minimum score of 8 (user requirement)
+                MIN_SCORE = 8
+                if signal_score < MIN_SCORE:
+                    print(f"[DEBUG] ❌ Signal score {signal_score} below minimum {MIN_SCORE} - SKIPPING", flush=True)
+                    signals_filtered += 1
+                    engine._log("entry_rejected_low_score", token=token_norm, 
+                               score=signal_score, min_score=MIN_SCORE)
+                    continue
                 
                 # Calculate expected performance
-                exp_wr = get_expected_win_rate(signal_score, conviction_type)
-                exp_gain = get_expected_avg_gain(signal_score, conviction_type)
+                print(f"[DEBUG] Calling get_expected_win_rate({signal_score}, {conviction_type})...", flush=True)
+                try:
+                    exp_wr = get_expected_win_rate(signal_score, conviction_type)
+                    print(f"[DEBUG] exp_wr={exp_wr}", flush=True)
+                except Exception as e:
+                    print(f"[DEBUG] ❌ EXCEPTION in get_expected_win_rate: {e}", flush=True)
+                    raise
+                
+                print(f"[DEBUG] Calling get_expected_avg_gain({signal_score}, {conviction_type})...", flush=True)
+                try:
+                    exp_gain = get_expected_avg_gain(signal_score, conviction_type)
+                    print(f"[DEBUG] exp_gain={exp_gain}", flush=True)
+                except Exception as e:
+                    print(f"[DEBUG] ❌ EXCEPTION in get_expected_avg_gain: {e}", flush=True)
+                    raise
                 
                 # Make trade decision
-                plan = decide_trade(stats, signal_score, conviction_type)
+                print(f"[DEBUG] Calling decide_trade(stats, {signal_score}, {conviction_type})...", flush=True)
+                try:
+                    plan = decide_trade(stats, signal_score, conviction_type)
+                    print(f"[DEBUG] decide_trade returned: {plan}", flush=True)
+                except Exception as e:
+                    print(f"[DEBUG] ❌ EXCEPTION in decide_trade: {e}", flush=True)
+                    raise
                 
                 if not plan:
                     signals_filtered += 1
                     engine._log("strategy_rejected", token=token, score=signal_score, 
                                conviction=conviction_type, reason="failed_filters")
+                    print(f"[DEBUG] Plan is None, signal rejected", flush=True)
                     continue
                 
                 # Final validation: double-check price hasn't moved too much
-                current_price = _get_last_price_usd(token)
+                print(f"[DEBUG] Calling _get_last_price_usd({token_norm[:8]})...", flush=True)
+                try:
+                    current_price = _get_last_price_usd(token_norm)
+                    print(f"[DEBUG] current_price={current_price}", flush=True)
+                except Exception as e:
+                    print(f"[DEBUG] ❌ EXCEPTION in _get_last_price_usd: {e}", flush=True)
+                    raise
+                
                 alert_price = float(stats.get("price", 0))
+                print(f"[DEBUG] alert_price={alert_price}", flush=True)
                 
                 if current_price > 0 and alert_price > 0:
                     price_change_pct = ((current_price - alert_price) / alert_price) * 100
@@ -520,34 +623,37 @@ def run() -> None:
                         continue
                 
                 # Execute trade
-                print(f"[DEBUG] Logging trade decision for {token[:8]}...", flush=True)
-                engine._log("trade_decision", token=token, score=signal_score,
+                print(f"[DEBUG] Logging trade decision for {token_norm[:8]}...", flush=True)
+                engine._log("trade_decision", token=token_norm, score=signal_score,
                            conviction=conviction_type, usd_size=plan["usd_size"],
                            trail_pct=plan["trail_pct"], expected_wr=exp_wr,
                            expected_gain=exp_gain)
-                print(f"[DEBUG] Trade decision logged, attempting to open position for {token[:8]}...", flush=True)
+                print(f"[DEBUG] Trade decision logged, attempting to open position for {token_norm[:8]}...", flush=True)
                 print(f"[DEBUG] Plan details: {plan}", flush=True)
                 
                 try:
-                    print(f"[DEBUG] Calling engine.open_position({token[:8]}, plan)...", flush=True)
-                    pid = engine.open_position(token, plan)
+                    print(f"[DEBUG] Calling engine.open_position({token_norm[:8]}, plan)...", flush=True)
+                    pid = engine.open_position(token_norm, plan)
                     print(f"[DEBUG] engine.open_position returned: {pid}", flush=True)
                     
                     if pid:
                         positions_opened += 1
-                        engine._log("position_opened_success", token=token, pid=pid,
+                        engine._log("position_opened_success", token=token_norm, pid=pid,
                                    total_positions=positions_opened)
                         print(f"[DEBUG] ✅ Position opened successfully: {pid}", flush=True)
                     else:
-                        engine._log("position_open_failed", token=token)
+                        engine._log("position_open_failed", token=token_norm)
                         print(f"[DEBUG] ❌ Position open failed (returned None)", flush=True)
                 except Exception as e:
-                    engine._log("position_open_exception", token=token, error=str(e))
+                    engine._log("position_open_exception", token=token_norm, error=str(e))
                     print(f"[DEBUG] ❌ Exception in engine.open_position: {e}", flush=True)
                     import traceback
                     traceback.print_exc()
                 
             except Exception as e:
+                print(f"[DEBUG] ❌ EXCEPTION in signal processing loop: {e}", flush=True)
+                import traceback
+                print(f"[DEBUG] Traceback: {traceback.format_exc()}", flush=True)
                 engine._log("signal_processing_error", error=str(e), token=token)
                 continue
     

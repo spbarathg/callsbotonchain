@@ -34,7 +34,7 @@ def _get_bool(name: str, default: bool) -> bool:
 # ==================== WALLET & EXECUTION ====================
 RPC_URL = os.getenv("TS_RPC_URL", "https://api.mainnet-beta.solana.com")
 WALLET_SECRET = os.getenv("TS_WALLET_SECRET", "")
-SLIPPAGE_BPS = _get_int("TS_SLIPPAGE_BPS", 500)  # 5.0% - REQUIRED for volatile memecoins (was 150/1.5%)
+SLIPPAGE_BPS = _get_int("TS_SLIPPAGE_BPS", 2000)  # 20.0% - User requested for maximum execution reliability
 PRIORITY_FEE_MICROLAMPORTS = _get_int("TS_PRIORITY_FEE_MICROLAMPORTS", 100000)  # 100k for SPEED (was 10k)
 MAX_SLIPPAGE_PCT = _get_float("TS_MAX_SLIPPAGE_PCT", 5.0)  # NEW: Max acceptable slippage
 MAX_PRICE_IMPACT_PCT = _get_float("TS_MAX_PRICE_IMPACT_PCT", 10.0)  # NEW: Max price impact

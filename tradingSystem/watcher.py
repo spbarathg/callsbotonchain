@@ -69,7 +69,17 @@ def follow_signals_redis(block_timeout: int = 5) -> Iterator[Dict]:
 			
 			# Get token and timestamp
 			token = signal.get("token", "unknown")
-			signal_time = signal.get("timestamp", 0)
+			# Try both 'timestamp' and 'ts' fields, parse ISO format if needed
+			signal_time = signal.get("timestamp") or signal.get("ts")
+			if signal_time and isinstance(signal_time, str):
+				try:
+					from datetime import datetime
+					dt = datetime.fromisoformat(signal_time.replace('Z', '+00:00'))
+					signal_time = dt.timestamp()
+				except:
+					signal_time = time.time()  # Assume fresh if parse fails
+			elif not signal_time:
+				signal_time = time.time()  # Assume fresh if no timestamp
 			age_seconds = time.time() - signal_time
 			
 			# Skip if this signal is too old (>10 minutes) to prevent stale trades
