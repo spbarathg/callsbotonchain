@@ -30,6 +30,8 @@ from .config_optimized import (
     PRIORITY_FEE_MICROLAMPORTS,
     BASE_MINT,
     MAX_PRICE_IMPACT_PCT,
+    # New: faster execution toggle
+    _get_bool as _cfg_get_bool,
 )
 
 
@@ -60,6 +62,11 @@ class Broker:
         self._token_meta: Dict[str, int] = {}
         self._error_count = 0
         self._last_error_time = 0.0
+        # Fast execution mode via env TS_FAST_EXECUTION=true (default true)
+        try:
+            self._fast_exec = os.getenv("TS_FAST_EXECUTION", "true").strip().lower() in ("1","true","yes","on")
+        except Exception:
+            self._fast_exec = True
 
     def _load_keypair(self, secret: str) -> Keypair:
         sec = secret.strip()
@@ -116,7 +123,8 @@ class Broker:
                 
                 # First try simulation to catch errors early
                 try:
-                    sim_result = self._rpc.simulate_transaction(tx)
+                    if not self._fast_exec:
+                        sim_result = self._rpc.simulate_transaction(tx)
                     if hasattr(sim_result, 'value') and hasattr(sim_result.value, 'err') and sim_result.value.err:
                         error_detail = str(sim_result.value.err)
                         print(f"[BROKER] ⚠️ Simulation error: {error_detail}", flush=True)
@@ -132,7 +140,7 @@ class Broker:
                 # Send transaction
                 sig_resp = self._rpc.send_raw_transaction(
                     bytes(tx),
-                    opts=TxOpts(skip_preflight=False, max_retries=2)  # Changed to False to get better errors
+                    opts=TxOpts(skip_preflight=self._fast_exec, max_retries=2)
                 )
                 # Extract signature from response
                 sig = sig_resp.value if hasattr(sig_resp, 'value') else sig_resp
@@ -141,7 +149,7 @@ class Broker:
                 
                 # Wait for confirmation (30s) with failure detection
                 confirmed = False
-                for conf_attempt in range(15):
+                for conf_attempt in range(10 if self._fast_exec else 15):
                     try:
                         result = self._rpc.get_signature_statuses([sig])
                         if result and result.value and result.value[0]:
@@ -156,7 +164,7 @@ class Broker:
                     except Exception as e:
                         if conf_attempt == 14:
                             return sig_str, f"RPC error: {str(e)}"
-                    time.sleep(2)
+                    time.sleep(1 if self._fast_exec else 2)
 
                 if confirmed:
                     return sig_str, None
@@ -204,7 +212,7 @@ class Broker:
             quote=quote,
             user_public_key=self._pubkey,
             wrap_unwrap_sol=True,
-            priority_fee=int(PRIORITY_FEE_MICROLAMPORTS or 100000),
+            priority_fee=int(max(PRIORITY_FEE_MICROLAMPORTS, 200000) if self._fast_exec else int(PRIORITY_FEE_MICROLAMPORTS or 100000)),
             timeout=15.0
         )
         
@@ -243,14 +251,17 @@ class Broker:
                 sol_price_usd = 180.0  # Fallback price
                 try:
                     # Get SOL/USDC quote to determine SOL price
-                    from app.http_client import request_json
-                    usdc_mint = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
-                    test_amount = 1000000000  # 1 SOL in lamports
-                    price_quote = request_json("GET", "https://quote-api.jup.ag/v6/quote", 
-                                              params={"inputMint": BASE_MINT, "outputMint": usdc_mint, "amount": str(test_amount), "slippageBps": "50"},
-                                              timeout=5.0, use_circuit_breaker=False)
-                    if price_quote.get("status_code") == 200 and price_quote.get("json"):
-                        out_amount = float(price_quote["json"].get("outAmount", 0)) / 1e6  # USDC has 6 decimals
+                    from app.jupiter_client import get_jupiter_client
+                    jup = get_jupiter_client()
+                    q = jup.get_quote(
+                        input_mint=BASE_MINT,
+                        output_mint="EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+                        amount=1000000000,
+                        slippage_bps=50,
+                        timeout=5.0
+                    )
+                    if q.get("status_code") == 200 and q.get("json"):
+                        out_amount = float(q["json"].get("outAmount", 0)) / 1e6  # USDC has 6 decimals
                         if out_amount > 0:
                             sol_price_usd = out_amount
                             print(f"[BROKER] SOL price from Jupiter: ${sol_price_usd:.2f}", flush=True)
