@@ -5,6 +5,10 @@ OPTIMIZED CLI - Intelligent Orchestration
 - Real-time monitoring
 - Graceful error handling
 """
+# Apply DNS patch FIRST before any other imports that might use network
+from app.dns_patch import apply_dns_patch
+apply_dns_patch()
+
 import argparse
 import json
 import os
