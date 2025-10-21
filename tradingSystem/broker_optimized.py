@@ -89,6 +89,19 @@ class Broker:
 
     def _get_decimals(self, mint: str) -> int:
         """Get token decimals with retry"""
+        # Fast-path for common mints to avoid network and wrong defaults
+        HARDCODED: Dict[str, int] = {
+            # SOL (wSOL)
+            "So11111111111111111111111111111111111111112": 9,
+            # USDC
+            "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v": 6,
+            # USDT
+            "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB": 6,
+        }
+        if mint in HARDCODED:
+            self._token_meta[mint] = HARDCODED[mint]
+            return HARDCODED[mint]
+
         if mint in self._token_meta:
             return self._token_meta[mint]
         
