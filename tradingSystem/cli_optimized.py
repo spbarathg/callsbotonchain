@@ -267,9 +267,11 @@ def _exit_loop(engine: TradeEngine, stop_event: threading.Event) -> None:
                     # These are ghost entries that spam Jupiter and trigger rate limits
                     from tradingSystem.db import get_open_qty
                     qty = get_open_qty(pid)
-                    if qty == 0:
-                        if iteration % 300 == 0:
-                            print(f"[EXIT_LOOP] Skipping {token[:8]}... (quantity=0, failed fill)", flush=True)
+                    if iteration == 1:  # Debug on first iteration
+                        print(f"[EXIT_LOOP] Position {token[:8]}... qty={qty} (type={type(qty).__name__})", flush=True)
+                    if qty == 0 or qty == 0.0:
+                        if iteration % 300 == 0 or iteration == 1:
+                            print(f"[EXIT_LOOP] Skipping {token[:8]}... (quantity={qty}, failed fill)", flush=True)
                         continue
                     
                     # Throttle price checks to reduce Jupiter calls under 429 pressure
