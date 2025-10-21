@@ -138,9 +138,10 @@ class Broker:
                 
                 # First try simulation to catch errors early
                 try:
+                    sim_result = None
                     if not self._fast_exec:
                         sim_result = self._rpc.simulate_transaction(tx)
-                    if hasattr(sim_result, 'value') and hasattr(sim_result.value, 'err') and sim_result.value.err:
+                    if sim_result is not None and hasattr(sim_result, 'value') and hasattr(sim_result.value, 'err') and sim_result.value.err:
                         error_detail = str(sim_result.value.err)
                         print(f"[BROKER] ⚠️ Simulation error: {error_detail}", flush=True)
                         # Try to extract more details
