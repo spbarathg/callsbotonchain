@@ -34,8 +34,8 @@ def _get_bool(name: str, default: bool) -> bool:
 # ==================== WALLET & EXECUTION ====================
 RPC_URL = os.getenv("TS_RPC_URL", "https://api.mainnet-beta.solana.com")
 WALLET_SECRET = os.getenv("TS_WALLET_SECRET", "")
-SLIPPAGE_BPS = _get_int("TS_SLIPPAGE_BPS", 150)  # 1.50%
-PRIORITY_FEE_MICROLAMPORTS = _get_int("TS_PRIORITY_FEE_MICROLAMPORTS", 10000)  # Increased for faster execution
+SLIPPAGE_BPS = _get_int("TS_SLIPPAGE_BPS", 500)  # 5.0% - REQUIRED for volatile memecoins (was 150/1.5%)
+PRIORITY_FEE_MICROLAMPORTS = _get_int("TS_PRIORITY_FEE_MICROLAMPORTS", 100000)  # 100k for SPEED (was 10k)
 MAX_SLIPPAGE_PCT = _get_float("TS_MAX_SLIPPAGE_PCT", 5.0)  # NEW: Max acceptable slippage
 MAX_PRICE_IMPACT_PCT = _get_float("TS_MAX_PRICE_IMPACT_PCT", 10.0)  # NEW: Max price impact
 
@@ -46,7 +46,7 @@ BASE_MINT = os.getenv("TS_BASE_MINT", USDC_MINT)
 # ==================== RISK & POSITION SIZING ====================
 # Based on proven performance: 42% WR overall, 50% WR for Score 8
 BANKROLL_USD = _get_float("TS_BANKROLL_USD", 500)
-MAX_CONCURRENT = _get_int("TS_MAX_CONCURRENT", 5)
+MAX_CONCURRENT = _get_int("TS_MAX_CONCURRENT", 4)  # Matches backtest (was 5)
 
 # OPTIMIZED SIZING - Based on proven win rates by score
 # Score 8: 50% WR, 254% avg gain = BEST (allocate most)
@@ -97,7 +97,7 @@ MAX_CONSECUTIVE_LOSSES = _get_int("TS_MAX_CONSECUTIVE_LOSSES", 5)  # Pause after
 # These are for additional validation beyond signal score
 # Align with signal bot defaults to avoid integration mismatch
 
-MIN_LIQUIDITY_USD = _get_float("TS_MIN_LIQUIDITY_USD", 30000)
+MIN_LIQUIDITY_USD = _get_float("TS_MIN_LIQUIDITY_USD", 30000)  # Must match signal bot filter!
 MIN_VOLUME_RATIO = _get_float("TS_MIN_VOLUME_RATIO", 0.1)  # Vol/MC ratio min
 
 # ==================== PATHS ====================
