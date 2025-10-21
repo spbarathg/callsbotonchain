@@ -203,7 +203,10 @@ class SignalProcessor:
             )
         
         # ANTI-FOMO FILTER: Reject tokens that already pumped (late entry!)
-        if not self._check_fomo_filter(stats, token_address):
+        # Blind mode override
+        if os.getenv('TS_BLIND_BUY', 'false').strip().lower() == 'true':
+            pass
+        elif not self._check_fomo_filter(stats, token_address):
             return ProcessResult(
                 status="skipped",
                 token_address=token_address,
@@ -244,7 +247,9 @@ class SignalProcessor:
         # CRITICAL FIX: Enforce score threshold for ALL signals (smart money or not)
         # Data shows Score 8+ has best performance (23.1% WR, 423% avg gain)
         # Scores below 8 have poor performance and dilute signal quality
-        if score < GENERAL_CYCLE_MIN_SCORE:
+        if os.getenv('TS_BLIND_BUY', 'false').strip().lower() == 'true':
+            pass
+        elif score < GENERAL_CYCLE_MIN_SCORE:
             self._log(f"REJECTED (Score Below Threshold): {token_address} (score: {score}/{GENERAL_CYCLE_MIN_SCORE}, smart_money={feed_tx.smart_money})")
             return ProcessResult(
                 status="skipped",

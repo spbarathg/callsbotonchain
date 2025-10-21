@@ -542,14 +542,16 @@ def run() -> None:
                 
                 # Check if signal is stale
                 print(f"[DEBUG] Checking if signal is stale...", flush=True)
-                if _is_stale_signal(stats):
-                    signals_filtered += 1
-                    engine._log("signal_stale", token=token_norm, 
-                               alert_price=stats.get("price"),
-                               current_price=_get_last_price_usd(token_norm))
-                    print(f"[DEBUG] Signal is stale for {token_norm[:8]}", flush=True)
-                    continue
-                print(f"[DEBUG] Signal is fresh, continuing...", flush=True)
+                _blind = os.getenv("TS_BLIND_BUY", "false").strip().lower() == "true"
+                if not _blind:
+                    if _is_stale_signal(stats):
+                        signals_filtered += 1
+                        engine._log("signal_stale", token=token_norm, 
+                                   alert_price=stats.get("price"),
+                                   current_price=_get_last_price_usd(token_norm))
+                        print(f"[DEBUG] Signal is stale for {token_norm[:8]}", flush=True)
+                        continue
+                print(f"[DEBUG] Signal is fresh (blind={_blind}), continuing...", flush=True)
                 
                 # Get signal score and conviction
                 print(f"[DEBUG] Extracting signal_score and conviction_type from stats...", flush=True)
@@ -557,8 +559,10 @@ def run() -> None:
                 conviction_type = stats.get("conviction_type", "High Confidence (Strict)")
                 print(f"[DEBUG] signal_score={signal_score}, conviction_type={conviction_type}", flush=True)
                 
-                # Enforce minimum score of 8 (user requirement)
-                MIN_SCORE = 8
+                # Enforce minimum score unless blind mode
+                MIN_SCORE = int(os.getenv("TS_MIN_SCORE", "8"))
+                if os.getenv("TS_BLIND_BUY", "false").strip().lower() == "true":
+                    MIN_SCORE = 0
                 if signal_score < MIN_SCORE:
                     print(f"[DEBUG] ❌ Signal score {signal_score} below minimum {MIN_SCORE} - SKIPPING", flush=True)
                     signals_filtered += 1
