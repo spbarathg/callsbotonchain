@@ -207,6 +207,13 @@ class Broker:
         
         print(f"[BROKER] Getting Jupiter quote: {in_mint[:8]}→{out_mint[:8]}, amount={in_amount}, slippage={SLIPPAGE_BPS}bps", flush=True)
         
+        # If rate-limited, short-circuit to avoid spamming
+        try:
+            if hasattr(jup, 'is_rate_limited') and jup.is_rate_limited():
+                raise BrokerError("Rate limited; Jupiter cooldown active")
+        except Exception:
+            pass
+
         result = jup.get_quote(
             input_mint=in_mint,
             output_mint=out_mint,
@@ -232,6 +239,13 @@ class Broker:
         
         print(f"[BROKER] Getting Jupiter swap transaction...", flush=True)
         
+        # If rate-limited, short-circuit
+        try:
+            if hasattr(jup, 'is_rate_limited') and jup.is_rate_limited():
+                raise BrokerError("Rate limited; Jupiter cooldown active")
+        except Exception:
+            pass
+
         result = jup.get_swap_transaction(
             quote=quote,
             user_public_key=self._pubkey,

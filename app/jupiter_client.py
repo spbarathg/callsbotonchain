@@ -49,9 +49,9 @@ class JupiterClient:
         
         # --- Global rate limiter (token bucket) ---
         # Defaults to ~36 RPM safe budget to stay below Jupiter's 60 RPM limit
-        rpm_limit = max(10, int(os.getenv("JUP_RPM_LIMIT", "36")))
+        rpm_limit = max(10, int(os.getenv("JUP_RPM_LIMIT", "20")))
         # refill_rate tokens/sec; capacity allows small bursts
-        self._bucket_capacity = int(os.getenv("JUP_RATE_BUCKET", "10"))
+        self._bucket_capacity = int(os.getenv("JUP_RATE_BUCKET", "3"))
         self._bucket_refill_rate = rpm_limit / 60.0  # tokens per second
         self._bucket_tokens = float(self._bucket_capacity)
         self._bucket_last_refill = time.time()
@@ -60,6 +60,7 @@ class JupiterClient:
         # 429 handling state
         self._consecutive_429 = 0
         self._cooldown_until: Optional[float] = None
+        self._request_lock = threading.Lock()  # serialize requests to avoid bursts
         
         # Try DNS resolution - if fails, switch to IP mode
         try:
@@ -131,6 +132,8 @@ class JupiterClient:
             # Acquire rate-limit token (token bucket)
             self._acquire_rate_token()
             try:
+                # Ensure only one in-flight request at a time across process
+                with self._request_lock:
                 if method == "GET":
                     headers["Accept"] = "application/json"
                     response = self.session.get(
@@ -165,13 +168,13 @@ class JupiterClient:
                     # Handle explicit 429 with exponential backoff + jitter
                     if response.status_code == 429:
                         self._consecutive_429 += 1
-                        backoff = min(60, (2 ** attempt))
+                        backoff = min(8, (2 ** attempt))
                         sleep_for = backoff + random.uniform(0, 0.5)
                         logger.warning(f"Jupiter 429 received. attempt={attempt+1}/{retries} backoff={sleep_for:.2f}s")
                         time.sleep(sleep_for)
                         # Trigger cool down if persistent
-                        if self._consecutive_429 >= int(os.getenv("JUP_429_COOLDOWN_THRESHOLD", "5")):
-                            cooldown_sec = int(os.getenv("JUP_429_COOLDOWN_SEC", "600"))
+                        if self._consecutive_429 >= int(os.getenv("JUP_429_COOLDOWN_THRESHOLD", "3")):
+                            cooldown_sec = int(os.getenv("JUP_429_COOLDOWN_SEC", "90"))
                             self._cooldown_until = time.time() + cooldown_sec
                             logger.error(f"Entering Jupiter cooldown for {cooldown_sec}s due to repeated 429s")
                         continue
@@ -206,6 +209,10 @@ class JupiterClient:
             "json": None,
             "error": "Max retries exceeded"
         }
+
+    def is_rate_limited(self) -> bool:
+        now = time.time()
+        return bool(self._cooldown_until and now < self._cooldown_until)
 
     def _acquire_rate_token(self) -> None:
         """Block until a token is available under the global RPM limit."""
