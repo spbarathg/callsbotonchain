@@ -109,6 +109,10 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - TS_BLIND_BUY=true
       - TS_MIN_SCORE=0
+      - JUP_RPM_LIMIT=36
+      - JUP_RATE_BUCKET=10
+      - JUP_429_COOLDOWN_THRESHOLD=5
+      - JUP_429_COOLDOWN_SEC=600
       - TS_FAST_EXECUTION=true
       - TS_PRIORITY_FEE_MICROLAMPORTS=200000
       # FIX: Match worker's liquidity filter (no filter)
