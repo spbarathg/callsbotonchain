@@ -14,6 +14,7 @@ import time
 from typing import Dict, Optional, Tuple
 
 from app.http_client import request_json
+from app.jupiter_client import get_jupiter_client
 from solana.rpc.api import Client as SolanaClient
 from solana.rpc.types import TxOpts
 from solders.keypair import Keypair
@@ -169,58 +170,54 @@ class Broker:
         return None, "Max retries exceeded"
 
     def _quote(self, in_mint: str, out_mint: str, in_amount: int, retries: int = 3) -> Optional[Dict]:
-        """Get quote with retry"""
-        for attempt in range(retries):
-            try:
-                params = {
-                    "inputMint": in_mint,
-                    "outputMint": out_mint,
-                    "amount": str(in_amount),
-                    "slippageBps": str(int(SLIPPAGE_BPS)),
-                }
-                print(f"[BROKER] Calling request_json for Jupiter quote (attempt {attempt + 1}/{retries})...", flush=True)
-                r = request_json("GET", "https://api.jup.ag/quote/v6/quote", params=params, timeout=10.0)
-                print(f"[BROKER] request_json returned: status_code={r.get('status_code')}, error={r.get('error')}, has_json={'json' in r}", flush=True)
-                if r.get("status_code") != 200:
-                    raise RuntimeError(f"quote fetch failed: {r.get('status_code')}, error: {r.get('error')}")
-                quote = r.get("json") or {}
-                if not quote.get("outAmount"):
-                    raise BrokerError("Quote missing outAmount")
-                return quote
-            except Exception as e:
-                print(f"[BROKER] Quote attempt {attempt + 1} failed: {e}", flush=True)
-                if attempt == retries - 1:
-                    raise BrokerError(f"Failed to get quote: {str(e)}")
-                time.sleep(1 * (attempt + 1))
+        """Get quote using dedicated Jupiter client (bypasses circuit breaker)"""
+        jup = get_jupiter_client()
         
-        return None
+        print(f"[BROKER] Getting Jupiter quote: {in_mint[:8]}→{out_mint[:8]}, amount={in_amount}, slippage={SLIPPAGE_BPS}bps", flush=True)
+        
+        result = jup.get_quote(
+            input_mint=in_mint,
+            output_mint=out_mint,
+            amount=in_amount,
+            slippage_bps=int(SLIPPAGE_BPS),
+            timeout=10.0
+        )
+        
+        if result["status_code"] == 200:
+            quote = result["json"]
+            if not quote.get("outAmount"):
+                raise BrokerError("Quote missing outAmount")
+            print(f"[BROKER] ✅ Quote received: {quote.get('outAmount')} units", flush=True)
+            return quote
+        else:
+            error_msg = f"Jupiter quote failed: {result['error']}"
+            print(f"[BROKER] ❌ {error_msg}", flush=True)
+            raise BrokerError(error_msg)
 
     def _swap(self, quote: Dict, retries: int = 3) -> Optional[str]:
-        """Get swap transaction with retry"""
-        for attempt in range(retries):
-            try:
-                payload = {
-                    "quoteResponse": quote,
-                    "userPublicKey": self._pubkey,
-                    "wrapAndUnwrapSol": True,
-                    "computeUnitPriceMicroLamports": int(PRIORITY_FEE_MICROLAMPORTS or 50000),  # Higher priority for fast memecoins
-                    "dynamicComputeUnitLimit": True,
-                    "asLegacyTransaction": False,  # Use versioned transactions
-                }
-                r = request_json("POST", "https://api.jup.ag/quote/v6/swap", json=payload, timeout=15.0)
-                if r.get("status_code") != 200:
-                    raise RuntimeError(f"swap tx fetch failed: {r.get('status_code')}")
-                data = r.get("json") or {}
-                swap_tx = data.get("swapTransaction")
-                if not swap_tx:
-                    raise BrokerError("Swap response missing swapTransaction")
-                return swap_tx
-            except Exception as e:
-                if attempt == retries - 1:
-                    raise BrokerError(f"Failed to get swap transaction: {str(e)}")
-                time.sleep(1 * (attempt + 1))
+        """Get swap transaction using dedicated Jupiter client (bypasses circuit breaker)"""
+        jup = get_jupiter_client()
         
-        return None
+        print(f"[BROKER] Getting Jupiter swap transaction...", flush=True)
+        
+        result = jup.get_swap_transaction(
+            quote=quote,
+            user_public_key=self._pubkey,
+            wrap_unwrap_sol=True,
+            priority_fee=int(PRIORITY_FEE_MICROLAMPORTS or 100000),
+            timeout=15.0
+        )
+        
+        if result["status_code"] == 200:
+            swap_tx = result["json"].get("swapTransaction")
+            if not swap_tx:
+                raise BrokerError("Swap response missing swapTransaction")
+            print(f"[BROKER] ✅ Swap transaction received", flush=True)
+            return swap_tx
+        else:
+            error_msg = f"Jupiter swap failed: {result['error']}"
+            print(f"[BROKER] ❌ {error_msg}", flush=True)
+            raise BrokerError(error_msg)
 
     def market_buy(self, token: str, usd_size: float) -> Fill:
         """Execute buy with comprehensive safety"""
@@ -249,9 +246,9 @@ class Broker:
                     from app.http_client import request_json
                     usdc_mint = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
                     test_amount = 1000000000  # 1 SOL in lamports
-                    price_quote = request_json("GET", "https://api.jup.ag/quote/v6/quote", 
+                    price_quote = request_json("GET", "https://quote-api.jup.ag/v6/quote", 
                                               params={"inputMint": BASE_MINT, "outputMint": usdc_mint, "amount": str(test_amount), "slippageBps": "50"},
-                                              timeout=5.0)
+                                              timeout=5.0, use_circuit_breaker=False)
                     if price_quote.get("status_code") == 200 and price_quote.get("json"):
                         out_amount = float(price_quote["json"].get("outAmount", 0)) / 1e6  # USDC has 6 decimals
                         if out_amount > 0:

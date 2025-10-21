@@ -72,10 +72,10 @@ _allow_hosts_env = os.getenv("CALLSBOT_HTTP_ALLOW_HOSTS", ",".join([
     "feed-api.cielo.finance",
     "api.cielo.finance",
     "api.geckoterminal.com",
-    "api.telegram.org",
-    "price.jup.ag",
     "quote-api.jup.ag",
     "token.jup.ag",
+    "price.jup.ag",
+    "api.telegram.org",
     "api.mainnet-beta.solana.com",
 ]))
 HTTP_ALLOW_HOSTS = {h.strip() for h in _allow_hosts_env.split(",") if h.strip()}

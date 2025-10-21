@@ -29,15 +29,15 @@ class CircuitBreaker:
     
     def __init__(
         self,
-        failure_threshold: int = 5,
-        recovery_timeout: int = 60,
+        failure_threshold: int = 10,  # Increased from 5
+        recovery_timeout: int = 300,  # Increased from 60 to 5 minutes
     ):
         self.failure_threshold = failure_threshold
         self.recovery_timeout = recovery_timeout
         
         self.failure_count = 0
         self.last_failure_time: Optional[datetime] = None
-        self.state = "CLOSED"  # CLOSED, OPEN, HALF_OPEN
+        self.state = "CLOSED"  # CLOSED, OPEN, HALF_OPEN - Always starts CLOSED
     
     def before_request(self) -> None:
         """Check circuit state before making request"""

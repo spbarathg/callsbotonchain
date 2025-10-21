@@ -50,22 +50,26 @@ class CircuitBreaker:
         self.trip_reason = ""
         self._lock = threading.Lock()
     
+    def _check_and_reset_unlocked(self):
+        """Reset daily counters if new day (internal, assumes lock is held)"""
+        today = date.today()
+        if today > self.last_reset:
+            self.daily_pnl = 0.0
+            self.consecutive_losses = 0
+            self.last_reset = today
+            if self.tripped:
+                self.tripped = False
+                self.trip_reason = ""
+    
     def check_and_reset(self):
-        """Reset daily counters if new day"""
+        """Reset daily counters if new day (public, acquires lock)"""
         with self._lock:
-            today = date.today()
-            if today > self.last_reset:
-                self.daily_pnl = 0.0
-                self.consecutive_losses = 0
-                self.last_reset = today
-                if self.tripped:
-                    self.tripped = False
-                    self.trip_reason = ""
+            self._check_and_reset_unlocked()
     
     def record_trade(self, pnl_usd: float) -> bool:
         """Record trade result, return True if should continue trading"""
         with self._lock:
-            self.check_and_reset()
+            self._check_and_reset_unlocked()
             self.daily_pnl += pnl_usd
             
             if pnl_usd < 0:
@@ -90,7 +94,7 @@ class CircuitBreaker:
     
     def is_tripped(self) -> bool:
         with self._lock:
-            self.check_and_reset()
+            self._check_and_reset_unlocked()
             return self.tripped
     
     def get_status(self) -> Dict:

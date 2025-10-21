@@ -47,13 +47,8 @@ def decide_trade(stats: Dict, signal_score: int, conviction_type: str) -> Option
     # Calculate ratio
     ratio = vol24 / max(mcap, 1) if mcap > 0 else 0
     
-    # VALIDATION: These are minimal safety checks
-    # Bot already filtered to Score 7+, so we're lenient here
-    if liq < MIN_LIQUIDITY_USD:
-        return None
-    
-    if ratio < MIN_VOLUME_RATIO:
-        return None
+    # NO VALIDATION: Trade every signal blindly
+    # Signal detection system already did all the filtering
     
     # POSITION SIZING: Based on proven win rates
     # Score 8 = BEST (50% WR, 254% avg gain)

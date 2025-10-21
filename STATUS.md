@@ -1,12 +1,48 @@
 # 🤖 Bot Status - V4 MOONSHOT HUNTER - MAXIMUM PROFIT CONFIGURATION
 
-**Last Updated:** October 20, 2025, 1:06 PM IST (7:36 AM UTC)  
-**Status:** ✅ **V4 OPTIMIZED + BACKTEST VALIDATED (+411% RETURN) - READY FOR LIVE TRADING**
+**Last Updated:** October 21, 2025, 2:25 PM IST (8:55 AM UTC)  
+**Status:** 🟡 Signals excellent; trading system fixes deployed and under live verification
 
 **Latest Commit:** `a0bd0ac` - Score threshold enforcement + Trailing stop optimization  
 **Deployed:** October 20, 2025, 1:05 PM IST
 
 ---
+
+## ✨ RECENT UPDATE (Last 12h)
+
+### 🔔 Signal Performance (via Phanes)
+- **Period:** 12h
+- **Calls:** 65
+- **2x Hit Rate (Win Rate):** 40% (≈26 winners)
+- **Median Gain:** 35%
+- **Average Return:** ~1.3x per call
+- **Top winners:** 15.4x, 9.1x, 7.5x, 7.4x, 7.1x
+
+This matches or exceeds expectations for the V4 Moonshot Hunter configuration. The signal detection system is performing strongly.
+
+### ⚙️ Trading System - Current State
+- ✅ Deployed fixes to restore exit/price monitoring:
+  - Price source switched to `callsbot-proxy` (Docker network) with DexScreener fallback when needed.
+  - Exit loop enabled with periodic logging to ensure peaks and exits are evaluated continuously.
+- 🟡 Live verification in progress: confirming peak updates and sell triggers fire from real-time prices.
+- 📌 Git tag for working repo state: `v2025-10-21-working` (also `latest-working`).
+
+### Quick Health Checks (now)
+```bash
+# Trader exit loop and price fetch
+ssh <server> "docker logs --since 10m callsbot-trader | grep -E 'EXIT_LOOP|Status check' | tail -10"
+
+# Open positions snapshot (trader DB)
+ssh <server> "docker exec callsbot-trader sqlite3 /app/var/trading.db \"SELECT token_address, entry_price, peak_price, trail_pct, qty, status FROM positions;\""
+```
+
+### What To Expect Next (6–24h)
+- Peaks should update automatically; trailing/stop exits should execute when thresholds are reached.
+- If a large winner develops, adaptive trailing will allow more room early (<30m), then tighten later.
+- Rebalancing will protect late pumpers (PnL >50% after 30m) from premature replacement.
+
+If any exit fails to trigger or peaks don’t advance, capture the last 2 minutes of `callsbot-trader` logs and we will escalate immediately.
+
 
 ## 🎯 $1000 TRADING SYSTEM - EXPECTED PERFORMANCE & DEBUG GUIDE
 
