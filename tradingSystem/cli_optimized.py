@@ -265,8 +265,9 @@ def _exit_loop(engine: TradeEngine, stop_event: threading.Event) -> None:
                     
                     # CRITICAL: Skip positions with quantity=0 (failed fills)
                     # These are ghost entries that spam Jupiter and trigger rate limits
-                    pos = engine.live.get(token)
-                    if pos and pos.get("qty", 0) == 0:
+                    from tradingSystem.db import get_open_qty
+                    qty = get_open_qty(pid)
+                    if qty == 0:
                         if iteration % 300 == 0:
                             print(f"[EXIT_LOOP] Skipping {token[:8]}... (quantity=0, failed fill)", flush=True)
                         continue
