@@ -7,6 +7,10 @@ import requests
 from typing import Dict, Optional, Any
 from datetime import datetime, timedelta
 import logging
+import os
+import time
+import threading
+import random
 
 # Apply DNS patch for Jupiter API before any requests are made
 from app.dns_patch import apply_dns_patch
@@ -42,6 +46,20 @@ class JupiterClient:
         )
         self.session.mount('https://', adapter)
         self.session.mount('http://', adapter)
+        
+        # --- Global rate limiter (token bucket) ---
+        # Defaults to ~36 RPM safe budget to stay below Jupiter's 60 RPM limit
+        rpm_limit = max(10, int(os.getenv("JUP_RPM_LIMIT", "36")))
+        # refill_rate tokens/sec; capacity allows small bursts
+        self._bucket_capacity = int(os.getenv("JUP_RATE_BUCKET", "10"))
+        self._bucket_refill_rate = rpm_limit / 60.0  # tokens per second
+        self._bucket_tokens = float(self._bucket_capacity)
+        self._bucket_last_refill = time.time()
+        self._bucket_lock = threading.Lock()
+        
+        # 429 handling state
+        self._consecutive_429 = 0
+        self._cooldown_until: Optional[float] = None
         
         # Try DNS resolution - if fails, switch to IP mode
         try:
@@ -102,7 +120,16 @@ class JupiterClient:
         if self.using_ip_fallback:
             headers["Host"] = self.hostname
         
+        # Respect global cooldown if triggered by excessive 429s
+        now = time.time()
+        if self._cooldown_until and now < self._cooldown_until:
+            delay = max(0.0, self._cooldown_until - now)
+            logger.warning(f"Jupiter rate-limit cooldown active for {delay:.1f}s")
+            return {"status_code": 429, "json": None, "error": f"Rate limited; cooling down {delay:.1f}s"}
+        
         for attempt in range(retries):
+            # Acquire rate-limit token (token bucket)
+            self._acquire_rate_token()
             try:
                 if method == "GET":
                     headers["Accept"] = "application/json"
@@ -127,12 +154,27 @@ class JupiterClient:
                 
                 # Success
                 if response.status_code == 200:
+                    # Success clears 429 counters
+                    self._consecutive_429 = 0
                     return {
                         "status_code": 200,
                         "json": response.json(),
                         "error": None
                     }
                 else:
+                    # Handle explicit 429 with exponential backoff + jitter
+                    if response.status_code == 429:
+                        self._consecutive_429 += 1
+                        backoff = min(60, (2 ** attempt))
+                        sleep_for = backoff + random.uniform(0, 0.5)
+                        logger.warning(f"Jupiter 429 received. attempt={attempt+1}/{retries} backoff={sleep_for:.2f}s")
+                        time.sleep(sleep_for)
+                        # Trigger cool down if persistent
+                        if self._consecutive_429 >= int(os.getenv("JUP_429_COOLDOWN_THRESHOLD", "5")):
+                            cooldown_sec = int(os.getenv("JUP_429_COOLDOWN_SEC", "600"))
+                            self._cooldown_until = time.time() + cooldown_sec
+                            logger.error(f"Entering Jupiter cooldown for {cooldown_sec}s due to repeated 429s")
+                        continue
                     return {
                         "status_code": response.status_code,
                         "json": None,
@@ -157,14 +199,47 @@ class JupiterClient:
                     }
                 
                 # Wait before retry
-                import time
-                time.sleep(1 * (attempt + 1))
+                time.sleep(1 * (attempt + 1) + random.uniform(0, 0.2))
         
         return {
             "status_code": None,
             "json": None,
             "error": "Max retries exceeded"
         }
+
+    def _acquire_rate_token(self) -> None:
+        """Block until a token is available under the global RPM limit."""
+        with self._bucket_lock:
+            now = time.time()
+            # Refill
+            elapsed = max(0.0, now - self._bucket_last_refill)
+            self._bucket_last_refill = now
+            self._bucket_tokens = min(
+                self._bucket_capacity,
+                self._bucket_tokens + elapsed * self._bucket_refill_rate,
+            )
+            if self._bucket_tokens >= 1.0:
+                self._bucket_tokens -= 1.0
+                return
+            # Calculate wait time for next token
+            needed = 1.0 - self._bucket_tokens
+            wait_sec = needed / max(self._bucket_refill_rate, 0.01)
+        # Sleep outside the lock
+        time.sleep(wait_sec)
+        # After sleeping, ensure we consume a token
+        with self._bucket_lock:
+            now2 = time.time()
+            elapsed2 = max(0.0, now2 - self._bucket_last_refill)
+            self._bucket_last_refill = now2
+            self._bucket_tokens = min(
+                self._bucket_capacity,
+                self._bucket_tokens + elapsed2 * self._bucket_refill_rate,
+            )
+            if self._bucket_tokens >= 1.0:
+                self._bucket_tokens -= 1.0
+                return
+            # Fallback: enforce small sleep to avoid tight loops
+            time.sleep(0.2)
     
     def get_quote(
         self,
