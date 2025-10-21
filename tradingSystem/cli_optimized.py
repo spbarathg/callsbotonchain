@@ -295,26 +295,28 @@ def run() -> None:
     engine = TradeEngine()
     mode = "dry_run" if engine.broker._dry else "LIVE"
     
-    # Verify Jupiter API connectivity before starting trading
+    # Verify Jupiter API connectivity before starting trading (non-blocking with backoff)
     print("="*60)
     print("🔍 JUPITER API HEALTH CHECK")
     print("="*60)
     from app.jupiter_client import get_jupiter_client
     jup = get_jupiter_client()
     
-    if not jup.health_check():
-        print("❌ Jupiter API is NOT reachable - Trading PAUSED")
-        print("   Please check network connectivity and DNS resolution")
-        print("   Waiting 60 seconds before retrying...")
-        time.sleep(60)
-        
-        # Retry once
-        if not jup.health_check():
-            print("❌ Jupiter API still unreachable after retry - EXITING")
-            print("   Please fix network issues before restarting")
-            return
+    healthy = False
+    max_checks = 3
+    for i in range(max_checks):
+        if jup.health_check():
+            healthy = True
+            break
+        backoff = 1 << i  # 1, 2, 4 seconds
+        print(f"❌ Jupiter 429/health check failed - retrying in {backoff}s (attempt {i+1}/{max_checks})")
+        time.sleep(backoff)
     
-    print("✅ Jupiter API is reachable - Trading system ready")
+    if healthy:
+        print("✅ Jupiter API is reachable - Trading system ready")
+    else:
+        # Non-blocking startup: continue trading; client has internal rate limiting/backoff
+        print("⚠️  Jupiter API not confirmed healthy yet; starting trading and will rely on client backoff")
     print("="*60)
     
     engine._log("trading_system_start", mode=mode, 
