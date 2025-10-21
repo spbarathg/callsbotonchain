@@ -9,6 +9,7 @@ OPTIMIZED BROKER - Bulletproof Execution
 """
 from dataclasses import dataclass
 import base64
+import threading
 import json
 import time
 from typing import Dict, Optional, Tuple
@@ -201,11 +202,12 @@ class Broker:
         
         return None, "Max retries exceeded"
 
-    def _quote(self, in_mint: str, out_mint: str, in_amount: int, retries: int = 3) -> Optional[Dict]:
+    def _quote(self, in_mint: str, out_mint: str, in_amount: int, retries: int = 3, slippage_bps_override: Optional[int] = None) -> Optional[Dict]:
         """Get quote using dedicated Jupiter client (bypasses circuit breaker)"""
         jup = get_jupiter_client()
         
-        print(f"[BROKER] Getting Jupiter quote: {in_mint[:8]}→{out_mint[:8]}, amount={in_amount}, slippage={SLIPPAGE_BPS}bps", flush=True)
+        use_slip = int(slippage_bps_override) if slippage_bps_override is not None else int(SLIPPAGE_BPS)
+        print(f"[BROKER] Getting Jupiter quote: {in_mint[:8]}→{out_mint[:8]}, amount={in_amount}, slippage={use_slip}bps", flush=True)
         
         # If rate-limited, short-circuit to avoid spamming
         try:
@@ -218,7 +220,7 @@ class Broker:
             input_mint=in_mint,
             output_mint=out_mint,
             amount=in_amount,
-            slippage_bps=int(SLIPPAGE_BPS),
+            slippage_bps=use_slip,
             timeout=10.0
         )
         
@@ -267,12 +269,13 @@ class Broker:
 
     def _retry_swap_on_6024(self, in_mint: str, out_mint: str, in_amount: int, token_decimals: int) -> Optional[str]:
         """Handle simulation error 6024 by re-quoting with slight amount bump and retrying a limited number of times."""
-        try_attempts = 2
-        bumped_amount = int(in_amount * 1.25)
+        try_attempts = 1
+        bumped_amount = int(in_amount * 1.05)
+        slip2 = min(int(SLIPPAGE_BPS) + 100, 3000)
         for i in range(try_attempts):
             try:
-                print(f"[BROKER] 6024 retry: re-quoting with amount={bumped_amount}", flush=True)
-                quote = self._quote(in_mint, out_mint, bumped_amount)
+                print(f"[BROKER] 6024 retry: re-quoting with amount={bumped_amount}, slippage={slip2}bps", flush=True)
+                quote = self._quote(in_mint, out_mint, bumped_amount, slippage_bps_override=slip2)
                 swap_tx = self._swap(quote)
                 return swap_tx
             except BrokerError as e:
