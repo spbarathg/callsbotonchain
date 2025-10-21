@@ -91,6 +91,9 @@ services:
     user: root
     command: ["python", "-m", "tradingSystem.cli_optimized"]
     restart: unless-stopped  # ENABLED for live trading
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
     env_file:
       - .env
     environment:
