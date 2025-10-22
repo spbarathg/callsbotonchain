@@ -4,6 +4,7 @@ Signal Processor - Core signal analysis and alerting logic
 Extracted from bot.py to improve testability and maintainability.
 Processes feed items and decides whether to send alerts.
 """
+import os
 import time
 import html
 from typing import Optional, Dict, Any
