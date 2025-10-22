@@ -285,8 +285,8 @@ class Broker:
             pass
 
         # Dynamic low-cost priority fees with cap (free-friendly)
-        # Bump slightly on retries inside sign/send logic; here we pass max allowed cap
-        priority_fee = int(PRIORITY_FEE_MAX_MICROLAMPORTS)
+        # Use MIN to minimize cost; broker send logic can bump if needed
+        priority_fee = int(PRIORITY_FEE_MIN_MICROLAMPORTS)
         
         result = jup.get_swap_transaction(
             quote=quote,
@@ -573,56 +573,11 @@ class Broker:
                     # Try with simulation first
                     sig, error = self._sign_and_send(swap_tx)
                     
-                    # If failed with 6024, try direct send
-                    if error and ("6024" in str(error) or "0x1788" in str(error) or "TransactionErrorInstructionError" in str(error)):
-                        print(f"[BROKER] ⚠️ Simulation failed, attempting direct send (skip preflight)...", flush=True)
-                        try:
-                            raw_tx = base64.b64decode(swap_tx)
-                            versioned_tx = VersionedTransaction.from_bytes(raw_tx)
-                            signed_tx = VersionedTransaction(versioned_tx.message, [self._kp])
-                            
-                            opts = TxOpts(skip_preflight=True, preflight_commitment="processed")
-                            result = self._rpc.send_raw_transaction(bytes(signed_tx), opts=opts)
-                            sig = str(result.value)
-                            print(f"[BROKER] ✅ Direct send submitted: {sig[:16]}...", flush=True)
-                            
-                            # CRITICAL FIX: Wait for confirmation instead of assuming success!
-                            print(f"[BROKER] ⏳ Waiting for confirmation...", flush=True)
-                            confirmed = False
-                            sig_obj = Signature.from_string(sig)  # Convert string to Signature object
-                            for conf_attempt in range(15):  # 30 seconds max
-                                try:
-                                    status_result = self._rpc.get_signature_statuses([sig_obj])
-                                    if status_result and status_result.value and status_result.value[0]:
-                                        tx_status = status_result.value[0]
-                                        # Check if transaction failed
-                                        if hasattr(tx_status, 'err') and tx_status.err is not None:
-                                            error = f"Transaction confirmed but FAILED: {tx_status.err}"
-                                            print(f"[BROKER] ❌ {error}", flush=True)
-                                            break
-                                        # Check if confirmed
-                                        if hasattr(tx_status, 'confirmation_status'):
-                                            confirmed = True
-                                            error = None
-                                            print(f"[BROKER] ✅ Transaction CONFIRMED: {sig[:16]}...", flush=True)
-                                            break
-                                    time.sleep(2)
-                                except Exception as check_error:
-                                    print(f"[BROKER] ⚠️ Confirmation check error: {check_error}", flush=True)
-                                    time.sleep(2)
-                            
-                            if not confirmed and not error:
-                                error = "Transaction submitted but not confirmed after 30s"
-                                print(f"[BROKER] ❌ {error}", flush=True)
-                        except Exception as e2:
-                            print(f"[BROKER] ❌ Direct send failed: {e2}", flush=True)
-                            if attempt < len(slippage_levels):
-                                print(f"[BROKER] 🔄 Trying with higher slippage...", flush=True)
-                                time.sleep(3)
-                                continue
-                            else:
-                                return Fill(price=0.0, qty=0.0, usd=0.0, success=False, 
-                                          error=f"All attempts exhausted: {e2}", tx=sig if sig else "")
+                    # If rate limited (common cause), abort early and let higher-level cooldown handle it
+                    if error and ("Rate limited" in str(error) or "429" in str(error)):
+                        print(f"[BROKER] ⚠️ Aborting due to Jupiter rate limit: {error}", flush=True)
+                        return Fill(price=0.0, qty=0.0, usd=0.0, success=False, error=str(error))
+                    # Skip direct send for sells to avoid unnecessary SOL spend on failures
                     
                     # If no error or direct send succeeded
                     if not error:
