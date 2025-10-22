@@ -81,8 +81,8 @@ SCORE_9_MULT = _get_float("TS_SCORE_9_MULT", 1.0)   # 100%
 SCORE_8_MULT = _get_float("TS_SCORE_8_MULT", 1.3)   # 130% - BEST PERFORMER!
 SCORE_7_MULT = _get_float("TS_SCORE_7_MULT", 0.9)   # 90%
 
-# Max position size (safety)
-MAX_POSITION_SIZE_PCT = _get_float("TS_MAX_POSITION_SIZE_PCT", 20.0)  # Max 20% of bankroll
+# Max position size (safety) - Reduced for testing with small capital
+MAX_POSITION_SIZE_PCT = _get_float("TS_MAX_POSITION_SIZE_PCT", 15.0)  # Max 15% of bankroll (was 20%)
 MAX_POSITION_SIZE_USD = BANKROLL_USD * (MAX_POSITION_SIZE_PCT / 100.0)
 
 # ==================== STOPS & TRAILS ====================
@@ -168,12 +168,15 @@ def get_position_size(score: int, conviction_type: str) -> float:
     
     # Calculate base percentage (not absolute USD)
     # This way it scales with balance automatically
+    # TESTING MODE: Reduced to 10-12% for small balance testing
+    # With $6 balance: $0.60-$0.72 per trade (safe for verification)
+    # With $100 balance: $10-$12 per trade (scales up automatically)
     if "Smart Money" in conviction_type:
-        base_pct = 22.5  # 22.5% for $20 = $4.50
+        base_pct = 12.0  # 12% of balance (was 22.5%)
     elif "Strict" in conviction_type:
-        base_pct = 20.0  # 20% for $20 = $4.00
+        base_pct = 11.0  # 11% of balance (was 20%)
     else:
-        base_pct = 17.5  # 17.5% for $20 = $3.50
+        base_pct = 10.0  # 10% of balance (was 17.5%)
     
     # Apply score multiplier
     if score >= 10:
