@@ -29,9 +29,12 @@ from .config_optimized import (
     RPC_URL,
     WALLET_SECRET,
     SLIPPAGE_BPS,
-    PRIORITY_FEE_MICROLAMPORTS,
+    PRIORITY_FEE_MIN_MICROLAMPORTS,
+    PRIORITY_FEE_MAX_MICROLAMPORTS,
     BASE_MINT,
-    MAX_PRICE_IMPACT_PCT,
+    SELL_MINT,
+    MAX_PRICE_IMPACT_BUY_PCT,
+    MAX_PRICE_IMPACT_SELL_PCT,
     # New: faster execution toggle
     _get_bool as _cfg_get_bool,
 )
@@ -273,9 +276,9 @@ class Broker:
         except Exception:
             pass
 
-        # Use VERY HIGH priority fees for sells to ensure execution
-        # 1 SOL = 1,000,000,000 lamports, so 1,000,000 microlamports = 0.001 SOL priority fee
-        priority_fee = 1000000  # 0.001 SOL priority fee - aggressive!
+        # Dynamic low-cost priority fees with cap (free-friendly)
+        # Bump slightly on retries inside sign/send logic; here we pass max allowed cap
+        priority_fee = int(PRIORITY_FEE_MAX_MICROLAMPORTS)
         
         result = jup.get_swap_transaction(
             quote=quote,
@@ -285,7 +288,11 @@ class Broker:
             timeout=15.0
         )
         
-        print(f"[BROKER] Using priority fee: {priority_fee} microlamports (${priority_fee/1e9 * 180:.4f})", flush=True)
+        try:
+            est_usd = priority_fee / 1e9 * 180.0
+            print(f"[BROKER] Using priority fee: {priority_fee} microlamports (~${est_usd:.5f})", flush=True)
+        except Exception:
+            print(f"[BROKER] Using priority fee: {priority_fee} microlamports", flush=True)
         
         if result["status_code"] == 200:
             swap_tx = result["json"].get("swapTransaction")
@@ -399,7 +406,7 @@ class Broker:
                     # Check price impact
                     price_impact = abs(float(quote.get("priceImpactPct") or 0))
                     print(f"[BROKER] Price impact: {price_impact:.2f}%", flush=True)
-                    if price_impact > MAX_PRICE_IMPACT_PCT:
+                    if price_impact > MAX_PRICE_IMPACT_BUY_PCT:
                         print(f"[BROKER] ❌ Price impact too high: {price_impact:.1f}%", flush=True)
                         return Fill(price=0.0, qty=0.0, usd=0.0, success=False, 
                                    error=f"Price impact too high: {price_impact:.1f}%")
@@ -516,21 +523,32 @@ class Broker:
                 try:
                     print(f"[BROKER] 🎯 SELL attempt {attempt}/{len(slippage_levels)} with {slippage_bps/100}% slippage for {token[:8]}...", flush=True)
                     
-                    # Get quote with escalating slippage
-                    quote = self._quote(token, BASE_MINT, in_amount, slippage_bps_override=slippage_bps)
+                    # Get quote with escalating slippage (sell to SELL_MINT, default USDC)
+                    quote = self._quote(token, SELL_MINT, in_amount, slippage_bps_override=slippage_bps)
                     if not quote:
                         print(f"[BROKER] ⚠️ Quote failed at {slippage_bps/100}% slippage, trying next level...", flush=True)
                         time.sleep(2)
                         continue
                     
                     # Calculate expected fill
-                    base_dec = self._get_decimals(BASE_MINT)
+                    base_dec = self._get_decimals(SELL_MINT)
                     out_usd = float(quote.get("outAmount") or 0) / (10 ** base_dec)
                     if float(qty) <= 0:
                         continue
                     expected_price = out_usd / float(qty)
                     
-                    # Skip price impact check for sells - we need to exit no matter what
+                    # Price impact guard for sells (higher cap)
+                    try:
+                        price_impact = abs(float(quote.get("priceImpactPct") or 0))
+                        if price_impact > MAX_PRICE_IMPACT_SELL_PCT:
+                            print(f"[BROKER] ❌ Sell price impact too high: {price_impact:.1f}% > cap {MAX_PRICE_IMPACT_SELL_PCT}%", flush=True)
+                            # Still try next slippage level before giving up
+                            if attempt < len(slippage_levels):
+                                time.sleep(2)
+                                continue
+                            return Fill(price=0.0, qty=0.0, usd=0.0, success=False, error=f"Sell price impact too high: {price_impact:.1f}%")
+                    except Exception:
+                        pass
                     
                     # Dry run
                     if self._dry:

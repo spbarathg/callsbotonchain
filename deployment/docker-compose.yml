@@ -86,10 +86,14 @@ services:
       - TS_MIN_SCORE=0
       - JUP_RPM_LIMIT=20
       - JUP_RATE_BUCKET=3
-      - JUP_429_COOLDOWN_THRESHOLD=3
-      - JUP_429_COOLDOWN_SEC=90
+      - JUP_429_COOLDOWN_THRESHOLD=1
+      - JUP_429_COOLDOWN_SEC=300
       - TS_FAST_EXECUTION=true
-      - TS_PRIORITY_FEE_MICROLAMPORTS=200000
+      - TS_PRIORITY_FEE_MIN_MICROLAMPORTS=5000
+      - TS_PRIORITY_FEE_MAX_MICROLAMPORTS=20000
+      - TS_MAX_PRICE_IMPACT_BUY_PCT=25.0
+      - TS_MAX_PRICE_IMPACT_SELL_PCT=50.0
+      - TS_SELL_MINT=EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v
       # FIX: Match worker's liquidity filter (no filter)
       - TS_MIN_LIQUIDITY_USD=0
       # Portfolio Rebalancing (Circle Strategy) - DISABLED to match backtest
