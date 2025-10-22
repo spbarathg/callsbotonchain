@@ -45,8 +45,15 @@ BASE_MINT = os.getenv("TS_BASE_MINT", USDC_MINT)
 
 # ==================== RISK & POSITION SIZING ====================
 # Based on proven performance: 42% WR overall, 50% WR for Score 8
-BANKROLL_USD = _get_float("TS_BANKROLL_USD", 500)
-MAX_CONCURRENT = _get_int("TS_MAX_CONCURRENT", 4)  # Matches backtest (was 5)
+
+# Dynamic wallet balance (DO NOT HARDCODE!)
+# Default 20 is fallback only - system reads actual balance at runtime
+BANKROLL_USD = _get_float("TS_BANKROLL_USD", 20)
+
+# NOTE: Position sizing uses get_position_size() which will query actual balance
+# This default is only used for circuit breaker calculations
+
+MAX_CONCURRENT = _get_int("TS_MAX_CONCURRENT", 5)  # 5 positions max
 
 # OPTIMIZED SIZING - Based on proven win rates by score
 # Score 8: 50% WR, 254% avg gain = BEST (allocate most)
@@ -54,10 +61,10 @@ MAX_CONCURRENT = _get_int("TS_MAX_CONCURRENT", 4)  # Matches backtest (was 5)
 # Score 7: 50% WR, 68% avg gain = Strong
 # Smart Money: 57% WR = Premium multiplier
 
-# Base sizes by conviction type
-SMART_MONEY_BASE = _get_float("TS_SMART_MONEY_BASE", 80)  # 57% WR proven - biggest allocation
-STRICT_BASE = _get_float("TS_STRICT_BASE", 60)  # 30% WR but can moon
-GENERAL_BASE = _get_float("TS_GENERAL_BASE", 40)  # Lower WR, smaller size
+# Base sizes by conviction type (scaled for $20 bankroll)
+SMART_MONEY_BASE = _get_float("TS_SMART_MONEY_BASE", 4.5)  # ~$4.50 per position
+STRICT_BASE = _get_float("TS_STRICT_BASE", 4.0)  # ~$4.00 per position
+GENERAL_BASE = _get_float("TS_GENERAL_BASE", 3.5)  # ~$3.50 per position
 
 # Score multipliers (applied to base)
 SCORE_10_MULT = _get_float("TS_SCORE_10_MULT", 1.2)  # 120%
@@ -118,9 +125,27 @@ PORTFOLIO_MIN_POSITION_AGE = _get_int("PORTFOLIO_MIN_POSITION_AGE", 600)  # 10 m
 
 
 # ==================== HELPER FUNCTIONS ====================
+def get_current_bankroll() -> float:
+    """
+    Get current wallet balance dynamically.
+    Reads actual SOL+USDC balance instead of using hardcoded value.
+    """
+    # Try to read actual balance
+    try:
+        from .wallet_balance import get_wallet_balance_cached
+        balance = get_wallet_balance_cached(RPC_URL, WALLET_SECRET, USDC_MINT)
+        if balance > 0:
+            return balance
+    except Exception as e:
+        print(f"[CONFIG] Could not read wallet balance: {e}, using env/default")
+    
+    # Fallback to configured value
+    return BANKROLL_USD
+
+
 def get_position_size(score: int, conviction_type: str) -> float:
     """
-    Calculate optimal position size based on proven performance.
+    Calculate optimal position size based on proven performance AND current balance.
     
     Based on actual data:
     - Score 8: 50% WR, 254% avg gain
@@ -129,13 +154,17 @@ def get_position_size(score: int, conviction_type: str) -> float:
     - Smart Money: 57% WR
     - Strict: 30% WR
     """
-    # Determine base size
+    # Get ACTUAL current bankroll (not hardcoded)
+    current_bankroll = get_current_bankroll()
+    
+    # Calculate base percentage (not absolute USD)
+    # This way it scales with balance automatically
     if "Smart Money" in conviction_type:
-        base = SMART_MONEY_BASE
+        base_pct = 22.5  # 22.5% for $20 = $4.50
     elif "Strict" in conviction_type:
-        base = STRICT_BASE
+        base_pct = 20.0  # 20% for $20 = $4.00
     else:
-        base = GENERAL_BASE
+        base_pct = 17.5  # 17.5% for $20 = $3.50
     
     # Apply score multiplier
     if score >= 10:
@@ -147,8 +176,11 @@ def get_position_size(score: int, conviction_type: str) -> float:
     else:
         multiplier = SCORE_7_MULT
     
-    # Calculate final size using 1/4 Kelly overlay as ceiling
-    size = base * multiplier
+    # Calculate size as percentage of CURRENT balance
+    size_pct = base_pct * multiplier
+    size = current_bankroll * (size_pct / 100.0)
+    
+    # Kelly overlay as ceiling (using current bankroll)
     try:
         # Lazy import to avoid circulars at module import time
         from .strategy_optimized import get_expected_win_rate, get_expected_avg_gain, get_kelly_fraction
@@ -156,14 +188,15 @@ def get_position_size(score: int, conviction_type: str) -> float:
         avg_gain = get_expected_avg_gain(score, conviction_type)
         kelly = get_kelly_fraction(win_rate, avg_gain)
         fractional_kelly = max(0.0, min(kelly * 0.25, 0.25))
-        kelly_size = BANKROLL_USD * fractional_kelly
+        kelly_size = current_bankroll * fractional_kelly
         # Use the minimum of heuristic size and Kelly ceiling for safety
         size = min(size, kelly_size)
     except Exception:
         pass
     
-    # Cap at max
-    size = min(size, MAX_POSITION_SIZE_USD)
+    # Cap at max percentage of current balance
+    max_size = current_bankroll * (MAX_POSITION_SIZE_PCT / 100.0)
+    size = min(size, max_size)
     
     return size
 

@@ -281,7 +281,19 @@ def _exit_loop(engine: TradeEngine, stop_event: threading.Event) -> None:
                         if iteration % 300 == 0:
                             print(f"[EXIT_LOOP] Checking exit for {token[:8]}... at price ${price:.8f}", flush=True)
                         engine.check_exits(token, price)
+                        # Reset price failure counter on success
+                        if token in engine.live:
+                            engine.live[token]["price_failures"] = 0
                     else:
+                        # Track consecutive price failures
+                        if token in engine.live:
+                            failures = engine.live[token].get("price_failures", 0) + 1
+                            engine.live[token]["price_failures"] = failures
+                            
+                            if failures > 20:  # 40 seconds of failures (20 * 2s intervals)
+                                engine._log("exit_repeated_price_failures", token=token, failures=failures)
+                                print(f"[EXIT_LOOP] ⚠️ {failures} consecutive price failures for {token[:8]}, cannot monitor position!", flush=True)
+                        
                         if iteration % 300 == 0:
                             print(f"[EXIT_LOOP] No price data for {token[:8]}...", flush=True)
                 except Exception as e:
