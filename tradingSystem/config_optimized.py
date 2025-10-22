@@ -40,8 +40,9 @@ MAX_SLIPPAGE_PCT = _get_float("TS_MAX_SLIPPAGE_PCT", 5.0)  # NEW: Max acceptable
 MAX_PRICE_IMPACT_PCT = _get_float("TS_MAX_PRICE_IMPACT_PCT", 10.0)  # NEW: Max price impact
 
 # Base asset
+SOL_MINT = os.getenv("TS_SOL_MINT", "So11111111111111111111111111111111111111112")
 USDC_MINT = os.getenv("TS_USDC_MINT", "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v")
-BASE_MINT = os.getenv("TS_BASE_MINT", USDC_MINT)
+BASE_MINT = os.getenv("TS_BASE_MINT", SOL_MINT)  # Default to SOL for trading
 
 # ==================== RISK & POSITION SIZING ====================
 # Based on proven performance: 42% WR overall, 50% WR for Score 8
