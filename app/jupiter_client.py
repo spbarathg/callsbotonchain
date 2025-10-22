@@ -173,8 +173,8 @@ class JupiterClient:
                         logger.warning(f"Jupiter 429 received. attempt={attempt+1}/{retries} backoff={sleep_for:.2f}s")
                         time.sleep(sleep_for)
                         # Trigger cool down if persistent
-                        if self._consecutive_429 >= int(os.getenv("JUP_429_COOLDOWN_THRESHOLD", "3")):
-                            cooldown_sec = int(os.getenv("JUP_429_COOLDOWN_SEC", "90"))
+                        if self._consecutive_429 >= int(os.getenv("JUP_429_COOLDOWN_THRESHOLD", "1")):
+                            cooldown_sec = int(os.getenv("JUP_429_COOLDOWN_SEC", "300"))
                             self._cooldown_until = time.time() + cooldown_sec
                             logger.error(f"Entering Jupiter cooldown for {cooldown_sec}s due to repeated 429s")
                         continue

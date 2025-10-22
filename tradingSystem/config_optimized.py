@@ -34,15 +34,23 @@ def _get_bool(name: str, default: bool) -> bool:
 # ==================== WALLET & EXECUTION ====================
 RPC_URL = os.getenv("TS_RPC_URL", "https://api.mainnet-beta.solana.com")
 WALLET_SECRET = os.getenv("TS_WALLET_SECRET", "")
-SLIPPAGE_BPS = _get_int("TS_SLIPPAGE_BPS", 2000)  # 20.0% - User requested for maximum execution reliability
-PRIORITY_FEE_MICROLAMPORTS = _get_int("TS_PRIORITY_FEE_MICROLAMPORTS", 100000)  # 100k for SPEED (was 10k)
-MAX_SLIPPAGE_PCT = _get_float("TS_MAX_SLIPPAGE_PCT", 5.0)  # NEW: Max acceptable slippage
-MAX_PRICE_IMPACT_PCT = _get_float("TS_MAX_PRICE_IMPACT_PCT", 10.0)  # NEW: Max price impact
+SLIPPAGE_BPS = _get_int("TS_SLIPPAGE_BPS", 2000)  # 20.0% default per strategy
+# Priority fee policy (free/low-cost): dynamic bump within [min,max]
+PRIORITY_FEE_MIN_MICROLAMPORTS = _get_int("TS_PRIORITY_FEE_MIN_MICROLAMPORTS", 5000)
+PRIORITY_FEE_MAX_MICROLAMPORTS = _get_int("TS_PRIORITY_FEE_MAX_MICROLAMPORTS", 20000)
+# Backward-compat constant if referenced elsewhere
+PRIORITY_FEE_MICROLAMPORTS = PRIORITY_FEE_MAX_MICROLAMPORTS
+MAX_SLIPPAGE_PCT = _get_float("TS_MAX_SLIPPAGE_PCT", 5.0)
+# Separate price impact caps (per user decision): buys 25%, sells 50%
+MAX_PRICE_IMPACT_BUY_PCT = _get_float("TS_MAX_PRICE_IMPACT_BUY_PCT", 25.0)
+MAX_PRICE_IMPACT_SELL_PCT = _get_float("TS_MAX_PRICE_IMPACT_SELL_PCT", 50.0)
+MAX_PRICE_IMPACT_PCT = MAX_PRICE_IMPACT_BUY_PCT  # backward-compat for older imports
 
 # Base asset
 SOL_MINT = os.getenv("TS_SOL_MINT", "So11111111111111111111111111111111111111112")
 USDC_MINT = os.getenv("TS_USDC_MINT", "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v")
-BASE_MINT = os.getenv("TS_BASE_MINT", SOL_MINT)  # Default to SOL for trading
+BASE_MINT = os.getenv("TS_BASE_MINT", SOL_MINT)  # Buys funded by SOL
+SELL_MINT = os.getenv("TS_SELL_MINT", USDC_MINT)  # Sells exit to USDC by default
 
 # ==================== RISK & POSITION SIZING ====================
 # Based on proven performance: 42% WR overall, 50% WR for Score 8
