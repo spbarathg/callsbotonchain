@@ -50,7 +50,7 @@ MAX_PRICE_IMPACT_PCT = MAX_PRICE_IMPACT_BUY_PCT  # backward-compat for older imp
 SOL_MINT = os.getenv("TS_SOL_MINT", "So11111111111111111111111111111111111111112")
 USDC_MINT = os.getenv("TS_USDC_MINT", "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v")
 BASE_MINT = os.getenv("TS_BASE_MINT", SOL_MINT)  # Buys funded by SOL
-SELL_MINT = os.getenv("TS_SELL_MINT", USDC_MINT)  # Sells exit to USDC by default
+SELL_MINT = os.getenv("TS_SELL_MINT", SOL_MINT)  # Sells exit to SOL (user preference)
 
 # ==================== RISK & POSITION SIZING ====================
 # Based on proven performance: 42% WR overall, 50% WR for Score 8

@@ -177,7 +177,7 @@ class Broker:
                 except Exception as sim_error:
                     print(f"[BROKER] ⚠️ Simulation check failed: {sim_error}", flush=True)
                 
-                # Send transaction
+                # Send transaction with finalized commitment requirement on confirmation
                 sig_resp = self._rpc.send_raw_transaction(
                     bytes(tx),
                     opts=TxOpts(skip_preflight=self._fast_exec, max_retries=2)
@@ -187,9 +187,9 @@ class Broker:
                 sig_str = str(sig)
                 print(f"[BROKER] Transaction submitted: {sig_str}", flush=True)
                 
-                # Wait for confirmation (30s) with failure detection
+                # Wait for confirmation (up to 60s) at finalized commitment
                 confirmed = False
-                for conf_attempt in range(10 if self._fast_exec else 15):
+                for conf_attempt in range(60):
                     try:
                         result = self._rpc.get_signature_statuses([sig])
                         if result and result.value and result.value[0]:
@@ -199,21 +199,29 @@ class Broker:
                                 error_msg = f"TransactionErrorInstructionError({tx_status.err})"
                                 print(f"[BROKER] ❌ Transaction failed: {error_msg}", flush=True)
                                 return sig_str, error_msg
-                            confirmed = True
-                            print(f"[BROKER] ✅ Transaction confirmed: {sig_str[:16]}...", flush=True)
-                            break
+                            # Check confirmation status if present
+                            try:
+                                conf = getattr(tx_status, 'confirmation_status', None)
+                                if conf and str(conf) == 'finalized':
+                                    confirmed = True
+                            except Exception:
+                                # Fallback: if confirmation_status not available, consider after sufficient waits
+                                confirmed = True
+                            if confirmed:
+                                print(f"[BROKER] ✅ Transaction FINALIZED: {sig_str[:16]}...", flush=True)
+                                break
                         else:
-                            if conf_attempt % 5 == 0:
-                                print(f"[BROKER] ⏳ Waiting for confirmation... ({conf_attempt}/15)", flush=True)
+                            if conf_attempt % 10 == 0:
+                                print(f"[BROKER] ⏳ Waiting for FINALIZED... ({conf_attempt}/60)", flush=True)
                     except Exception as e:
-                        if conf_attempt == 14:
+                        if conf_attempt == 59:
                             return sig_str, f"RPC error: {str(e)}"
-                    time.sleep(1 if self._fast_exec else 2)
+                    time.sleep(1)
 
                 if confirmed:
                     return sig_str, None
-                print(f"[BROKER] ⚠️ Transaction timeout: {sig_str[:16]}... (may still succeed later)", flush=True)
-                return sig_str, "Transaction not confirmed within 30s (may still succeed later)"
+                print(f"[BROKER] ⚠️ Transaction timeout: {sig_str[:16]}... (not finalized within 60s)", flush=True)
+                return sig_str, "Transaction not finalized within 60s"
                 
             except Exception as e:
                 # If we caught a 6024 from earlier simulation or RPC error path, try re-quote and swap
