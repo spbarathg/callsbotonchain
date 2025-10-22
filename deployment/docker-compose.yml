@@ -19,9 +19,17 @@ services:
       - TELEGRAM_USER_SESSION_FILE=sessions/relay_user.session
       - TS_BLIND_BUY=true
       - USE_LIQUIDITY_FILTER=false
-      - GENERAL_CYCLE_MIN_SCORE=8
-      - MAX_1H_CHANGE_FOR_ALERT=200
-      - MAX_24H_CHANGE_FOR_ALERT=300
+      - GENERAL_CYCLE_MIN_SCORE=7
+      - MIN_MARKET_CAP_USD=10000
+      - MAX_MARKET_CAP_USD=500000
+      - MAX_MARKET_CAP_FOR_DEFAULT_ALERT=500000
+      - MIN_LIQUIDITY_USD=0
+      - MIN_VOLUME_24H_USD=10000
+      - MIN_VOL_TO_MCAP_RATIO=0.3
+      - MAX_TOP10_CONCENTRATION=30
+      - MAX_BUNDLERS_PERCENT=15
+      - MAX_INSIDERS_PERCENT=25
+      - SMART_MONEY_SCORE_BONUS=0
     volumes:
       - ./var:/app/var
       - worker_sessions:/app/sessions
