@@ -524,9 +524,10 @@ class Broker:
                             # CRITICAL FIX: Wait for confirmation instead of assuming success!
                             print(f"[BROKER] ⏳ Waiting for confirmation...", flush=True)
                             confirmed = False
+                            sig_obj = Signature.from_string(sig)  # Convert string to Signature object
                             for conf_attempt in range(15):  # 30 seconds max
                                 try:
-                                    status_result = self._rpc.get_signature_statuses([sig])
+                                    status_result = self._rpc.get_signature_statuses([sig_obj])
                                     if status_result and status_result.value and status_result.value[0]:
                                         tx_status = status_result.value[0]
                                         # Check if transaction failed
