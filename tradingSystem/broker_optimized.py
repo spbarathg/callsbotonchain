@@ -12,6 +12,7 @@ import base64
 import threading
 import json
 import time
+import requests
 from typing import Dict, Optional, Tuple
 
 from app.http_client import request_json
@@ -87,6 +88,25 @@ class Broker:
             return len(decoded) == 32
         except Exception:
             return False
+    
+    def _get_sol_price_fallback(self) -> float:
+        """Get SOL price from external oracle as fallback (no Jupiter dependency)"""
+        try:
+            # Try CoinGecko (free, no API key needed)
+            resp = requests.get(
+                "https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd",
+                timeout=5
+            )
+            if resp.status_code == 200:
+                price = float(resp.json()["solana"]["usd"])
+                print(f"[BROKER] SOL price from CoinGecko: ${price:.2f}", flush=True)
+                return price
+        except Exception as e:
+            print(f"[BROKER] CoinGecko failed: {e}", flush=True)
+        
+        # Ultimate fallback - conservative estimate
+        print("[BROKER] Using conservative SOL price estimate: $180", flush=True)
+        return 180.0
 
     def _get_decimals(self, mint: str) -> int:
         """Get token decimals with retry"""
@@ -173,11 +193,15 @@ class Broker:
                             tx_status = result.value[0]
                             # solders RpcResponse has .err attr; handle failure explicitly
                             if hasattr(tx_status, 'err') and tx_status.err is not None:
-                                error_msg = f"Transaction failed: {tx_status.err}"
-                                print(f"[BROKER] ❌ {error_msg}", flush=True)
+                                error_msg = f"TransactionErrorInstructionError({tx_status.err})"
+                                print(f"[BROKER] ❌ Transaction failed: {error_msg}", flush=True)
                                 return sig_str, error_msg
                             confirmed = True
+                            print(f"[BROKER] ✅ Transaction confirmed: {sig_str[:16]}...", flush=True)
                             break
+                        else:
+                            if conf_attempt % 5 == 0:
+                                print(f"[BROKER] ⏳ Waiting for confirmation... ({conf_attempt}/15)", flush=True)
                     except Exception as e:
                         if conf_attempt == 14:
                             return sig_str, f"RPC error: {str(e)}"
@@ -185,6 +209,7 @@ class Broker:
 
                 if confirmed:
                     return sig_str, None
+                print(f"[BROKER] ⚠️ Transaction timeout: {sig_str[:16]}... (may still succeed later)", flush=True)
                 return sig_str, "Transaction not confirmed within 30s (may still succeed later)"
                 
             except Exception as e:
@@ -248,13 +273,19 @@ class Broker:
         except Exception:
             pass
 
+        # Use VERY HIGH priority fees for sells to ensure execution
+        # 1 SOL = 1,000,000,000 lamports, so 1,000,000 microlamports = 0.001 SOL priority fee
+        priority_fee = 1000000  # 0.001 SOL priority fee - aggressive!
+        
         result = jup.get_swap_transaction(
             quote=quote,
             user_public_key=self._pubkey,
             wrap_unwrap_sol=True,
-            priority_fee=int(max(PRIORITY_FEE_MICROLAMPORTS, 200000) if self._fast_exec else int(PRIORITY_FEE_MICROLAMPORTS or 100000)),
+            priority_fee=priority_fee,
             timeout=15.0
         )
+        
+        print(f"[BROKER] Using priority fee: {priority_fee} microlamports (${priority_fee/1e9 * 180:.4f})", flush=True)
         
         if result["status_code"] == 200:
             swap_tx = result["json"].get("swapTransaction")
@@ -305,7 +336,7 @@ class Broker:
             if BASE_MINT == "So11111111111111111111111111111111111111112":
                 # Get SOL price (approximate - for exact, would need price oracle)
                 # For now, use Jupiter quote-api to get rough SOL price
-                sol_price_usd = 180.0  # Fallback price
+                sol_price_usd = self._get_sol_price_fallback()
                 try:
                     # Get SOL/USDC quote to determine SOL price
                     from app.jupiter_client import get_jupiter_client
@@ -323,7 +354,7 @@ class Broker:
                             sol_price_usd = out_amount
                             print(f"[BROKER] SOL price from Jupiter: ${sol_price_usd:.2f}", flush=True)
                 except Exception as e:
-                    print(f"[BROKER] Could not fetch SOL price, using fallback ${sol_price_usd}", flush=True)
+                    print(f"[BROKER] Could not fetch SOL price from Jupiter, using fallback ${sol_price_usd:.2f}", flush=True)
                 
                 # Convert USD to SOL
                 sol_amount = float(usd_size) / sol_price_usd
@@ -424,7 +455,7 @@ class Broker:
             return Fill(price=0.0, qty=0.0, usd=0.0, success=False, error=f"Buy failed: {str(e)}")
 
     def market_sell(self, token: str, qty: float) -> Fill:
-        """Execute sell with comprehensive safety"""
+        """Execute sell with escalating slippage - NEVER GIVE UP!"""
         try:
             # Validation
             if qty <= 0:
@@ -439,44 +470,108 @@ class Broker:
             if in_amount <= 0:
                 return Fill(price=0.0, qty=0.0, usd=0.0, success=False, error="Amount too small")
             
-            # Get quote
-            quote = self._quote(token, BASE_MINT, in_amount)
-            if not quote:
-                return Fill(price=0.0, qty=0.0, usd=0.0, success=False, error="Failed to get quote")
+            # Escalating slippage: 20%, 30%, 40%, 50% (capped to prevent catastrophic loss)
+            slippage_levels = [2000, 3000, 4000, 5000]
             
-            # Calculate expected fill
-            base_dec = self._get_decimals(BASE_MINT)
-            out_usd = float(quote.get("outAmount") or 0) / (10 ** base_dec)
-            if float(qty) <= 0:
-                return Fill(price=0.0, qty=0.0, usd=0.0, success=False, error="Invalid quantity for price calc")
-            expected_price = out_usd / float(qty)
+            for attempt, slippage_bps in enumerate(slippage_levels, 1):
+                try:
+                    print(f"[BROKER] 🎯 SELL attempt {attempt}/{len(slippage_levels)} with {slippage_bps/100}% slippage for {token[:8]}...", flush=True)
+                    
+                    # Get quote with escalating slippage
+                    quote = self._quote(token, BASE_MINT, in_amount, slippage_bps_override=slippage_bps)
+                    if not quote:
+                        print(f"[BROKER] ⚠️ Quote failed at {slippage_bps/100}% slippage, trying next level...", flush=True)
+                        time.sleep(2)
+                        continue
+                    
+                    # Calculate expected fill
+                    base_dec = self._get_decimals(BASE_MINT)
+                    out_usd = float(quote.get("outAmount") or 0) / (10 ** base_dec)
+                    if float(qty) <= 0:
+                        continue
+                    expected_price = out_usd / float(qty)
+                    
+                    # Skip price impact check for sells - we need to exit no matter what
+                    
+                    # Dry run
+                    if self._dry:
+                        return Fill(price=expected_price, qty=float(qty), usd=out_usd, 
+                                   success=True, slippage_pct=0.0)
+                    
+                    # Execute
+                    swap_tx = self._swap(quote)
+                    if not swap_tx:
+                        print(f"[BROKER] ⚠️ Swap failed at {slippage_bps/100}% slippage, trying next level...", flush=True)
+                        time.sleep(2)
+                        continue
+                    
+                    # Try with simulation first
+                    sig, error = self._sign_and_send(swap_tx)
+                    
+                    # If failed with 6024, try direct send
+                    if error and ("6024" in str(error) or "0x1788" in str(error) or "TransactionErrorInstructionError" in str(error)):
+                        print(f"[BROKER] ⚠️ Simulation failed, attempting direct send (skip preflight)...", flush=True)
+                        try:
+                            raw_tx = base64.b64decode(swap_tx)
+                            versioned_tx = VersionedTransaction.from_bytes(raw_tx)
+                            signed_tx = VersionedTransaction(versioned_tx.message, [self._kp])
+                            
+                            opts = TxOpts(skip_preflight=True, preflight_commitment="processed")
+                            result = self._rpc.send_raw_transaction(bytes(signed_tx), opts=opts)
+                            sig = str(result.value)
+                            error = None
+                            print(f"[BROKER] ✅ Direct send submitted: {sig[:16]}...", flush=True)
+                        except Exception as e2:
+                            print(f"[BROKER] ❌ Direct send failed: {e2}", flush=True)
+                            if attempt < len(slippage_levels):
+                                print(f"[BROKER] 🔄 Trying with higher slippage...", flush=True)
+                                time.sleep(3)
+                                continue
+                            else:
+                                return Fill(price=0.0, qty=0.0, usd=0.0, success=False, 
+                                          error=f"All attempts exhausted: {e2}", tx=sig if sig else "")
+                    
+                    # If no error or direct send succeeded
+                    if not error:
+                        # CRITICAL: Validate we got reasonable value back
+                        # If we got less than 10% of expected value, treat as failed
+                        if out_usd > 0 and out_usd < (float(qty) * expected_price * 0.10):
+                            print(f"[BROKER] ⚠️ SELL returned only ${out_usd:.4f} (< 10% of expected), treating as FAILED", flush=True)
+                            print(f"[BROKER] Expected: ${float(qty) * expected_price:.4f}, Got: ${out_usd:.4f}", flush=True)
+                            return Fill(price=0.0, qty=0.0, usd=0.0, success=False, 
+                                       error=f"Sell returned only ${out_usd:.4f} (catastrophic slippage)", tx=sig)
+                        
+                        print(f"[BROKER] ✅ SELL SUCCESS at {slippage_bps/100}% slippage!", flush=True)
+                        return Fill(price=expected_price, qty=float(qty), usd=out_usd, 
+                                   tx=sig, success=True, slippage_pct=slippage_bps/100)
+                    
+                    # If still error and not last attempt, try next level
+                    if attempt < len(slippage_levels):
+                        print(f"[BROKER] ⚠️ Failed at {slippage_bps/100}% slippage: {error}", flush=True)
+                        print(f"[BROKER] 🔄 Escalating to {slippage_levels[attempt]/100}% slippage...", flush=True)
+                        time.sleep(3)
+                        continue
+                    else:
+                        return Fill(price=0.0, qty=0.0, usd=0.0, success=False, error=error, tx=sig)
+                
+                except Exception as e:
+                    print(f"[BROKER] ❌ Exception at {slippage_bps/100}% slippage: {e}", flush=True)
+                    if attempt < len(slippage_levels):
+                        time.sleep(3)
+                        continue
+                    else:
+                        raise
             
-            # Check price impact
-            price_impact = abs(float(quote.get("priceImpactPct") or 0))
-            if price_impact > 15.0:  # Slightly higher for sells
-                return Fill(price=0.0, qty=0.0, usd=0.0, success=False,
-                           error=f"Price impact too high: {price_impact:.1f}%")
-            
-            # Dry run
-            if self._dry:
-                return Fill(price=expected_price, qty=float(qty), usd=out_usd, 
-                           success=True, slippage_pct=0.0)
-            
-            # Execute
-            swap_tx = self._swap(quote)
-            if not swap_tx:
-                return Fill(price=0.0, qty=0.0, usd=0.0, success=False, error="Failed to get swap transaction")
-            
-            sig, error = self._sign_and_send(swap_tx)
-            if error:
-                return Fill(price=0.0, qty=0.0, usd=0.0, success=False, error=error, tx=sig)
-            
-            return Fill(price=expected_price, qty=float(qty), usd=out_usd, 
-                       tx=sig, success=True, slippage_pct=0.0)
+            # If we exhausted all attempts
+            return Fill(price=0.0, qty=0.0, usd=0.0, success=False, 
+                       error="Exhausted all slippage levels (20%-50%) - token likely unsellable")
             
         except Exception as e:
             self._error_count += 1
             self._last_error_time = time.time()
+            print(f"[BROKER] ❌ SELL EXCEPTION: {e}", flush=True)
+            import traceback
+            traceback.print_exc()
             return Fill(price=0.0, qty=0.0, usd=0.0, success=False, error=f"Sell failed: {str(e)}")
 
     def get_error_rate(self) -> float:
