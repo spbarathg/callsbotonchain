@@ -1,6 +1,6 @@
 """
 Enhanced API endpoints for comprehensive dashboard
-Provides data for Overview, Performance, System, Configuration, and Paper Trading tabs
+Provides data for Overview, Performance, System, and Configuration tabs
 """
 import os
 import json

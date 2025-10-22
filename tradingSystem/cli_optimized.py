@@ -241,8 +241,9 @@ def _exit_loop(engine: TradeEngine, stop_event: threading.Event) -> None:
     last_portfolio_sync = 0
     iteration = 0
     
-    # Configurable check interval (default: 5 seconds)
-    check_interval = float(os.getenv("TS_EXIT_CHECK_INTERVAL", "5.0"))
+    # Configurable check interval (default: 2 seconds for faster peak tracking)
+    # Reduced from 5s to 2s to catch price spikes and protect profits better
+    check_interval = float(os.getenv("TS_EXIT_CHECK_INTERVAL", "2.0"))
     print(f"[EXIT_LOOP] Exit check interval: {check_interval}s", flush=True)
     
     while not stop_event.is_set():
@@ -314,9 +315,9 @@ def _exit_loop(engine: TradeEngine, stop_event: threading.Event) -> None:
                             print(f"[EXIT_LOOP] Checking exit for {token[:8]}... at price ${price:.8f}", flush=True)
                         engine.check_exits(token, price)
                         # Reset price failure counter on success
+                        # NOTE: DO NOT reset sell_failures here - it's managed by check_exits
                         if token in engine.live:
                             engine.live[token]["price_failures"] = 0
-                            engine.live[token]["sell_failures"] = 0
                     else:
                         # Track consecutive price failures
                         if token in engine.live:

@@ -364,22 +364,24 @@ class TradeEngine:
                         sell_failures = self.live[token].get("sell_failures", 0) + 1
                         self.live[token]["sell_failures"] = sell_failures
                         
-                        # After 20 failed sell attempts (illiquid token), force close
+                        # After 20 failed sell attempts, mark as stuck (DON'T force close!)
+                        # Keep trying to sell periodically instead of abandoning the position
                         if sell_failures >= 20:
-                            self._log("force_closing_unsellable_position", token=token, pid=pid,
-                                     sell_failures=sell_failures, reason="too_many_sell_failures")
+                            if sell_failures == 20:  # Log once
+                                self._log("position_stuck_unsellable", token=token, pid=pid,
+                                         sell_failures=sell_failures, 
+                                         reason="will_keep_retrying_with_higher_slippage")
+                                print(f"[TRADER] ⚠️ Position {token[:8]} stuck after 20 sell failures - will keep retrying", flush=True)
                             
-                            # Mark as closed in database and remove from live
-                            close_position(pid)
-                            self.live.pop(token, None)
+                            # Mark as stuck but keep it in live tracking
+                            # Reset counter every 20 attempts to retry periodically
+                            if sell_failures % 20 == 0:
+                                self.live[token]["sell_failures"] = 0  # Reset to retry
+                                self._log("retrying_stuck_position", token=token, pid=pid,
+                                         total_attempts=sell_failures)
                             
-                            # Record as loss (assume total loss for unsellable token)
-                            entry_usd = float(data.get("entry_price", 0)) * qty_open
-                            self.circuit_breaker.record_trade(-entry_usd)
-                            
-                            self._log("forced_exit_illiquid", token=token, pid=pid,
-                                     entry_usd=entry_usd, reason="unsellable_token")
-                            return True  # Consider it "exited" so position clears
+                            # DON'T close position - let it keep trying
+                            # User may want to manually sell or wait for liquidity to return
                     
                     return False
                 

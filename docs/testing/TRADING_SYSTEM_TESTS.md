@@ -286,3 +286,6 @@ ssh root@64.227.157.221 "docker logs --since 10m callsbot-trader | grep -E 'reco
 The comprehensive test suite provides confidence that the trading system will execute correctly in production. The discovery and fix of the circuit breaker deadlock bug demonstrates the value of thorough integration testing.
 
 
+
+
+
