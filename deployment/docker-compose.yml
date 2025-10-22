@@ -19,9 +19,9 @@ services:
       - TELEGRAM_USER_SESSION_FILE=sessions/relay_user.session
       - TS_BLIND_BUY=true
       - USE_LIQUIDITY_FILTER=false
-      - GENERAL_CYCLE_MIN_SCORE=0
-      - MAX_1H_CHANGE_FOR_ALERT=10000
-      - MAX_24H_CHANGE_FOR_ALERT=10000
+      - GENERAL_CYCLE_MIN_SCORE=8
+      - MAX_1H_CHANGE_FOR_ALERT=200
+      - MAX_24H_CHANGE_FOR_ALERT=300
     volumes:
       - ./var:/app/var
       - worker_sessions:/app/sessions
@@ -62,31 +62,6 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  # Paper Trading - Runs automatically to simulate trading with $500
-  paper_trader:
-    build:
-      context: ..
-      dockerfile: deployment/Dockerfile
-    container_name: callsbot-paper-trader
-    user: root
-    command: ["python", "-m", "tradingSystem.cli_paper", "--capital", "500"]
-    restart: unless-stopped
-    env_file:
-      - .env
-    environment:
-      - CALLSBOT_LOG_STDOUT=true
-    volumes:
-      - ./var:/app/var
-      - ./data/logs:/app/data/logs
-    depends_on:
-      - worker
-      - web
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
-
   # Real Trader - Uses optimized system with adaptive trailing stops and rebalancing
   trader:
     build:
@@ -117,8 +92,8 @@ services:
       - TS_PRIORITY_FEE_MICROLAMPORTS=200000
       # FIX: Match worker's liquidity filter (no filter)
       - TS_MIN_LIQUIDITY_USD=0
-      # Portfolio Rebalancing (Circle Strategy)
-      - PORTFOLIO_REBALANCING_ENABLED=true
+      # Portfolio Rebalancing (Circle Strategy) - DISABLED to match backtest
+      - PORTFOLIO_REBALANCING_ENABLED=false
       - PORTFOLIO_MAX_POSITIONS=5
       - PORTFOLIO_MIN_MOMENTUM_ADVANTAGE=15.0
       - PORTFOLIO_REBALANCE_COOLDOWN=300
@@ -127,8 +102,8 @@ services:
       - PORTFOLIO_PROTECT_LATE_PUMPERS=true
       - PORTFOLIO_LATE_PUMP_THRESHOLD=50
       - PORTFOLIO_NEVER_REBALANCE_ABOVE=100
-      # Adaptive Trailing Stops
-      - TS_ADAPTIVE_TRAILING_ENABLED=true
+      # Adaptive Trailing Stops - DISABLED (has bugs, use proven fixed trails)
+      - TS_ADAPTIVE_TRAILING_ENABLED=false
       - TS_EARLY_TRAIL_PCT=25.0
       - TS_MID_TRAIL_PCT=15.0
       - TS_LATE_TRAIL_PCT=12.0

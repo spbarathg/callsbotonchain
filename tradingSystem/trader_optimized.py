@@ -213,6 +213,7 @@ class TradeEngine:
                     "strategy": strategy,
                     "entry_price": fill.price,  # CRITICAL: Store entry price
                     "peak_price": fill.price,
+                    "price_failures": 0,  # Track consecutive price fetch failures
                 }
                 
                 self._log("open_position", 
@@ -262,8 +263,17 @@ class TradeEngine:
                 # Update peak and get trail stop
                 peak, trail = update_peak_and_trail(pid, price)
                 
-                # CRITICAL: Get ENTRY price (not peak)
-                entry_price = float(data.get("entry_price", peak))
+                # Validate database returns
+                if peak <= 0 or trail <= 0:
+                    self._log("exit_invalid_peak_trail", token=token, pid=pid, peak=peak, trail=trail)
+                    return False
+                
+                # CRITICAL: Get ENTRY price (no fallback - must be present)
+                entry_price = data.get("entry_price")
+                if not entry_price or entry_price <= 0:
+                    self._log("exit_missing_entry_price", token=token, pid=pid)
+                    return False
+                entry_price = float(entry_price)
                 strategy = str(data.get("strategy", "unknown"))
                 
                 # Update peak in live data
@@ -434,10 +444,18 @@ class TradeEngine:
             # Add all current positions to portfolio manager
             for token, data in self.live.items():
                 if not pm.has_position(token):
+                    # Get the position ID for this token
+                    pid = data.get("pid")
+                    if not pid:
+                        continue
+                    
+                    # Get the actual quantity from the database
+                    qty = get_open_qty(pid)
+                    
                     pm.add_position(
                         token_address=token,
                         entry_price=data.get("entry_price", 0),
-                        quantity=get_open_qty(token) or 0,
+                        quantity=qty,
                         signal_score=5,  # Default score
                         conviction_score=0,
                         name="",
