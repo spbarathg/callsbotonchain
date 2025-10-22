@@ -134,26 +134,26 @@ class JupiterClient:
             try:
                 # Ensure only one in-flight request at a time across process
                 with self._request_lock:
-                if method == "GET":
-                    headers["Accept"] = "application/json"
-                    response = self.session.get(
-                        url,
-                        params=params,
-                        timeout=timeout,
-                        headers=headers,
-                        verify=True  # Keep SSL verification
-                    )
-                elif method == "POST":
-                    headers["Content-Type"] = "application/json"
-                    response = self.session.post(
-                        url,
-                        json=json,
-                        timeout=timeout,
-                        headers=headers,
-                        verify=True  # Keep SSL verification
-                    )
-                else:
-                    raise ValueError(f"Unsupported method: {method}")
+                    if method == "GET":
+                        headers["Accept"] = "application/json"
+                        response = self.session.get(
+                            url,
+                            params=params,
+                            timeout=timeout,
+                            headers=headers,
+                            verify=True  # Keep SSL verification
+                        )
+                    elif method == "POST":
+                        headers["Content-Type"] = "application/json"
+                        response = self.session.post(
+                            url,
+                            json=json,
+                            timeout=timeout,
+                            headers=headers,
+                            verify=True  # Keep SSL verification
+                        )
+                    else:
+                        raise ValueError(f"Unsupported method: {method}")
                 
                 # Success
                 if response.status_code == 200:
