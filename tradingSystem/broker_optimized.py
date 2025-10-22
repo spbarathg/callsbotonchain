@@ -519,8 +519,35 @@ class Broker:
                             opts = TxOpts(skip_preflight=True, preflight_commitment="processed")
                             result = self._rpc.send_raw_transaction(bytes(signed_tx), opts=opts)
                             sig = str(result.value)
-                            error = None
                             print(f"[BROKER] ✅ Direct send submitted: {sig[:16]}...", flush=True)
+                            
+                            # CRITICAL FIX: Wait for confirmation instead of assuming success!
+                            print(f"[BROKER] ⏳ Waiting for confirmation...", flush=True)
+                            confirmed = False
+                            for conf_attempt in range(15):  # 30 seconds max
+                                try:
+                                    status_result = self._rpc.get_signature_statuses([sig])
+                                    if status_result and status_result.value and status_result.value[0]:
+                                        tx_status = status_result.value[0]
+                                        # Check if transaction failed
+                                        if hasattr(tx_status, 'err') and tx_status.err is not None:
+                                            error = f"Transaction confirmed but FAILED: {tx_status.err}"
+                                            print(f"[BROKER] ❌ {error}", flush=True)
+                                            break
+                                        # Check if confirmed
+                                        if hasattr(tx_status, 'confirmation_status'):
+                                            confirmed = True
+                                            error = None
+                                            print(f"[BROKER] ✅ Transaction CONFIRMED: {sig[:16]}...", flush=True)
+                                            break
+                                    time.sleep(2)
+                                except Exception as check_error:
+                                    print(f"[BROKER] ⚠️ Confirmation check error: {check_error}", flush=True)
+                                    time.sleep(2)
+                            
+                            if not confirmed and not error:
+                                error = "Transaction submitted but not confirmed after 30s"
+                                print(f"[BROKER] ❌ {error}", flush=True)
                         except Exception as e2:
                             print(f"[BROKER] ❌ Direct send failed: {e2}", flush=True)
                             if attempt < len(slippage_levels):
