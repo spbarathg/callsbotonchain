@@ -26,41 +26,51 @@ from app.toggles import trading_enabled
 from .db import get_open_position_id_by_token
 from .config_optimized import MAX_CONCURRENT
 from .portfolio_manager import get_portfolio_manager, should_use_portfolio_manager
+from .price_cache import get_price_cache
 
 
-def _get_last_price_usd(token: str) -> float:
-    """Fetch last price with robust fallbacks.
-
+def _get_last_price_usd(token: str, use_cache: bool = True) -> float:
+    """Fetch last price with caching and robust fallbacks.
+    
+    Args:
+        token: Token address
+        use_cache: If True, return cached price if available (default: True)
+    
     Order:
-    1) Internal tracked API via proxy (Docker network)
-    2) DexScreener token endpoint
+    1) Cache (if use_cache=True and cached value is fresh)
+    2) Internal tracked API via proxy (Docker network)  
+    3) DexScreener token endpoint
     """
-    print(f"[DEBUG] _get_last_price_usd: Starting for {token[:8]}...", flush=True)
+    # Check cache first if enabled
+    if use_cache:
+        cache = get_price_cache()
+        cached_price = cache.get(token)
+        if cached_price is not None:
+            return cached_price
+    
     # 1) Tracked API via proxy
     try:
         api_url = os.getenv("API_URL", "http://callsbot-proxy/api/tracked")
-        print(f"[DEBUG] _get_last_price_usd: Calling proxy API: {api_url}", flush=True)
         resp = requests.get(f"{api_url}?limit=200", timeout=4)
-        print(f"[DEBUG] _get_last_price_usd: Proxy response status: {resp.status_code}", flush=True)
         resp.raise_for_status()
         rows = (resp.json() or {}).get("rows") or []
-        print(f"[DEBUG] _get_last_price_usd: Got {len(rows)} rows from proxy", flush=True)
         for r in rows:
             if r.get("token") == token:
                 lp = r.get("last_price") or r.get("peak_price") or r.get("first_price")
                 price = float(lp or 0.0)
                 if price > 0:
-                    print(f"[DEBUG] _get_last_price_usd: Found price via proxy: {price}", flush=True)
+                    # Cache the price
+                    if use_cache:
+                        cache = get_price_cache()
+                        cache.set(token, price)
                     return price
                 break
     except Exception as e:
-        print(f"[DEBUG] Price via proxy failed for {token[:8]}...: {e}", flush=True)
+        pass
 
-    # 2) DexScreener fallback
+    # 2) DexScreener fallback  
     try:
-        print(f"[DEBUG] _get_last_price_usd: Trying DexScreener fallback...", flush=True)
         ds = requests.get(f"https://api.dexscreener.com/latest/dex/tokens/{token}", timeout=4)
-        print(f"[DEBUG] _get_last_price_usd: DexScreener response status: {ds.status_code}", flush=True)
         if ds.status_code == 200:
             data = ds.json() or {}
             pairs = data.get("pairs") or []
@@ -68,9 +78,13 @@ def _get_last_price_usd(token: str) -> float:
                 p = pairs[0]
                 price = float(p.get("priceUsd") or 0.0)
                 if price > 0:
+                    # Cache the price
+                    if use_cache:
+                        cache = get_price_cache()
+                        cache.set(token, price)
                     return price
     except Exception as e:
-        print(f"[DEBUG] Price via DexScreener failed for {token[:8]}...: {e}", flush=True)
+        pass
 
     return 0.0
 
@@ -192,10 +206,18 @@ def _fetch_real_stats(token: str) -> Optional[Dict]:
     return stats
 
 
-def _is_stale_signal(stats: Dict, max_age_seconds: int = 300) -> bool:
-    """Check if signal is too old (price may have moved significantly)"""
-    # Check if price has already moved too much
-    current_price = _get_last_price_usd(stats.get("token", ""))
+def _is_stale_signal(stats: Dict, current_price: Optional[float] = None, max_age_seconds: int = 300) -> bool:
+    """Check if signal is too old (price may have moved significantly)
+    
+    Args:
+        stats: Signal statistics dictionary
+        current_price: Optional pre-fetched current price (avoids redundant API call)
+        max_age_seconds: Max age in seconds (unused, for future use)
+    """
+    # Use provided price or fetch it (but prefer provided to avoid duplicate calls)
+    if current_price is None:
+        current_price = _get_last_price_usd(stats.get("token", ""), use_cache=True)
+    
     alert_price = float(stats.get("price", 0))
     
     if current_price > 0 and alert_price > 0:
@@ -219,10 +241,14 @@ def _exit_loop(engine: TradeEngine, stop_event: threading.Event) -> None:
     last_portfolio_sync = 0
     iteration = 0
     
+    # Configurable check interval (default: 5 seconds)
+    check_interval = float(os.getenv("TS_EXIT_CHECK_INTERVAL", "5.0"))
+    print(f"[EXIT_LOOP] Exit check interval: {check_interval}s", flush=True)
+    
     while not stop_event.is_set():
         try:
             iteration += 1
-            if iteration % 30 == 0:  # Log every 60 seconds (30 * 2s)
+            if iteration % 12 == 0:  # Log every 60 seconds (12 * 5s)
                 print(f"[EXIT_LOOP] Iteration {iteration}, checking {len(engine.live)} positions", flush=True)
             
             # Log status every 5 minutes
@@ -231,6 +257,13 @@ def _exit_loop(engine: TradeEngine, stop_event: threading.Event) -> None:
                 status = engine.get_status()
                 engine._log("status_check", **status)
                 print(f"[EXIT_LOOP] Status check: {status}", flush=True)
+                
+                # Log cache stats
+                cache = get_price_cache()
+                cache_stats = cache.get_stats()
+                engine._log("price_cache_stats", **cache_stats)
+                print(f"[EXIT_LOOP] Price cache: {cache_stats}", flush=True)
+                
                 last_status_log = now
             
             # Sync portfolio manager every minute
@@ -256,7 +289,7 @@ def _exit_loop(engine: TradeEngine, stop_event: threading.Event) -> None:
                 time.sleep(60)  # Wait a minute before checking again
                 continue
             
-            # Check exits for all open positions
+            # Check exits for all open positions (prices are cached!)
             for token in list(engine.live.keys()):
                 try:
                     pid = get_open_position_id_by_token(token)
@@ -274,9 +307,8 @@ def _exit_loop(engine: TradeEngine, stop_event: threading.Event) -> None:
                             print(f"[EXIT_LOOP] Skipping {token[:8]}... (quantity={qty}, failed fill)", flush=True)
                         continue
                     
-                    # Throttle price checks to reduce Jupiter calls under 429 pressure
-                    time.sleep(0.1)
-                    price = _get_last_price_usd(token)
+                    # Get price (will use cache if available - reduces API calls by ~90%)
+                    price = _get_last_price_usd(token, use_cache=True)
                     if price > 0:
                         if iteration % 300 == 0:
                             print(f"[EXIT_LOOP] Checking exit for {token[:8]}... at price ${price:.8f}", flush=True)
@@ -284,15 +316,33 @@ def _exit_loop(engine: TradeEngine, stop_event: threading.Event) -> None:
                         # Reset price failure counter on success
                         if token in engine.live:
                             engine.live[token]["price_failures"] = 0
+                            engine.live[token]["sell_failures"] = 0
                     else:
                         # Track consecutive price failures
                         if token in engine.live:
                             failures = engine.live[token].get("price_failures", 0) + 1
                             engine.live[token]["price_failures"] = failures
                             
-                            if failures > 20:  # 40 seconds of failures (20 * 2s intervals)
+                            # Force close position after 60 failed price checks (5 minutes)
+                            if failures >= 60:
+                                engine._log("force_closing_dead_position", token=token, failures=failures,
+                                           reason="cannot_get_price_for_5min")
+                                print(f"[EXIT_LOOP] ⚠️ Force-closing dead position {token[:8]} after {failures} price failures", flush=True)
+                                
+                                # Force close in database and clear from live
+                                try:
+                                    from tradingSystem.db import close_position
+                                    data = engine.live.get(token)
+                                    if data and data.get("pid"):
+                                        close_position(data["pid"])
+                                    engine.live.pop(token, None)
+                                    print(f"[EXIT_LOOP] ✅ Forced position closed: {token[:8]}", flush=True)
+                                except Exception as e:
+                                    engine._log("force_close_error", token=token, error=str(e))
+                            
+                            elif failures > 10:  # Warning at 50 seconds
                                 engine._log("exit_repeated_price_failures", token=token, failures=failures)
-                                print(f"[EXIT_LOOP] ⚠️ {failures} consecutive price failures for {token[:8]}, cannot monitor position!", flush=True)
+                                print(f"[EXIT_LOOP] ⚠️ {failures} consecutive price failures for {token[:8]}, will force-close at 60", flush=True)
                         
                         if iteration % 300 == 0:
                             print(f"[EXIT_LOOP] No price data for {token[:8]}...", flush=True)
@@ -300,7 +350,7 @@ def _exit_loop(engine: TradeEngine, stop_event: threading.Event) -> None:
                     engine._log("exit_check_error", token=token, error=str(e))
                     print(f"[EXIT_LOOP] Exit check error for {token[:8]}...: {e}", flush=True)
             
-            time.sleep(2)
+            time.sleep(check_interval)
             
         except Exception as e:
             engine._log("exit_loop_error", error=str(e))
@@ -443,6 +493,17 @@ def run() -> None:
                 if engine.has_position(token_norm):
                     print(f"[DEBUG] Already have position for {token_norm[:8]}, skipping...", flush=True)
                     continue
+                
+                # Skip if token is on cooldown (prevents buy-sell-rebuy loops)
+                print(f"[DEBUG] Checking cooldown for {token_norm[:8]}...", flush=True)
+                if engine.is_on_cooldown(token_norm):
+                    remaining = engine.get_cooldown_remaining(token_norm)
+                    signals_filtered += 1
+                    engine._log("entry_rejected_cooldown", token=token_norm, 
+                               remaining_seconds=remaining)
+                    print(f"[DEBUG] Token {token_norm[:8]} on cooldown for {remaining:.0f}s more", flush=True)
+                    continue
+                
                 print(f"[DEBUG] No existing position, continuing to trade logic...", flush=True)
                 
                 # Check if portfolio is full - evaluate rebalancing
@@ -469,19 +530,19 @@ def run() -> None:
                         engine._log("rebalance_skipped", token=token, reason="stats_fetch_failed")
                         continue
                     
-                    # Check if signal is stale
-                    if _is_stale_signal(stats):
+                    # Fetch current price once (will be reused to avoid duplicate calls)
+                    current_price = _get_last_price_usd(token, use_cache=True)
+                    if current_price <= 0:
+                        current_price = float(stats.get("price", 0))
+                    
+                    # Check if signal is stale (pass current_price to avoid redundant fetch)
+                    if _is_stale_signal(stats, current_price=current_price):
                         engine._log("rebalance_skipped", token=token, reason="signal_stale")
                         continue
                     
                     # Get signal score and conviction
                     signal_score = int(stats.get("final_score", 7))
                     conviction_type = stats.get("conviction_type", "High Confidence (Strict)")
-                    
-                    # Prepare signal for evaluation
-                    current_price = _get_last_price_usd(token)
-                    if current_price <= 0:
-                        current_price = float(stats.get("price", 0))
                     
                     new_signal = {
                         "token": token,
@@ -567,15 +628,20 @@ def run() -> None:
                         continue
                 print(f"[DEBUG] Stats extracted successfully: MCap=${stats['market_cap_usd']:.0f}, Liq=${stats.get('liquidity_usd', 0):.0f}", flush=True)
                 
-                # Check if signal is stale
+                # Fetch current price ONCE and reuse it (avoids 3+ redundant calls!)
+                print(f"[DEBUG] Fetching current price once for staleness + validation...", flush=True)
+                current_price = _get_last_price_usd(token_norm, use_cache=True)
+                print(f"[DEBUG] Current price: ${current_price:.8f}", flush=True)
+                
+                # Check if signal is stale (reuse current_price)
                 print(f"[DEBUG] Checking if signal is stale...", flush=True)
                 _blind = os.getenv("TS_BLIND_BUY", "false").strip().lower() == "true"
                 if not _blind:
-                    if _is_stale_signal(stats):
+                    if _is_stale_signal(stats, current_price=current_price):
                         signals_filtered += 1
                         engine._log("signal_stale", token=token_norm, 
                                    alert_price=stats.get("price"),
-                                   current_price=_get_last_price_usd(token_norm))
+                                   current_price=current_price)
                         print(f"[DEBUG] Signal is stale for {token_norm[:8]}", flush=True)
                         continue
                 print(f"[DEBUG] Signal is fresh (blind={_blind}), continuing...", flush=True)
@@ -631,14 +697,8 @@ def run() -> None:
                     continue
                 
                 # Final validation: double-check price hasn't moved too much
-                print(f"[DEBUG] Calling _get_last_price_usd({token_norm[:8]})...", flush=True)
-                try:
-                    current_price = _get_last_price_usd(token_norm)
-                    print(f"[DEBUG] current_price={current_price}", flush=True)
-                except Exception as e:
-                    print(f"[DEBUG] ❌ EXCEPTION in _get_last_price_usd: {e}", flush=True)
-                    raise
-                
+                # REUSE current_price from earlier to avoid redundant API call!
+                print(f"[DEBUG] Final price validation (cached price=${current_price:.8f})...", flush=True)
                 alert_price = float(stats.get("price", 0))
                 print(f"[DEBUG] alert_price={alert_price}", flush=True)
                 

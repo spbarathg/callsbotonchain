@@ -48,10 +48,10 @@ class JupiterClient:
         self.session.mount('http://', adapter)
         
         # --- Global rate limiter (token bucket) ---
-        # Defaults to ~36 RPM safe budget to stay below Jupiter's 60 RPM limit
-        rpm_limit = max(10, int(os.getenv("JUP_RPM_LIMIT", "20")))
+        # Increased to 45 RPM (75% of Jupiter's 60 RPM limit) for better throughput
+        rpm_limit = max(10, int(os.getenv("JUP_RPM_LIMIT", "45")))
         # refill_rate tokens/sec; capacity allows small bursts
-        self._bucket_capacity = int(os.getenv("JUP_RATE_BUCKET", "3"))
+        self._bucket_capacity = int(os.getenv("JUP_RATE_BUCKET", "5"))
         self._bucket_refill_rate = rpm_limit / 60.0  # tokens per second
         self._bucket_tokens = float(self._bucket_capacity)
         self._bucket_last_refill = time.time()
@@ -60,7 +60,8 @@ class JupiterClient:
         # 429 handling state
         self._consecutive_429 = 0
         self._cooldown_until: Optional[float] = None
-        self._request_lock = threading.Lock()  # serialize requests to avoid bursts
+        # REMOVED: Request lock that was serializing all requests (bottleneck!)
+        # We rely on token bucket for rate limiting instead
         
         # Try DNS resolution - if fails, switch to IP mode
         try:
@@ -129,31 +130,31 @@ class JupiterClient:
             return {"status_code": 429, "json": None, "error": f"Rate limited; cooling down {delay:.1f}s"}
         
         for attempt in range(retries):
-            # Acquire rate-limit token (token bucket)
+            # Acquire rate-limit token (token bucket) - this provides rate limiting
             self._acquire_rate_token()
             try:
-                # Ensure only one in-flight request at a time across process
-                with self._request_lock:
-                    if method == "GET":
-                        headers["Accept"] = "application/json"
-                        response = self.session.get(
-                            url,
-                            params=params,
-                            timeout=timeout,
-                            headers=headers,
-                            verify=True  # Keep SSL verification
-                        )
-                    elif method == "POST":
-                        headers["Content-Type"] = "application/json"
-                        response = self.session.post(
-                            url,
-                            json=json,
-                            timeout=timeout,
-                            headers=headers,
-                            verify=True  # Keep SSL verification
-                        )
-                    else:
-                        raise ValueError(f"Unsupported method: {method}")
+                # NO MORE REQUEST LOCK - allows concurrent requests (better throughput!)
+                # Token bucket prevents overloading Jupiter API
+                if method == "GET":
+                    headers["Accept"] = "application/json"
+                    response = self.session.get(
+                        url,
+                        params=params,
+                        timeout=timeout,
+                        headers=headers,
+                        verify=True  # Keep SSL verification
+                    )
+                elif method == "POST":
+                    headers["Content-Type"] = "application/json"
+                    response = self.session.post(
+                        url,
+                        json=json,
+                        timeout=timeout,
+                        headers=headers,
+                        verify=True  # Keep SSL verification
+                    )
+                else:
+                    raise ValueError(f"Unsupported method: {method}")
                 
                 # Success
                 if response.status_code == 200:
@@ -172,9 +173,9 @@ class JupiterClient:
                         sleep_for = backoff + random.uniform(0, 0.5)
                         logger.warning(f"Jupiter 429 received. attempt={attempt+1}/{retries} backoff={sleep_for:.2f}s")
                         time.sleep(sleep_for)
-                        # Trigger cool down if persistent
-                        if self._consecutive_429 >= int(os.getenv("JUP_429_COOLDOWN_THRESHOLD", "1")):
-                            cooldown_sec = int(os.getenv("JUP_429_COOLDOWN_SEC", "300"))
+                        # Trigger cooldown if persistent (reduced from 5 minutes to 60 seconds)
+                        if self._consecutive_429 >= int(os.getenv("JUP_429_COOLDOWN_THRESHOLD", "3")):
+                            cooldown_sec = int(os.getenv("JUP_429_COOLDOWN_SEC", "60"))
                             self._cooldown_until = time.time() + cooldown_sec
                             logger.error(f"Entering Jupiter cooldown for {cooldown_sec}s due to repeated 429s")
                         continue
