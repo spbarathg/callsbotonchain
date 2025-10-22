@@ -51,7 +51,6 @@ try:
         get_current_config,
         update_toggle as _update_toggle_v2,
     )
-    from src.paper_trading import get_paper_trading_engine
 except Exception:
     # Soft-fallbacks if new modules are not present
     def get_smart_money_status():
@@ -84,21 +83,6 @@ except Exception:
         return {}
     def _update_toggle_v2(toggle_name: str, value: bool):
         return {"success": False, "error": "unavailable"}
-    def get_paper_trading_engine():
-        class _Dummy:  # type: ignore
-            def start_session(self, *a, **k):
-                return {"success": False, "error": "unavailable"}
-            def stop_session(self):
-                return {"success": False, "error": "unavailable"}
-            def reset_session(self):
-                return {"success": False, "error": "unavailable"}
-            def get_portfolio_summary(self):
-                return None
-            def update_positions(self):
-                return {"success": True}
-            def run_backtest(self, *a, **k):
-                return {"success": False, "error": "unavailable"}
-        return _Dummy()
 import time
 from app.toggles import get_toggles, set_toggles
 from app.notify import get_redis_status
@@ -604,46 +588,6 @@ def create_app() -> Flask:
             return jsonify({"success": False, "error": "name required"}), 400
         return _no_cache(jsonify(_sanitize_json(_update_toggle_v2(name, val))))
 
-    # Paper trading
-    @app.post("/api/v2/paper/start")
-    def api_v2_paper_start():
-        body = request.get_json(force=True, silent=True) or {}
-        capital = float(body.get("capital") or 1000.0)
-        strategy = str(body.get("strategy") or "smart_money_only")
-        sizing = str(body.get("position_sizing") or "fixed_50")
-        max_conc = int(body.get("max_concurrent") or 5)
-        eng = get_paper_trading_engine()
-        return _no_cache(jsonify(_sanitize_json(eng.start_session(capital, strategy, sizing, max_conc))))
-
-    @app.post("/api/v2/paper/stop")
-    def api_v2_paper_stop():
-        eng = get_paper_trading_engine()
-        return _no_cache(jsonify(_sanitize_json(eng.stop_session())))
-
-    @app.post("/api/v2/paper/reset")
-    def api_v2_paper_reset():
-        eng = get_paper_trading_engine()
-        return _no_cache(jsonify(_sanitize_json(eng.reset_session())))
-
-    @app.get("/api/v2/paper/portfolio")
-    def api_v2_paper_portfolio():
-        eng = get_paper_trading_engine()
-        # update positions before returning
-        try:
-            eng.update_positions()
-        except Exception:
-            pass
-        return _no_cache(jsonify(_sanitize_json({"portfolio": eng.get_portfolio_summary()})))
-
-    @app.post("/api/v2/paper/backtest")
-    def api_v2_paper_backtest():
-        body = request.get_json(force=True, silent=True) or {}
-        days = int(body.get("days") or 7)
-        capital = float(body.get("capital") or 1000.0)
-        strategy = str(body.get("strategy") or "smart_money_only")
-        eng = get_paper_trading_engine()
-        return _no_cache(jsonify(_sanitize_json(eng.run_backtest(days, capital, strategy))))
-    
     # Comprehensive Token Tracking API
     @app.get("/api/v2/token/<token_address>")
     def api_v2_token_detail(token_address: str):

@@ -55,7 +55,9 @@ class PriceCache:
 
 
 # Global price cache instance
-_price_cache = PriceCache(ttl_seconds=5)  # 5 second cache for exit monitoring
+# Increased to 10 seconds to ensure we stay well within Jupiter's 60 RPM limit
+# With 4 positions × 6 fetches/min = 24 API calls/min (40% of limit)
+_price_cache = PriceCache(ttl_seconds=10)  # 10 second cache for exit monitoring
 
 def get_price_cache() -> PriceCache:
     """Get global price cache instance"""

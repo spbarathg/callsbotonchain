@@ -304,4 +304,3 @@ Risk Management:
 - Max 5 concurrent positions
 - Trailing stops capture 60-70% of peaks
 """
-
