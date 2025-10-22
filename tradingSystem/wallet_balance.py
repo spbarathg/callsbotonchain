@@ -49,20 +49,17 @@ def get_wallet_balance_usd(rpc_url: str, wallet_secret: str, usdc_mint: str) -> 
         usdc_balance_usd = 0.0
         try:
             # Get token accounts for USDC
+            from spl.token.instructions import get_associated_token_address
             usdc_pubkey = Pubkey.from_string(usdc_mint)
-            token_accounts = client.get_token_accounts_by_owner(
-                pubkey,
-                {"mint": usdc_pubkey}
-            )
             
-            if token_accounts.value:
-                for account in token_accounts.value:
-                    # Parse token amount
-                    account_data = account.account.data
-                    if hasattr(account_data, 'parsed'):
-                        token_amount = account_data.parsed['info']['tokenAmount']
-                        usdc_balance = float(token_amount['uiAmount'])
-                        usdc_balance_usd += usdc_balance  # USDC is 1:1 with USD
+            # Get the associated token address
+            ata = get_associated_token_address(pubkey, usdc_pubkey)
+            
+            # Get token account balance
+            token_account_info = client.get_token_account_balance(ata)
+            if token_account_info and token_account_info.value:
+                usdc_balance_usd = float(token_account_info.value.ui_amount or 0)
+                print(f"[WALLET] USDC balance: ${usdc_balance_usd:.2f}")
         except Exception as e:
             print(f"[WALLET] Could not fetch USDC balance: {e}")
         
