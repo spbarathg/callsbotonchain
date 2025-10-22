@@ -499,9 +499,11 @@ def run() -> None:
                 if engine.is_on_cooldown(token_norm):
                     remaining = engine.get_cooldown_remaining(token_norm)
                     signals_filtered += 1
+                    hours = int(remaining // 3600)
+                    minutes = int((remaining % 3600) // 60)
                     engine._log("entry_rejected_cooldown", token=token_norm, 
-                               remaining_seconds=remaining)
-                    print(f"[DEBUG] Token {token_norm[:8]} on cooldown for {remaining:.0f}s more", flush=True)
+                               remaining_seconds=remaining, remaining_hours=hours, remaining_minutes=minutes)
+                    print(f"[DEBUG] Token {token_norm[:8]} on cooldown for {hours}h {minutes}m more", flush=True)
                     continue
                 
                 print(f"[DEBUG] No existing position, continuing to trade logic...", flush=True)

@@ -122,7 +122,7 @@ class TradeEngine:
         # Token cooldown: Prevent immediate rebuy after selling (stops buy-sell-rebuy loops)
         self._token_cooldowns: Dict[str, float] = {}  # token -> timestamp when sold
         self._cooldown_lock = threading.Lock()
-        self._cooldown_seconds = float(os.getenv("TS_REBUY_COOLDOWN_SEC", "300"))  # Default: 5 minutes
+        self._cooldown_seconds = float(os.getenv("TS_REBUY_COOLDOWN_SEC", "14400"))  # Default: 4 hours
         
         os.makedirs(os.path.dirname(LOG_JSON_PATH), exist_ok=True)
         os.makedirs(os.path.dirname(LOG_TEXT_PATH), exist_ok=True)
