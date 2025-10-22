@@ -8,6 +8,7 @@ OPTIMIZED TRADER - Proper Risk Management
 """
 import json
 import os
+import time
 import threading
 from datetime import datetime, date
 from typing import Dict, Optional
@@ -118,6 +119,11 @@ class TradeEngine:
         self._position_locks = PositionLock()
         self.circuit_breaker = CircuitBreaker()
         
+        # Token cooldown: Prevent immediate rebuy after selling (stops buy-sell-rebuy loops)
+        self._token_cooldowns: Dict[str, float] = {}  # token -> timestamp when sold
+        self._cooldown_lock = threading.Lock()
+        self._cooldown_seconds = float(os.getenv("TS_REBUY_COOLDOWN_SEC", "300"))  # Default: 5 minutes
+        
         os.makedirs(os.path.dirname(LOG_JSON_PATH), exist_ok=True)
         os.makedirs(os.path.dirname(LOG_TEXT_PATH), exist_ok=True)
         
@@ -214,6 +220,7 @@ class TradeEngine:
                     "entry_price": fill.price,  # CRITICAL: Store entry price
                     "peak_price": fill.price,
                     "price_failures": 0,  # Track consecutive price fetch failures
+                    "sell_failures": 0,  # Track consecutive sell attempt failures
                 }
                 
                 self._log("open_position", 
@@ -228,6 +235,43 @@ class TradeEngine:
 
     def has_position(self, token: str) -> bool:
         return token in self.live
+    
+    def is_on_cooldown(self, token: str) -> bool:
+        """Check if token is on cooldown (prevents immediate rebuy after sell)"""
+        with self._cooldown_lock:
+            if token not in self._token_cooldowns:
+                return False
+            
+            sell_time = self._token_cooldowns[token]
+            elapsed = time.time() - sell_time
+            
+            if elapsed >= self._cooldown_seconds:
+                # Cooldown expired
+                del self._token_cooldowns[token]
+                return False
+            
+            return True
+    
+    def get_cooldown_remaining(self, token: str) -> Optional[float]:
+        """Get remaining cooldown time in seconds"""
+        with self._cooldown_lock:
+            if token not in self._token_cooldowns:
+                return None
+            
+            sell_time = self._token_cooldowns[token]
+            elapsed = time.time() - sell_time
+            remaining = self._cooldown_seconds - elapsed
+            
+            if remaining <= 0:
+                del self._token_cooldowns[token]
+                return None
+            
+            return remaining
+    
+    def _add_cooldown(self, token: str):
+        """Add cooldown for a token (called internally after selling)"""
+        with self._cooldown_lock:
+            self._token_cooldowns[token] = time.time()
 
     def position_strategy(self, token: str) -> Optional[str]:
         data = self.live.get(token)
@@ -314,6 +358,29 @@ class TradeEngine:
                 
                 if not fill.success:
                     self._log("exit_failed_sell", token=token, pid=pid, error=fill.error)
+                    
+                    # Track consecutive sell failures
+                    if token in self.live:
+                        sell_failures = self.live[token].get("sell_failures", 0) + 1
+                        self.live[token]["sell_failures"] = sell_failures
+                        
+                        # After 20 failed sell attempts (illiquid token), force close
+                        if sell_failures >= 20:
+                            self._log("force_closing_unsellable_position", token=token, pid=pid,
+                                     sell_failures=sell_failures, reason="too_many_sell_failures")
+                            
+                            # Mark as closed in database and remove from live
+                            close_position(pid)
+                            self.live.pop(token, None)
+                            
+                            # Record as loss (assume total loss for unsellable token)
+                            entry_usd = float(data.get("entry_price", 0)) * qty_open
+                            self.circuit_breaker.record_trade(-entry_usd)
+                            
+                            self._log("forced_exit_illiquid", token=token, pid=pid,
+                                     entry_usd=entry_usd, reason="unsellable_token")
+                            return True  # Consider it "exited" so position clears
+                    
                     return False
                 
                 # Calculate PnL
@@ -328,6 +395,11 @@ class TradeEngine:
                 
                 # Remove from live
                 self.live.pop(token, None)
+                
+                # Add cooldown to prevent immediate rebuy (especially important for stop losses)
+                self._add_cooldown(token)
+                self._log("cooldown_added", token=token, cooldown_seconds=self._cooldown_seconds,
+                         reason=f"sold_via_{exit_type}")
                 
                 # Record with circuit breaker
                 self.circuit_breaker.record_trade(pnl_usd)
@@ -391,11 +463,43 @@ class TradeEngine:
                 self._log("rebalance_failed", reason="invalid_price", token=token_to_sell)
                 return False
             
-            # Execute sell
-            sell_result = self._exit_position(token_to_sell, current_price, "rebalance")
+            # Execute sell by calling check_exits (which handles the full exit logic)
+            # This is better than duplicating exit logic here
+            sell_result = self.check_exits(token_to_sell, current_price)
             if not sell_result:
-                self._log("rebalance_failed", reason="sell_failed", token=token_to_sell)
-                return False
+                # Try to force the exit even if stop/trail not hit (rebalance override)
+                pid = sell_data.get("pid")
+                if not pid:
+                    return False
+                
+                # Get quantity and sell directly
+                from .db import get_open_qty, add_fill, close_position
+                qty_open = get_open_qty(int(pid))
+                if qty_open <= 0:
+                    self._log("rebalance_failed", reason="zero_qty", token=token_to_sell)
+                    return False
+                
+                # Force sell
+                fill = self.broker.market_sell(token_to_sell, float(qty_open))
+                if not fill.success:
+                    self._log("rebalance_failed", reason="sell_failed", token=token_to_sell, error=fill.error)
+                    return False
+                
+                # Update database
+                add_fill(int(pid), "sell", float(fill.price), float(fill.qty), float(fill.usd))
+                close_position(pid)
+                
+                # Remove from live
+                self.live.pop(token_to_sell, None)
+                
+                # Log the forced exit
+                entry_price = float(sell_data.get("entry_price", 0))
+                entry_usd = entry_price * qty_open if entry_price > 0 else 0
+                pnl_usd = fill.usd - entry_usd
+                pnl_pct = (pnl_usd / entry_usd * 100) if entry_usd > 0 else 0
+                
+                self._log("rebalance_forced_exit", token=token_to_sell, pid=pid,
+                         pnl_usd=pnl_usd, pnl_pct=pnl_pct, reason="rebalance_override")
             
             # Execute buy
             buy_pid = self.open_position(new_token, new_plan)
@@ -489,11 +593,22 @@ class TradeEngine:
 
     def get_status(self) -> Dict:
         """Get engine status"""
+        # Get cooldown stats
+        with self._cooldown_lock:
+            now = time.time()
+            active_cooldowns = sum(1 for sell_time in self._token_cooldowns.values() 
+                                  if (now - sell_time) < self._cooldown_seconds)
+        
         status = {
             "open_positions": len(self.live),
             "tokens": list(self.live.keys()),
             "circuit_breaker": self.circuit_breaker.get_status(),
             "broker_dry_run": self.broker._dry,
+            "token_cooldowns": {
+                "active": active_cooldowns,
+                "total": len(self._token_cooldowns),
+                "cooldown_seconds": self._cooldown_seconds,
+            },
         }
         
         # Add portfolio manager status if enabled

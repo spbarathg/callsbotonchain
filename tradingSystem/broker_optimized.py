@@ -11,6 +11,7 @@ from dataclasses import dataclass
 import base64
 import threading
 import json
+import os
 import time
 import requests
 from typing import Dict, Optional, Tuple
@@ -625,4 +626,37 @@ class Broker:
     def get_error_rate(self) -> float:
         """Get recent error rate"""
         return self._error_count / max(1, time.time() - self._last_error_time + 1)
+    
+    def get_token_price(self, token: str) -> float:
+        """
+        Get current token price in USD.
+        Uses Jupiter quote API to get real-time price.
+        
+        Returns:
+            Price in USD, or 0.0 if failed
+        """
+        try:
+            # Get a small quote to determine price
+            # Quote 1 token worth to get price
+            dec = self._get_decimals(token)
+            in_amount = int(1 * (10 ** dec))  # 1 token
+            
+            # Get quote selling token for USDC
+            quote = self._quote(token, "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", in_amount, slippage_bps_override=50)
+            if not quote:
+                return 0.0
+            
+            # Calculate price: output_usdc / input_tokens
+            out_usdc = float(quote.get("outAmount", 0)) / 1e6  # USDC has 6 decimals
+            in_tokens = float(in_amount) / (10 ** dec)
+            
+            if in_tokens > 0:
+                price = out_usdc / in_tokens
+                return price
+            
+            return 0.0
+            
+        except Exception as e:
+            print(f"[BROKER] Failed to get token price: {e}", flush=True)
+            return 0.0
 
