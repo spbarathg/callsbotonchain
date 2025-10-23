@@ -34,6 +34,7 @@ from .config_optimized import (
     PRIORITY_FEE_MAX_MICROLAMPORTS,
     BASE_MINT,
     SELL_MINT,
+    SOL_MINT,
     MAX_PRICE_IMPACT_BUY_PCT,
     MAX_PRICE_IMPACT_SELL_PCT,
     # New: faster execution toggle
@@ -556,8 +557,20 @@ class Broker:
                         continue
                     
                     # Calculate expected fill
+                    # CRITICAL FIX: When selling to SOL, we get SOL back, not USD!
+                    # Must convert SOL amount to USD for accurate price tracking
                     base_dec = self._get_decimals(SELL_MINT)
-                    out_usd = float(quote.get("outAmount") or 0) / (10 ** base_dec)
+                    out_amount_base = float(quote.get("outAmount") or 0) / (10 ** base_dec)  # SOL amount
+                    
+                    # Convert SOL to USD (if SELL_MINT is SOL)
+                    if SELL_MINT == SOL_MINT:
+                        sol_price = self._get_sol_price_fallback()
+                        out_usd = out_amount_base * sol_price
+                        print(f"[BROKER] Sell quote: {out_amount_base:.6f} SOL @ ${sol_price:.2f} = ${out_usd:.4f}", flush=True)
+                    else:
+                        # If selling to USDC or other stablecoin, amount is already in USD
+                        out_usd = out_amount_base
+                    
                     if float(qty) <= 0:
                         continue
                     expected_price = out_usd / float(qty)
