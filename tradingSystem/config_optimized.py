@@ -36,8 +36,10 @@ RPC_URL = os.getenv("TS_RPC_URL", "https://api.mainnet-beta.solana.com")
 WALLET_SECRET = os.getenv("TS_WALLET_SECRET", "")
 SLIPPAGE_BPS = _get_int("TS_SLIPPAGE_BPS", 2000)  # 20.0% default per strategy
 # Priority fee policy (free/low-cost): dynamic bump within [min,max]
-PRIORITY_FEE_MIN_MICROLAMPORTS = _get_int("TS_PRIORITY_FEE_MIN_MICROLAMPORTS", 5000)
-PRIORITY_FEE_MAX_MICROLAMPORTS = _get_int("TS_PRIORITY_FEE_MAX_MICROLAMPORTS", 20000)
+# INCREASED from 5000 to 10000 min to improve transaction success rate
+# Error 6024 often caused by low priority → transaction gets dropped
+PRIORITY_FEE_MIN_MICROLAMPORTS = _get_int("TS_PRIORITY_FEE_MIN_MICROLAMPORTS", 10000)
+PRIORITY_FEE_MAX_MICROLAMPORTS = _get_int("TS_PRIORITY_FEE_MAX_MICROLAMPORTS", 50000)
 # Backward-compat constant if referenced elsewhere
 PRIORITY_FEE_MICROLAMPORTS = PRIORITY_FEE_MAX_MICROLAMPORTS
 MAX_SLIPPAGE_PCT = _get_float("TS_MAX_SLIPPAGE_PCT", 5.0)
