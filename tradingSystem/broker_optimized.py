@@ -35,6 +35,7 @@ from .config_optimized import (
     BASE_MINT,
     SELL_MINT,
     SOL_MINT,
+    USDC_MINT,
     MAX_PRICE_IMPACT_BUY_PCT,
     MAX_PRICE_IMPACT_SELL_PCT,
     # New: faster execution toggle
@@ -252,12 +253,13 @@ class Broker:
         
         return None, "Max retries exceeded"
 
-    def _quote(self, in_mint: str, out_mint: str, in_amount: int, retries: int = 3, slippage_bps_override: Optional[int] = None) -> Optional[Dict]:
+    def _quote(self, in_mint: str, out_mint: str, in_amount: int, retries: int = 3, slippage_bps_override: Optional[int] = None, only_direct_routes: bool = False) -> Optional[Dict]:
         """Get quote using dedicated Jupiter client (bypasses circuit breaker)"""
         jup = get_jupiter_client()
         
         use_slip = int(slippage_bps_override) if slippage_bps_override is not None else int(SLIPPAGE_BPS)
-        print(f"[BROKER] Getting Jupiter quote: {in_mint[:8]}→{out_mint[:8]}, amount={in_amount}, slippage={use_slip}bps", flush=True)
+        direct_str = " (direct routes only)" if only_direct_routes else ""
+        print(f"[BROKER] Getting Jupiter quote: {in_mint[:8]}→{out_mint[:8]}, amount={in_amount}, slippage={use_slip}bps{direct_str}", flush=True)
         
         # If rate-limited, short-circuit to avoid spamming
         try:
@@ -271,7 +273,8 @@ class Broker:
             output_mint=out_mint,
             amount=in_amount,
             slippage_bps=use_slip,
-            timeout=10.0
+            timeout=10.0,
+            only_direct_routes=only_direct_routes
         )
         
         if result["status_code"] == 200:
@@ -549,27 +552,42 @@ class Broker:
                 try:
                     print(f"[BROKER] 🎯 SELL attempt {attempt}/{len(slippage_levels)} with {slippage_bps/100}% slippage for {token[:8]}...", flush=True)
                     
-                    # Get quote with escalating slippage (sell to SELL_MINT, default USDC)
-                    quote = self._quote(token, SELL_MINT, in_amount, slippage_bps_override=slippage_bps)
+                    # SMART ROUTING: Try direct route to SOL first, fallback to USDC
+                    output_mint = SOL_MINT
+                    quote = None
+                    try:
+                        print(f"[BROKER] Trying direct route to SOL...", flush=True)
+                        quote = self._quote(token, SOL_MINT, in_amount, slippage_bps_override=slippage_bps, only_direct_routes=True)
+                    except Exception as e:
+                        # No direct SOL route available, try USDC
+                        print(f"[BROKER] ⚠️ No direct SOL route: {e}", flush=True)
+                        print(f"[BROKER] Trying direct route to USDC instead...", flush=True)
+                        try:
+                            quote = self._quote(token, USDC_MINT, in_amount, slippage_bps_override=slippage_bps, only_direct_routes=True)
+                            output_mint = USDC_MINT  # We'll get USDC
+                        except Exception as e2:
+                            print(f"[BROKER] ⚠️ No direct USDC route either: {e2}", flush=True)
+                    
                     if not quote:
                         print(f"[BROKER] ⚠️ Quote failed at {slippage_bps/100}% slippage, trying next level...", flush=True)
                         time.sleep(2)
                         continue
                     
-                    # Calculate expected fill
-                    # CRITICAL FIX: When selling to SOL, we get SOL back, not USD!
-                    # Must convert SOL amount to USD for accurate price tracking
-                    base_dec = self._get_decimals(SELL_MINT)
-                    out_amount_base = float(quote.get("outAmount") or 0) / (10 ** base_dec)  # SOL amount
+                    # Calculate expected fill based on output mint
+                    base_dec = self._get_decimals(output_mint)
+                    out_amount_base = float(quote.get("outAmount") or 0) / (10 ** base_dec)
                     
-                    # Convert SOL to USD (if SELL_MINT is SOL)
-                    if SELL_MINT == SOL_MINT:
+                    # Convert to USD value
+                    if output_mint == SOL_MINT:
                         sol_price = self._get_sol_price_fallback()
                         out_usd = out_amount_base * sol_price
-                        print(f"[BROKER] Sell quote: {out_amount_base:.6f} SOL @ ${sol_price:.2f} = ${out_usd:.4f}", flush=True)
+                        print(f"[BROKER] Direct route quote: {out_amount_base:.6f} SOL @ ${sol_price:.2f} = ${out_usd:.4f}", flush=True)
+                    elif output_mint == USDC_MINT:
+                        out_usd = out_amount_base  # USDC is 1:1 USD
+                        print(f"[BROKER] Direct route quote: {out_amount_base:.4f} USDC = ${out_usd:.4f}", flush=True)
                     else:
-                        # If selling to USDC or other stablecoin, amount is already in USD
-                        out_usd = out_amount_base
+                        print(f"[BROKER] ❌ Unexpected output mint: {output_mint}", flush=True)
+                        continue
                     
                     if float(qty) <= 0:
                         continue
@@ -621,7 +639,31 @@ class Broker:
                         
                         # Calculate actual executed price from USD received
                         actual_price = out_usd / float(qty) if float(qty) > 0 else expected_price
-                        print(f"[BROKER] ✅ SELL SUCCESS at {slippage_bps/100}% slippage!", flush=True)
+                        
+                        # If we got USDC, immediately convert to SOL (wallet stays in SOL)
+                        if output_mint == USDC_MINT:
+                            print(f"[BROKER] 🔄 Converting ${out_usd:.4f} USDC → SOL...", flush=True)
+                            try:
+                                # Get USDC balance (in smallest units: 6 decimals)
+                                usdc_amount = int(out_amount_base * 1e6)
+                                
+                                # Quote USDC → SOL with high slippage tolerance (we need this conversion)
+                                usdc_to_sol_quote = self._quote(USDC_MINT, SOL_MINT, usdc_amount, slippage_bps_override=3000, only_direct_routes=True)
+                                if usdc_to_sol_quote:
+                                    usdc_to_sol_tx = self._swap(usdc_to_sol_quote)
+                                    if usdc_to_sol_tx:
+                                        sol_sig, sol_error = self._sign_and_send(usdc_to_sol_tx)
+                                        if not sol_error:
+                                            sol_received = float(usdc_to_sol_quote.get("outAmount") or 0) / 1e9
+                                            print(f"[BROKER] ✅ Converted to {sol_received:.6f} SOL", flush=True)
+                                        else:
+                                            print(f"[BROKER] ⚠️ USDC→SOL conversion failed: {sol_error} (USDC remains in wallet)", flush=True)
+                                else:
+                                    print(f"[BROKER] ⚠️ USDC→SOL quote failed (USDC remains in wallet)", flush=True)
+                            except Exception as conv_error:
+                                print(f"[BROKER] ⚠️ USDC→SOL conversion error: {conv_error} (USDC remains in wallet)", flush=True)
+                        
+                        print(f"[BROKER] ✅ SELL SUCCESS at {slippage_bps/100}% slippage (direct route)!", flush=True)
                         print(f"[BROKER] Actual price: ${actual_price:.8f} (Expected: ${expected_price:.8f})", flush=True)
                         return Fill(price=actual_price, qty=float(qty), usd=out_usd, 
                                    tx=sig, success=True, slippage_pct=slippage_bps/100)
@@ -649,7 +691,7 @@ class Broker:
             
             # If we exhausted all attempts
             return Fill(price=0.0, qty=0.0, usd=0.0, success=False, 
-                       error="Exhausted all slippage levels (20%-50%) - token likely unsellable")
+                       error="Exhausted all slippage levels (20%-50%) with direct routes - no direct SOL or USDC path available")
             
         except Exception as e:
             self._error_count += 1
