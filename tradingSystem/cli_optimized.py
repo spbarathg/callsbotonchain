@@ -290,21 +290,10 @@ def _exit_loop(engine: TradeEngine, stop_event: threading.Event) -> None:
                 time.sleep(60)  # Wait a minute before checking again
                 continue
             
-            # Check Jupiter API cooldown status before attempting ANY sells
-            # This prevents spamming failed sell attempts during rate limit cooldowns
-            try:
-                from app.jupiter_client import get_jupiter_client
-                jup_client = get_jupiter_client()
-                is_cooling, cooldown_remaining = jup_client.is_in_cooldown()
-                if is_cooling:
-                    if iteration % 6 == 0:  # Log every 30 seconds during cooldown
-                        print(f"[EXIT_LOOP] ⏸️ Jupiter API in cooldown: {cooldown_remaining:.1f}s remaining - pausing exit checks", flush=True)
-                    time.sleep(min(check_interval, cooldown_remaining))
-                    continue
-            except Exception as e:
-                # If we can't check cooldown, just continue (don't block the bot)
-                if iteration % 60 == 0:  # Log once per minute
-                    print(f"[EXIT_LOOP] Warning: Could not check Jupiter cooldown: {e}", flush=True)
+            # CRITICAL FIX: NEVER pause exit monitoring!
+            # Price checks use DexScreener (not Jupiter), so we can always monitor positions
+            # The broker's sell function handles Jupiter cooldown gracefully
+            # Pausing exits during cooldowns causes massive losses (-20% -> -37% bleeding)
             
             # Check exits for all open positions (prices are cached!)
             for token in list(engine.live.keys()):
