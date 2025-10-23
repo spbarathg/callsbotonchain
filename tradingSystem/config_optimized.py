@@ -91,18 +91,23 @@ MAX_POSITION_SIZE_USD = BANKROLL_USD * (MAX_POSITION_SIZE_PCT / 100.0)
 # Stop losses (from ENTRY price, not peak) - FIXED BUG
 STOP_LOSS_PCT = _get_float("TS_STOP_LOSS_PCT", 15.0)  # -15% from entry for all
 
-# Trailing stops - OPTIMIZED based on real V4 data (1,225 signals)
-# DATA-DRIVEN: 10% trail captures 346% avg (40.7% winners), 30% trail captures 268% avg (36.7% winners)
-# RESULT: Tighter trails capture +78% more profit!
-TRAIL_AGGRESSIVE = _get_float("TS_TRAIL_AGGRESSIVE", 10.0)  # For Score 9-10 (fast lock)
-TRAIL_DEFAULT = _get_float("TS_TRAIL_DEFAULT", 15.0)  # For Score 8 (standard)
-TRAIL_CONSERVATIVE = _get_float("TS_TRAIL_CONSERVATIVE", 20.0)  # For Score 7 moonshots
+# Trailing stops - TIGHTENED based on live performance analysis
+# OBSERVED: Signals peak at +60-200% but bot misses them with 15-20% trails
+# NEW STRATEGY: Tighter trails (5-10%) to capture peaks before dumps
+# Example: PING +60% → -1% because 20% trail never triggered
+TRAIL_AGGRESSIVE = _get_float("TS_TRAIL_AGGRESSIVE", 5.0)  # For Score 9-10 (very tight)
+TRAIL_DEFAULT = _get_float("TS_TRAIL_DEFAULT", 8.0)  # For Score 8 (tight)
+TRAIL_CONSERVATIVE = _get_float("TS_TRAIL_CONSERVATIVE", 10.0)  # For Score 7 (moderate)
 
 # ADAPTIVE TRAILING STOPS - NEW! Prevents selling late pumpers too early
 ADAPTIVE_TRAILING_ENABLED = _get_bool("TS_ADAPTIVE_TRAILING_ENABLED", False)
 EARLY_TRAIL_PCT = _get_float("TS_EARLY_TRAIL_PCT", 25.0)  # 0-30 min: Wide trail (let it run)
 MID_TRAIL_PCT = _get_float("TS_MID_TRAIL_PCT", 15.0)      # 30-60 min: Standard trail
 LATE_TRAIL_PCT = _get_float("TS_LATE_TRAIL_PCT", 12.0)    # 60+ min: Tight trail
+
+# TIME-BASED EXIT - Automatically sell stagnant positions
+# Prevents capital from being stuck in dead/inactive tokens
+MAX_HOLD_TIME_SECONDS = _get_int("TS_MAX_HOLD_TIME_SEC", 3600)  # Default: 1 hour
 
 # ==================== CIRCUIT BREAKERS ====================
 # NEW: Protect against catastrophic losses
@@ -304,3 +309,4 @@ Risk Management:
 - Max 5 concurrent positions
 - Trailing stops capture 60-70% of peaks
 """
+

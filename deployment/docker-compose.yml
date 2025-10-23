@@ -92,13 +92,16 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - TS_BLIND_BUY=true
       - TS_MIN_SCORE=0
-      - JUP_RPM_LIMIT=20
-      - JUP_RATE_BUCKET=3
-      - JUP_429_COOLDOWN_THRESHOLD=1
-      - JUP_429_COOLDOWN_SEC=300
+      # Jupiter API Rate Limiting - CRITICAL FIX FOR STOP LOSS FAILURES
+      # Problem: 1s price checks = 60 calls/min > 40 RPM limit
+      # Solution: Conservative limits + longer cooldown = reliable sells
+      - JUP_RPM_LIMIT=35              # Conservative (leave buffer for sells)
+      - JUP_RATE_BUCKET=5
+      - JUP_429_COOLDOWN_THRESHOLD=1  # Stop immediately on first 429
+      - JUP_429_COOLDOWN_SEC=90       # Wait 90s for limit to fully reset
       - TS_FAST_EXECUTION=true
-      - TS_PRIORITY_FEE_MIN_MICROLAMPORTS=5000
-      - TS_PRIORITY_FEE_MAX_MICROLAMPORTS=20000
+      - TS_PRIORITY_FEE_MIN_MICROLAMPORTS=50000
+      - TS_PRIORITY_FEE_MAX_MICROLAMPORTS=200000
       - TS_MAX_PRICE_IMPACT_BUY_PCT=25.0
       - TS_MAX_PRICE_IMPACT_SELL_PCT=50.0
       - TS_SELL_MINT=So11111111111111111111111111111111111111112
@@ -119,6 +122,16 @@ services:
       - TS_EARLY_TRAIL_PCT=25.0
       - TS_MID_TRAIL_PCT=15.0
       - TS_LATE_TRAIL_PCT=12.0
+      # Time-Based Exit - Automatically sell stagnant positions
+      - TS_MAX_HOLD_TIME_SEC=3600
+      # Circuit Breaker - DISABLED (set to very high values)
+      - TS_MAX_DAILY_LOSS_PCT=1000.0
+      - TS_MAX_CONSECUTIVE_LOSSES=1000
+      # PROFIT OPTIMIZATION - Tighter trails, SLOWER checks (API limit fix)
+      - TS_TRAIL_AGGRESSIVE=5.0    # Score 9-10: 5% trail (was 10%)
+      - TS_TRAIL_DEFAULT=8.0       # Score 8: 8% trail (was 15%)
+      - TS_TRAIL_CONSERVATIVE=10.0 # Score 7: 10% trail (was 20%)
+      - TS_EXIT_CHECK_INTERVAL=5.0 # CRITICAL: 5s = 12 calls/min (was 1s = 60 calls/min)
     volumes:
       - ./var:/app/var
       - ./data/logs:/app/data/logs

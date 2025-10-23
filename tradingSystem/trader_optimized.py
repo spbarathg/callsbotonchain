@@ -20,7 +20,7 @@ from .db import (
 from .config_optimized import (
     STOP_LOSS_PCT, LOG_JSON_PATH, LOG_TEXT_PATH,
     MAX_CONCURRENT, MAX_DAILY_LOSS_PCT, MAX_CONSECUTIVE_LOSSES,
-    BANKROLL_USD, DB_PATH
+    BANKROLL_USD, DB_PATH, MAX_HOLD_TIME_SECONDS
 )
 from .broker_optimized import Broker
 from .portfolio_manager import get_portfolio_manager, should_use_portfolio_manager
@@ -221,6 +221,7 @@ class TradeEngine:
                     "peak_price": fill.price,
                     "price_failures": 0,  # Track consecutive price fetch failures
                     "sell_failures": 0,  # Track consecutive sell attempt failures
+                    "open_at": time.time(),  # Track when position was opened
                 }
                 
                 self._log("open_position", 
@@ -333,13 +334,23 @@ class TradeEngine:
                 exit_type = None
                 exit_reason = ""
                 
+                # Check time-based exit (stagnant position)
+                open_at = data.get("open_at", 0)
+                if open_at > 0:
+                    hold_time = time.time() - open_at
+                    if hold_time >= MAX_HOLD_TIME_SECONDS:
+                        exit_type = "timeout"
+                        hold_minutes = int(hold_time / 60)
+                        max_minutes = int(MAX_HOLD_TIME_SECONDS / 60)
+                        exit_reason = f"Max hold time reached: {hold_minutes} min >= {max_minutes} min (freeing capital)"
+                
                 # Check hard stop loss (from entry)
-                if price <= stop_price:
+                if not exit_type and price <= stop_price:
                     exit_type = "stop"
                     exit_reason = f"Hit stop loss: {price:.8f} <= {stop_price:.8f} (entry: {entry_price:.8f})"
                 
                 # Check trailing stop (from peak)
-                elif peak > 0 and price <= trail_price:
+                elif not exit_type and peak > 0 and price <= trail_price:
                     exit_type = "trail"
                     exit_reason = f"Hit trailing stop: {price:.8f} <= {trail_price:.8f} (peak: {peak:.8f}, trail: {trail}%)"
                 
