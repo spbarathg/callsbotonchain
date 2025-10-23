@@ -357,6 +357,21 @@ class TradeEngine:
                 if not exit_type:
                     return False
                 
+                # Check position-specific cooldown (prevent API spam after failures)
+                last_sell_attempt = data.get("last_sell_attempt", 0)
+                sell_failures = data.get("sell_failures", 0)
+                
+                # Exponential backoff: 0s, 10s, 30s, 60s, 120s, 300s (max 5 min)
+                backoff_times = [0, 10, 30, 60, 120, 300]
+                backoff_idx = min(sell_failures, len(backoff_times) - 1)
+                backoff_seconds = backoff_times[backoff_idx]
+                
+                if last_sell_attempt > 0 and (time.time() - last_sell_attempt) < backoff_seconds:
+                    remaining = int(backoff_seconds - (time.time() - last_sell_attempt))
+                    if sell_failures < 3:  # Only log first few times to avoid spam
+                        print(f"[TRADER] ⏳ Position {token[:8]} in cooldown: {remaining}s remaining (failures={sell_failures})", flush=True)
+                    return False
+                
                 # Execute sell
                 qty_open = get_open_qty(int(pid))
                 if qty_open <= 0:
@@ -365,36 +380,32 @@ class TradeEngine:
                     close_position(pid)
                     return False
                 
+                # Update last attempt time
+                if token in self.live:
+                    self.live[token]["last_sell_attempt"] = time.time()
+                
                 fill = self.broker.market_sell(token, float(qty_open))
                 
                 if not fill.success:
-                    self._log("exit_failed_sell", token=token, pid=pid, error=fill.error)
+                    self._log("exit_failed_sell", token=token, pid=pid, error=fill.error, 
+                             failures=sell_failures + 1, next_backoff=backoff_times[min(sell_failures + 1, len(backoff_times) - 1)])
                     
-                    # Track consecutive sell failures
+                    # Track consecutive sell failures with exponential backoff
                     if token in self.live:
-                        sell_failures = self.live[token].get("sell_failures", 0) + 1
-                        self.live[token]["sell_failures"] = sell_failures
+                        self.live[token]["sell_failures"] = sell_failures + 1
                         
-                        # After 20 failed sell attempts, mark as stuck (DON'T force close!)
-                        # Keep trying to sell periodically instead of abandoning the position
-                        if sell_failures >= 20:
-                            if sell_failures == 20:  # Log once
-                                self._log("position_stuck_unsellable", token=token, pid=pid,
-                                         sell_failures=sell_failures, 
-                                         reason="will_keep_retrying_with_higher_slippage")
-                                print(f"[TRADER] ⚠️ Position {token[:8]} stuck after 20 sell failures - will keep retrying", flush=True)
-                            
-                            # Mark as stuck but keep it in live tracking
-                            # Reset counter every 20 attempts to retry periodically
-                            if sell_failures % 20 == 0:
-                                self.live[token]["sell_failures"] = 0  # Reset to retry
-                                self._log("retrying_stuck_position", token=token, pid=pid,
-                                         total_attempts=sell_failures)
-                            
-                            # DON'T close position - let it keep trying
-                            # User may want to manually sell or wait for liquidity to return
+                        # Log failures with backoff info
+                        if sell_failures + 1 <= 5:  # Log first 5 failures
+                            print(f"[TRADER] ⚠️ Sell attempt {sell_failures + 1} failed for {token[:8]}: {fill.error}", flush=True)
+                            print(f"[TRADER] Next retry in {backoff_times[min(sell_failures + 1, len(backoff_times) - 1)]}s", flush=True)
+                        elif (sell_failures + 1) % 10 == 0:  # Then log every 10 failures
+                            print(f"[TRADER] ⚠️ Position {token[:8]} has {sell_failures + 1} sell failures - retrying every {backoff_seconds}s", flush=True)
                     
                     return False
+                
+                # SUCCESS! Reset failure counter
+                if token in self.live:
+                    self.live[token]["sell_failures"] = 0
                 
                 # Calculate PnL
                 entry_usd = entry_price * qty_open if entry_price > 0 else 0

@@ -74,6 +74,17 @@ class JupiterClient:
             self.base_url = f"https://{self._current_ip}"
             logger.info(f"Using IP fallback: {self._current_ip}")
     
+    def is_in_cooldown(self) -> tuple[bool, float]:
+        """
+        Check if Jupiter API is in cooldown period
+        Returns: (is_cooling_down, seconds_remaining)
+        """
+        if self._cooldown_until:
+            now = time.time()
+            if now < self._cooldown_until:
+                return (True, self._cooldown_until - now)
+        return (False, 0.0)
+    
     def _resolve_dns(self, domain: str) -> Optional[str]:
         """
         Resolve DNS with caching and fallback
