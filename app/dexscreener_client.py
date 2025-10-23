@@ -61,7 +61,8 @@ class DexScreenerClient:
         
         try:
             # DexScreener API endpoint for Solana tokens
-            url = f"{self.base_url}/latest/dex/tokens/solana/{token_address}"
+            # Use full chain:address format for better compatibility
+            url = f"{self.base_url}/latest/dex/tokens/{token_address}"
             
             response = self.session.get(url, timeout=5.0)
             
