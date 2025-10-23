@@ -267,7 +267,8 @@ class JupiterClient:
         amount: int,
         slippage_bps: int = 2000,
         timeout: float = 10.0,
-        only_direct_routes: bool = False
+        only_direct_routes: bool = False,
+        max_accounts: int = None
     ) -> Dict[str, Any]:
         """
         Get swap quote from Jupiter
@@ -279,6 +280,7 @@ class JupiterClient:
             slippage_bps: Slippage tolerance in basis points (2000 = 20%)
             timeout: Request timeout in seconds
             only_direct_routes: If True, only return quotes using single-hop routes (more reliable)
+            max_accounts: Max accounts/hops to use (lower = simpler routes, e.g. 20 for 2-hop max)
             
         Returns:
             Dict with status_code, json (quote data), and error
@@ -293,7 +295,10 @@ class JupiterClient:
         if only_direct_routes:
             params["onlyDirectRoutes"] = "true"
         
-        logger.debug(f"Getting Jupiter quote: {input_mint[:8]}... → {output_mint[:8]}... ({amount} units, {slippage_bps} BPS slippage, direct={only_direct_routes})")
+        if max_accounts is not None:
+            params["maxAccounts"] = str(max_accounts)
+        
+        logger.debug(f"Getting Jupiter quote: {input_mint[:8]}... → {output_mint[:8]}... ({amount} units, {slippage_bps} BPS slippage, direct={only_direct_routes}, maxAccounts={max_accounts})")
         
         result = self._make_request("GET", "/v6/quote", params=params, timeout=timeout)
         
