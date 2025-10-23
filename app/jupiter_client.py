@@ -266,7 +266,8 @@ class JupiterClient:
         output_mint: str,
         amount: int,
         slippage_bps: int = 2000,
-        timeout: float = 10.0
+        timeout: float = 10.0,
+        only_direct_routes: bool = False
     ) -> Dict[str, Any]:
         """
         Get swap quote from Jupiter
@@ -277,6 +278,7 @@ class JupiterClient:
             amount: Amount in smallest unit (lamports for SOL)
             slippage_bps: Slippage tolerance in basis points (2000 = 20%)
             timeout: Request timeout in seconds
+            only_direct_routes: If True, only return quotes using single-hop routes (more reliable)
             
         Returns:
             Dict with status_code, json (quote data), and error
@@ -288,7 +290,10 @@ class JupiterClient:
             "slippageBps": str(slippage_bps)
         }
         
-        logger.debug(f"Getting Jupiter quote: {input_mint[:8]}... → {output_mint[:8]}... ({amount} units, {slippage_bps} BPS slippage)")
+        if only_direct_routes:
+            params["onlyDirectRoutes"] = "true"
+        
+        logger.debug(f"Getting Jupiter quote: {input_mint[:8]}... → {output_mint[:8]}... ({amount} units, {slippage_bps} BPS slippage, direct={only_direct_routes})")
         
         result = self._make_request("GET", "/v6/quote", params=params, timeout=timeout)
         
