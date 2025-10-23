@@ -552,21 +552,35 @@ class Broker:
                 try:
                     print(f"[BROKER] 🎯 SELL attempt {attempt}/{len(slippage_levels)} with {slippage_bps/100}% slippage for {token[:8]}...", flush=True)
                     
-                    # SMART ROUTING: Try direct route to SOL first, fallback to USDC
+                    # SMART ROUTING STRATEGY:
+                    # 1. Try Jupiter's best route FIRST (may be multi-hop, but often works best)
+                    # 2. If that fails, try direct route to SOL
+                    # 3. Finally, try direct route to USDC with auto-conversion
                     output_mint = SOL_MINT
                     quote = None
+                    
+                    # Strategy 1: Let Jupiter pick the best route (may be multi-hop)
                     try:
-                        print(f"[BROKER] Trying direct route to SOL...", flush=True)
-                        quote = self._quote(token, SOL_MINT, in_amount, slippage_bps_override=slippage_bps, only_direct_routes=True)
+                        print(f"[BROKER] Trying Jupiter's optimal route to SOL...", flush=True)
+                        quote = self._quote(token, SOL_MINT, in_amount, slippage_bps_override=slippage_bps, only_direct_routes=False)
+                        print(f"[BROKER] ✅ Got Jupiter's optimal route", flush=True)
                     except Exception as e:
-                        # No direct SOL route available, try USDC
-                        print(f"[BROKER] ⚠️ No direct SOL route: {e}", flush=True)
-                        print(f"[BROKER] Trying direct route to USDC instead...", flush=True)
+                        print(f"[BROKER] ⚠️ Jupiter optimal route failed: {e}", flush=True)
+                        
+                        # Strategy 2: Try direct route to SOL
                         try:
-                            quote = self._quote(token, USDC_MINT, in_amount, slippage_bps_override=slippage_bps, only_direct_routes=True)
-                            output_mint = USDC_MINT  # We'll get USDC
+                            print(f"[BROKER] Trying direct-only route to SOL...", flush=True)
+                            quote = self._quote(token, SOL_MINT, in_amount, slippage_bps_override=slippage_bps, only_direct_routes=True)
                         except Exception as e2:
-                            print(f"[BROKER] ⚠️ No direct USDC route either: {e2}", flush=True)
+                            print(f"[BROKER] ⚠️ No direct SOL route: {e2}", flush=True)
+                            
+                            # Strategy 3: Try direct route to USDC
+                            print(f"[BROKER] Trying direct route to USDC (will convert to SOL)...", flush=True)
+                            try:
+                                quote = self._quote(token, USDC_MINT, in_amount, slippage_bps_override=slippage_bps, only_direct_routes=True)
+                                output_mint = USDC_MINT  # We'll get USDC
+                            except Exception as e3:
+                                print(f"[BROKER] ⚠️ No direct USDC route either: {e3}", flush=True)
                     
                     if not quote:
                         print(f"[BROKER] ⚠️ Quote failed at {slippage_bps/100}% slippage, trying next level...", flush=True)
@@ -663,7 +677,8 @@ class Broker:
                             except Exception as conv_error:
                                 print(f"[BROKER] ⚠️ USDC→SOL conversion error: {conv_error} (USDC remains in wallet)", flush=True)
                         
-                        print(f"[BROKER] ✅ SELL SUCCESS at {slippage_bps/100}% slippage (direct route)!", flush=True)
+                        route_type = "direct USDC" if output_mint == USDC_MINT else "optimal"
+                        print(f"[BROKER] ✅ SELL SUCCESS at {slippage_bps/100}% slippage ({route_type} route)!", flush=True)
                         print(f"[BROKER] Actual price: ${actual_price:.8f} (Expected: ${expected_price:.8f})", flush=True)
                         return Fill(price=actual_price, qty=float(qty), usd=out_usd, 
                                    tx=sig, success=True, slippage_pct=slippage_bps/100)
@@ -691,7 +706,7 @@ class Broker:
             
             # If we exhausted all attempts
             return Fill(price=0.0, qty=0.0, usd=0.0, success=False, 
-                       error="Exhausted all slippage levels (20%-50%) with direct routes - no direct SOL or USDC path available")
+                       error="Exhausted all slippage levels (20%-50%) - no working route found (tried multi-hop + direct)")
             
         except Exception as e:
             self._error_count += 1
