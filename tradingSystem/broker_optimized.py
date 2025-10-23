@@ -253,13 +253,14 @@ class Broker:
         
         return None, "Max retries exceeded"
 
-    def _quote(self, in_mint: str, out_mint: str, in_amount: int, retries: int = 3, slippage_bps_override: Optional[int] = None, only_direct_routes: bool = False) -> Optional[Dict]:
+    def _quote(self, in_mint: str, out_mint: str, in_amount: int, retries: int = 3, slippage_bps_override: Optional[int] = None, only_direct_routes: bool = False, max_accounts: int = None) -> Optional[Dict]:
         """Get quote using dedicated Jupiter client (bypasses circuit breaker)"""
         jup = get_jupiter_client()
         
         use_slip = int(slippage_bps_override) if slippage_bps_override is not None else int(SLIPPAGE_BPS)
         direct_str = " (direct routes only)" if only_direct_routes else ""
-        print(f"[BROKER] Getting Jupiter quote: {in_mint[:8]}→{out_mint[:8]}, amount={in_amount}, slippage={use_slip}bps{direct_str}", flush=True)
+        accounts_str = f" (max {max_accounts} accounts)" if max_accounts else ""
+        print(f"[BROKER] Getting Jupiter quote: {in_mint[:8]}→{out_mint[:8]}, amount={in_amount}, slippage={use_slip}bps{direct_str}{accounts_str}", flush=True)
         
         # If rate-limited, short-circuit to avoid spamming
         try:
@@ -274,7 +275,8 @@ class Broker:
             amount=in_amount,
             slippage_bps=use_slip,
             timeout=10.0,
-            only_direct_routes=only_direct_routes
+            only_direct_routes=only_direct_routes,
+            max_accounts=max_accounts
         )
         
         if result["status_code"] == 200:
@@ -552,20 +554,21 @@ class Broker:
                 try:
                     print(f"[BROKER] 🎯 SELL attempt {attempt}/{len(slippage_levels)} with {slippage_bps/100}% slippage for {token[:8]}...", flush=True)
                     
-                    # SMART ROUTING STRATEGY:
-                    # 1. Try Jupiter's best route FIRST (may be multi-hop, but often works best)
+                    # SMART ROUTING STRATEGY (avoids problematic 3-hop routes):
+                    # 1. Try 2-hop max route to SOL (avoids PancakeSwap 3rd hop issues)
                     # 2. If that fails, try direct route to SOL
-                    # 3. Finally, try direct route to USDC with auto-conversion
+                    # 3. If that fails, try direct route to USDC with auto-conversion
+                    # 4. Last resort: unrestricted multi-hop route
                     output_mint = SOL_MINT
                     quote = None
                     
-                    # Strategy 1: Let Jupiter pick the best route (may be multi-hop)
+                    # Strategy 1: 2-hop maximum route (avoids problematic 3-hop failures)
                     try:
-                        print(f"[BROKER] Trying Jupiter's optimal route to SOL...", flush=True)
-                        quote = self._quote(token, SOL_MINT, in_amount, slippage_bps_override=slippage_bps, only_direct_routes=False)
-                        print(f"[BROKER] ✅ Got Jupiter's optimal route", flush=True)
+                        print(f"[BROKER] Trying 2-hop max route to SOL...", flush=True)
+                        quote = self._quote(token, SOL_MINT, in_amount, slippage_bps_override=slippage_bps, only_direct_routes=False, max_accounts=20)
+                        print(f"[BROKER] ✅ Got 2-hop route", flush=True)
                     except Exception as e:
-                        print(f"[BROKER] ⚠️ Jupiter optimal route failed: {e}", flush=True)
+                        print(f"[BROKER] ⚠️ 2-hop route failed: {e}", flush=True)
                         
                         # Strategy 2: Try direct route to SOL
                         try:
@@ -580,7 +583,15 @@ class Broker:
                                 quote = self._quote(token, USDC_MINT, in_amount, slippage_bps_override=slippage_bps, only_direct_routes=True)
                                 output_mint = USDC_MINT  # We'll get USDC
                             except Exception as e3:
-                                print(f"[BROKER] ⚠️ No direct USDC route either: {e3}", flush=True)
+                                print(f"[BROKER] ⚠️ No direct USDC route: {e3}", flush=True)
+                                
+                                # Strategy 4: Last resort - unrestricted multi-hop
+                                print(f"[BROKER] Last resort: unrestricted route...", flush=True)
+                                try:
+                                    quote = self._quote(token, SOL_MINT, in_amount, slippage_bps_override=slippage_bps, only_direct_routes=False)
+                                    print(f"[BROKER] ✅ Got unrestricted route", flush=True)
+                                except Exception as e4:
+                                    print(f"[BROKER] ⚠️ All routing strategies failed: {e4}", flush=True)
                     
                     if not quote:
                         print(f"[BROKER] ⚠️ Quote failed at {slippage_bps/100}% slippage, trying next level...", flush=True)
