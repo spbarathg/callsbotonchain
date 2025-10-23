@@ -701,24 +701,29 @@ def run() -> None:
                 
                 # Final validation: double-check price hasn't moved too much
                 # REUSE current_price from earlier to avoid redundant API call!
-                print(f"[DEBUG] Final price validation (cached price=${current_price:.8f})...", flush=True)
-                alert_price = float(stats.get("price", 0))
-                print(f"[DEBUG] alert_price={alert_price}", flush=True)
-                
-                if current_price > 0 and alert_price > 0:
-                    price_change_pct = ((current_price - alert_price) / alert_price) * 100
+                # SKIP this check if blind buy is enabled
+                _blind_buy = os.getenv("TS_BLIND_BUY", "false").strip().lower() == "true"
+                if not _blind_buy:
+                    print(f"[DEBUG] Final price validation (cached price=${current_price:.8f})...", flush=True)
+                    alert_price = float(stats.get("price", 0))
+                    print(f"[DEBUG] alert_price={alert_price}", flush=True)
                     
-                    if price_change_pct < -25.0:
-                        signals_filtered += 1
-                        engine._log("entry_rejected_dumped", token=token, 
-                                   price_change_pct=price_change_pct)
-                        continue
-                    
-                    if price_change_pct > 50.0:
-                        signals_filtered += 1
-                        engine._log("entry_rejected_fomo", token=token,
-                                   price_change_pct=price_change_pct)
-                        continue
+                    if current_price > 0 and alert_price > 0:
+                        price_change_pct = ((current_price - alert_price) / alert_price) * 100
+                        
+                        if price_change_pct < -25.0:
+                            signals_filtered += 1
+                            engine._log("entry_rejected_dumped", token=token, 
+                                       price_change_pct=price_change_pct)
+                            continue
+                        
+                        if price_change_pct > 50.0:
+                            signals_filtered += 1
+                            engine._log("entry_rejected_fomo", token=token,
+                                       price_change_pct=price_change_pct)
+                            continue
+                else:
+                    print(f"[DEBUG] Blind buy mode: skipping FOMO/dump filters", flush=True)
                 
                 # Execute trade
                 print(f"[DEBUG] Logging trade decision for {token_norm[:8]}...", flush=True)

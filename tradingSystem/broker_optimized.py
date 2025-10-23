@@ -477,9 +477,11 @@ class Broker:
                                 sig = str(sig_result)
                                 print(f"[BROKER] ✅ Direct send successful (no simulation): {sig[:8]}...", flush=True)
                                 
-                                # SUCCESS! Return fill
+                                # SUCCESS! Calculate actual executed price from tokens received
+                                actual_price = float(usd_size) / out_amt if out_amt > 0 else expected_price
                                 print(f"[BROKER] ✅ BUY SUCCESS at {slippage_bps/100}% slippage!", flush=True)
-                                return Fill(price=expected_price, qty=out_amt, usd=float(usd_size), 
+                                print(f"[BROKER] Actual price: ${actual_price:.8f} (Expected: ${expected_price:.8f})", flush=True)
+                                return Fill(price=actual_price, qty=out_amt, usd=float(usd_size), 
                                            tx=sig, success=True, slippage_pct=slippage_bps/100)
                             except Exception as e2:
                                 print(f"[BROKER] ❌ Direct send also failed: {e2}", flush=True)
@@ -497,9 +499,11 @@ class Broker:
                     else:
                         print(f"[BROKER] ✅ Transaction sent: {sig[:8]}...", flush=True)
                     
-                    # SUCCESS! Return fill
+                    # SUCCESS! Calculate actual executed price from tokens received
+                    actual_price = float(usd_size) / out_amt if out_amt > 0 else expected_price
                     print(f"[BROKER] ✅ BUY SUCCESS at {slippage_bps/100}% slippage!", flush=True)
-                    return Fill(price=expected_price, qty=out_amt, usd=float(usd_size), 
+                    print(f"[BROKER] Actual price: ${actual_price:.8f} (Expected: ${expected_price:.8f})", flush=True)
+                    return Fill(price=actual_price, qty=out_amt, usd=float(usd_size), 
                                tx=sig, success=True, slippage_pct=slippage_bps/100)
                     
                 except Exception as e:
@@ -602,8 +606,11 @@ class Broker:
                             return Fill(price=0.0, qty=0.0, usd=0.0, success=False, 
                                        error=f"Sell returned only ${out_usd:.4f} (catastrophic slippage)", tx=sig)
                         
+                        # Calculate actual executed price from USD received
+                        actual_price = out_usd / float(qty) if float(qty) > 0 else expected_price
                         print(f"[BROKER] ✅ SELL SUCCESS at {slippage_bps/100}% slippage!", flush=True)
-                        return Fill(price=expected_price, qty=float(qty), usd=out_usd, 
+                        print(f"[BROKER] Actual price: ${actual_price:.8f} (Expected: ${expected_price:.8f})", flush=True)
+                        return Fill(price=actual_price, qty=float(qty), usd=out_usd, 
                                    tx=sig, success=True, slippage_pct=slippage_bps/100)
                     
                     # If still error and not last attempt, try next level
@@ -671,153 +678,4 @@ class Broker:
         except Exception as e:
             print(f"[BROKER] Failed to get token price: {e}", flush=True)
             return 0.0
-
-
-            # Get quote
-            print(f"[BROKER] Fetching Jupiter quote...", flush=True)
-            quote = self._quote(BASE_MINT, token, in_amount)
-            if not quote:
-                print(f"[BROKER] ❌ Failed to get quote", flush=True)
-                return Fill(price=0.0, qty=0.0, usd=0.0, success=False, error="Failed to get quote")
-            print(f"[BROKER] ✅ Quote received", flush=True)
-            
-            # Calculate expected fill
-            out_amt = float(quote.get("outAmount") or 0) / (10 ** token_dec)
-            print(f"[BROKER] Expected output: {out_amt:.4f} tokens", flush=True)
-            if out_amt <= 0:
-                print(f"[BROKER] ❌ Zero output amount", flush=True)
-                return Fill(price=0.0, qty=0.0, usd=0.0, success=False, error="Invalid quote: zero output amount")
-            expected_price = usd_size / out_amt
-            
-            # Check price impact
-            price_impact = abs(float(quote.get("priceImpactPct") or 0))
-            print(f"[BROKER] Price impact: {price_impact:.2f}%", flush=True)
-            if price_impact > MAX_PRICE_IMPACT_PCT:
-                print(f"[BROKER] ❌ Price impact too high: {price_impact:.1f}%", flush=True)
-                return Fill(price=0.0, qty=0.0, usd=0.0, success=False, 
-                           error=f"Price impact too high: {price_impact:.1f}%")
-            
-            # Dry run
-            print(f"[BROKER] DRY_RUN={self._dry}", flush=True)
-            if self._dry:
-                print(f"[BROKER] 🎭 Dry run mode, simulating successful buy", flush=True)
-                return Fill(price=expected_price, qty=out_amt, usd=float(usd_size), 
-                           success=True, slippage_pct=0.0)
-            
-            # Execute
-            print(f"[BROKER] Fetching swap transaction...", flush=True)
-            swap_tx = self._swap(quote)
-            if not swap_tx:
-                print(f"[BROKER] ❌ Failed to get swap transaction", flush=True)
-                return Fill(price=0.0, qty=0.0, usd=0.0, success=False, error="Failed to get swap transaction")
-            print(f"[BROKER] ✅ Swap transaction received", flush=True)
-            
-            print(f"[BROKER] Signing and sending transaction...", flush=True)
-            sig, error = self._sign_and_send(swap_tx)
-            if error:
-                # If simulation failed but it's just a 6024 error, try sending anyway
-                if "6024" in str(error) or "0x1788" in str(error):
-                    print(f"[BROKER] ⚠️ Simulation failed with 6024, attempting direct send...", flush=True)
-                    try:
-                        # Skip simulation, send directly
-                        raw_tx = base64.b64decode(swap_tx)
-                        versioned_tx = VersionedTransaction.from_bytes(raw_tx)
-                        signed_tx = VersionedTransaction(versioned_tx.message, [self._kp])
-                        
-                        # Send without preflight (skip simulation)
-                        opts = TxOpts(skip_preflight=True, preflight_commitment="processed")
-                        result = self._rpc.send_raw_transaction(bytes(signed_tx), opts=opts)
-                        sig_result = result.value
-                        sig = str(sig_result)
-                        print(f"[BROKER] ✅ Direct send successful (no simulation): {sig[:8]}...", flush=True)
-                    except Exception as e2:
-                        print(f"[BROKER] ❌ Direct send also failed: {e2}", flush=True)
-                        import traceback
-                        traceback.print_exc()
-                        return Fill(price=0.0, qty=0.0, usd=0.0, success=False, error=f"Simulation and direct send failed: {error}", tx=sig)
-                else:
-                    # Try auto re-quote + retry for 6024
-                    if "6024" in str(error):
-                        retry_tx = self._retry_swap_on_6024(BASE_MINT, token, in_amount, token_dec)
-                        if retry_tx:
-                            print(f"[BROKER] Retrying send after re-quote...", flush=True)
-                            sig2, error2 = self._sign_and_send(retry_tx)
-                            if not error2:
-                                return Fill(price=expected_price, qty=out_amt, usd=float(usd_size), tx=sig2, success=True, slippage_pct=0.0)
-                            print(f"[BROKER] ❌ Retry after re-quote failed: {error2}", flush=True)
-                    print(f"[BROKER] ❌ Sign/send failed: {error}", flush=True)
-                    return Fill(price=0.0, qty=0.0, usd=0.0, success=False, error=error, tx=sig)
-            else:
-                print(f"[BROKER] ✅ Transaction sent: {sig[:8]}...", flush=True)
-            
-            return Fill(price=expected_price, qty=out_amt, usd=float(usd_size), 
-                       tx=sig, success=True, slippage_pct=0.0)
-            
-        except Exception as e:
-            self._error_count += 1
-            self._last_error_time = time.time()
-            print(f"[BROKER] ❌ EXCEPTION in market_buy: {type(e).__name__}: {str(e)}", flush=True)
-            import traceback
-            traceback.print_exc()
-            return Fill(price=0.0, qty=0.0, usd=0.0, success=False, error=f"Buy failed: {str(e)}")
-
-    def market_sell(self, token: str, qty: float) -> Fill:
-        """Execute sell with comprehensive safety"""
-        try:
-            # Validation
-            if qty <= 0:
-                return Fill(price=0.0, qty=0.0, usd=0.0, success=False, error="Invalid quantity")
-            
-            if not token or not self._is_valid_solana_address(token):
-                return Fill(price=0.0, qty=0.0, usd=0.0, success=False, error="Invalid token address")
-            
-            dec = self._get_decimals(token)
-            in_amount = int(round(float(qty) * (10 ** dec)))
-            
-            if in_amount <= 0:
-                return Fill(price=0.0, qty=0.0, usd=0.0, success=False, error="Amount too small")
-            
-            # Get quote
-            quote = self._quote(token, BASE_MINT, in_amount)
-            if not quote:
-                return Fill(price=0.0, qty=0.0, usd=0.0, success=False, error="Failed to get quote")
-            
-            # Calculate expected fill
-            base_dec = self._get_decimals(BASE_MINT)
-            out_usd = float(quote.get("outAmount") or 0) / (10 ** base_dec)
-            if float(qty) <= 0:
-                return Fill(price=0.0, qty=0.0, usd=0.0, success=False, error="Invalid quantity for price calc")
-            expected_price = out_usd / float(qty)
-            
-            # Check price impact
-            price_impact = abs(float(quote.get("priceImpactPct") or 0))
-            if price_impact > 15.0:  # Slightly higher for sells
-                return Fill(price=0.0, qty=0.0, usd=0.0, success=False,
-                           error=f"Price impact too high: {price_impact:.1f}%")
-            
-            # Dry run
-            if self._dry:
-                return Fill(price=expected_price, qty=float(qty), usd=out_usd, 
-                           success=True, slippage_pct=0.0)
-            
-            # Execute
-            swap_tx = self._swap(quote)
-            if not swap_tx:
-                return Fill(price=0.0, qty=0.0, usd=0.0, success=False, error="Failed to get swap transaction")
-            
-            sig, error = self._sign_and_send(swap_tx)
-            if error:
-                return Fill(price=0.0, qty=0.0, usd=0.0, success=False, error=error, tx=sig)
-            
-            return Fill(price=expected_price, qty=float(qty), usd=out_usd, 
-                       tx=sig, success=True, slippage_pct=0.0)
-            
-        except Exception as e:
-            self._error_count += 1
-            self._last_error_time = time.time()
-            return Fill(price=0.0, qty=0.0, usd=0.0, success=False, error=f"Sell failed: {str(e)}")
-
-    def get_error_rate(self) -> float:
-        """Get recent error rate"""
-        return self._error_count / max(1, time.time() - self._last_error_time + 1)
 
