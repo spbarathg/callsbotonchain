@@ -332,21 +332,45 @@ class Broker:
             print(f"[BROKER] ❌ {error_msg}", flush=True)
             raise BrokerError(error_msg)
 
-    def _retry_swap_on_6024(self, in_mint: str, out_mint: str, in_amount: int, token_decimals: int) -> Optional[str]:
-        """Handle simulation error 6024 by re-quoting with slight amount bump and retrying a limited number of times."""
-        try_attempts = 1
-        bumped_amount = int(in_amount * 1.05)
-        slip2 = min(int(SLIPPAGE_BPS) + 100, 3000)
+    def _retry_swap_on_6024(self, in_mint: str, out_mint: str, in_amount: int, token_decimals: int, current_slippage: int = None) -> Optional[str]:
+        """Handle simulation error 6024 by getting FRESH quote and retrying immediately.
+        
+        Error 6024 usually means:
+        - Quote is stale (market moved)
+        - Pool state changed
+        - Need fresh quote with current market conditions
+        """
+        try_attempts = 2  # Increased attempts
+        # Use current slippage or bump it slightly
+        slip2 = current_slippage + 500 if current_slippage else min(int(SLIPPAGE_BPS) + 500, 5000)
+        
         for i in range(try_attempts):
             try:
-                print(f"[BROKER] 6024 retry: re-quoting with amount={bumped_amount}, slippage={slip2}bps", flush=True)
-                quote = self._quote(in_mint, out_mint, bumped_amount, slippage_bps_override=slip2)
+                # CRITICAL: Get FRESH quote immediately (don't wait)
+                print(f"[BROKER] 6024 recovery attempt {i+1}: Getting FRESH quote with {slip2}bps slippage", flush=True)
+                
+                # Try with slightly adjusted amount to avoid exact same state
+                adjusted_amount = int(in_amount * (1.0 + (i * 0.01)))  # 0%, 1%, 2% adjustment
+                
+                quote = self._quote(in_mint, out_mint, adjusted_amount, slippage_bps_override=slip2, only_direct_routes=False)
+                if not quote:
+                    print(f"[BROKER] Failed to get fresh quote on attempt {i+1}", flush=True)
+                    time.sleep(0.5)  # Brief pause before retry
+                    continue
+                
+                # Execute immediately (minimize staleness)
                 swap_tx = self._swap(quote)
-                return swap_tx
+                if swap_tx:
+                    print(f"[BROKER] ✅ 6024 recovery successful on attempt {i+1}", flush=True)
+                    return swap_tx
+                    
             except BrokerError as e:
                 print(f"[BROKER] 6024 retry attempt {i+1} failed: {e}", flush=True)
-                time.sleep(1 * (i + 1))
+                if i < try_attempts - 1:
+                    time.sleep(0.5)  # Short delay before next attempt
                 continue
+        
+        print(f"[BROKER] ❌ All 6024 recovery attempts failed", flush=True)
         return None
 
     def market_buy(self, token: str, usd_size: float) -> Fill:
@@ -542,7 +566,16 @@ class Broker:
                 return Fill(price=0.0, qty=0.0, usd=0.0, success=False, error="Invalid token address")
             
             dec = self._get_decimals(token)
-            in_amount = int(round(float(qty) * (10 ** dec)))
+            
+            # CRITICAL FIX: Sell 99% instead of 100% to avoid Error 6024 (InsufficientFunds)
+            # Reasons for 99% (leaving 1% dust):
+            # 1. Rounding/precision errors during buy mean actual balance might be slightly less
+            # 2. Jupiter API rejects if you try to sell even 1 raw unit more than you have
+            # 3. 1% dust is small enough loss (~$0.10 on $10 position) but safe buffer
+            # 4. Standard practice in DEX trading to leave dust to avoid stuck positions
+            in_amount = int(float(qty) * (10 ** dec) * 0.99)  # Sell 99%, leave 1% dust for safety
+            
+            print(f"[BROKER] Sell: {qty} tokens → {in_amount} raw units (99% to prevent Error 6024)", flush=True)
             
             if in_amount <= 0:
                 return Fill(price=0.0, qty=0.0, usd=0.0, success=False, error="Amount too small")
@@ -645,6 +678,22 @@ class Broker:
                     
                     # Try with simulation first
                     sig, error = self._sign_and_send(swap_tx)
+                    
+                    # CRITICAL FIX: Handle Error 6024 immediately with fresh quote retry
+                    if error and "6024" in str(error):
+                        print(f"[BROKER] ⚠️ Error 6024 detected during sell execution - attempting fresh quote recovery", flush=True)
+                        try:
+                            # Try to recover with FRESH quote (stale quote is likely cause)
+                            recovery_tx = self._retry_swap_on_6024(token, output_mint, in_amount, dec, current_slippage=slippage_bps)
+                            if recovery_tx:
+                                # Retry execution with fresh transaction
+                                sig, error = self._sign_and_send(recovery_tx)
+                                if not error:
+                                    print(f"[BROKER] ✅ 6024 recovery succeeded!", flush=True)
+                                else:
+                                    print(f"[BROKER] ⚠️ 6024 recovery failed: {error}", flush=True)
+                        except Exception as e:
+                            print(f"[BROKER] ⚠️ 6024 recovery exception: {e}", flush=True)
                     
                     # If rate limited (common cause), abort early and let higher-level cooldown handle it
                     if error and ("Rate limited" in str(error) or "429" in str(error)):
