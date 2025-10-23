@@ -615,9 +615,13 @@ class Broker:
                     
                     # If still error and not last attempt, try next level
                     if attempt < len(slippage_levels):
+                        # Check if this is a slippage error (6024) - needs longer wait for price to stabilize
+                        is_slippage_error = "6024" in str(error) or "SlippageToleranceExceeded" in str(error)
+                        wait_time = 8 if is_slippage_error else 3  # Wait longer for slippage errors
+                        
                         print(f"[BROKER] ⚠️ Failed at {slippage_bps/100}% slippage: {error}", flush=True)
-                        print(f"[BROKER] 🔄 Escalating to {slippage_levels[attempt]/100}% slippage...", flush=True)
-                        time.sleep(3)
+                        print(f"[BROKER] 🔄 Waiting {wait_time}s then escalating to {slippage_levels[attempt]/100}% slippage...", flush=True)
+                        time.sleep(wait_time)
                         continue
                     else:
                         return Fill(price=0.0, qty=0.0, usd=0.0, success=False, error=error, tx=sig)
