@@ -91,32 +91,55 @@ MAX_POSITION_SIZE_USD = BANKROLL_USD * (MAX_POSITION_SIZE_PCT / 100.0)
 # ==================== STOPS & TRAILS ====================
 # Optimized for 96% avg gain and 42% WR
 
-# Stop losses (from ENTRY price, not peak) - OPTIMIZED FOR MOONSHOTS
-# Widened to -18% to handle normal memecoin volatility before 5-10x pumps
-STOP_LOSS_PCT = _get_float("TS_STOP_LOSS_PCT", 18.0)  # -18% from entry (was -15%)
+# ==================== MOONSHOT MODE - LET WINNERS RUN! 🚀 ====================
+# PHILOSOPHY: Your signal bot finds 5-10x movers. The trading bot should RIDE them,
+# not cut them short! Survive the shakeouts, catch the moonshots.
+
+# Stop losses (from ENTRY price, not peak) - WIDE TO SURVIVE VOLATILITY
+# Memecoins can dump -30% before 5x pumping. Don't get shaken out!
+STOP_LOSS_PCT = _get_float("TS_STOP_LOSS_PCT", 30.0)  # -30% from entry (was -18%)
 
 # EMERGENCY HARD STOP - Absolute maximum loss before force exit
 # If normal stop fails (price feed issues), this is the last line of defense
-EMERGENCY_HARD_STOP_PCT = _get_float("TS_EMERGENCY_HARD_STOP_PCT", 40.0)  # -40% absolute max
+EMERGENCY_HARD_STOP_PCT = _get_float("TS_EMERGENCY_HARD_STOP_PCT", 50.0)  # -50% absolute max
 
-# Trailing stops - TIGHTENED based on live performance analysis
-# OBSERVED: Signals peak at +60-200% but bot misses them with 15-20% trails
-# NEW STRATEGY: Tighter trails (5-10%) to capture peaks before dumps
-# Example: PING +60% → -1% because 20% trail never triggered
-TRAIL_AGGRESSIVE = _get_float("TS_TRAIL_AGGRESSIVE", 5.0)  # For Score 9-10 (very tight)
-TRAIL_DEFAULT = _get_float("TS_TRAIL_DEFAULT", 8.0)  # For Score 8 (tight)
-TRAIL_CONSERVATIVE = _get_float("TS_TRAIL_CONSERVATIVE", 10.0)  # For Score 7 (moderate)
+# ==================== PROFIT-BASED ADAPTIVE TRAILING STOPS ====================
+# OLD PROBLEM: Time-based trails exit too early (sold at +50% when token goes to +400%)
+# NEW STRATEGY: Trail based on PROFIT, not time! Let big winners run longer.
+#
+# Example (Mika token):
+# - Entry: $1.19
+# - At +50% ($1.78): Use 50% trail → needs -50% drop to exit (won't happen in pump)
+# - At +100% ($2.38): Use 35% trail → needs -35% drop to exit
+# - At +200% ($3.57): Use 25% trail → needs -25% drop to exit  
+# - At +400% ($5.95): Use 20% trail → locks in 300%+ profit on pullback
+#
+# Result: Rides the full pump, exits on real reversal, not small dips!
 
-# ADAPTIVE TRAILING STOPS - ENABLED FOR BIG GAINS! 🚀
-# Your signals find 5-10x movers (MOG 11.6x, EBTCoin 5.2x) - this captures them!
-ADAPTIVE_TRAILING_ENABLED = _get_bool("TS_ADAPTIVE_TRAILING_ENABLED", True)  # Changed to True!
-EARLY_TRAIL_PCT = _get_float("TS_EARLY_TRAIL_PCT", 25.0)  # 0-30 min: Wide trail (let it run)
-MID_TRAIL_PCT = _get_float("TS_MID_TRAIL_PCT", 15.0)      # 30-60 min: Standard trail
-LATE_TRAIL_PCT = _get_float("TS_LATE_TRAIL_PCT", 10.0)    # 60+ min: Tight trail (lock gains)
+ADAPTIVE_TRAILING_ENABLED = _get_bool("TS_ADAPTIVE_TRAILING_ENABLED", True)
 
-# TIME-BASED EXIT - Extended for slow pumpers
-# Your signals include slow movers (wen 5.1x, pup 4.8x) that need time
-MAX_HOLD_TIME_SECONDS = _get_int("TS_MAX_HOLD_TIME_SEC", 5400)  # 90 minutes (was 60)
+# PROFIT THRESHOLDS (PnL %)
+PROFIT_TIER_1 = _get_float("TS_PROFIT_TIER_1", 50.0)   # First milestone: +50%
+PROFIT_TIER_2 = _get_float("TS_PROFIT_TIER_2", 100.0)  # Second milestone: +100%
+PROFIT_TIER_3 = _get_float("TS_PROFIT_TIER_3", 200.0)  # Third milestone: +200%
+
+# TRAILING STOPS PER TIER (how much pullback from peak before exit)
+TRAIL_TIER_0 = _get_float("TS_TRAIL_TIER_0", 50.0)  # 0-50% profit: 50% trail (VERY LOOSE - let it run!)
+TRAIL_TIER_1 = _get_float("TS_TRAIL_TIER_1", 35.0)  # 50-100% profit: 35% trail (loose)
+TRAIL_TIER_2 = _get_float("TS_TRAIL_TIER_2", 25.0)  # 100-200% profit: 25% trail (moderate)
+TRAIL_TIER_3 = _get_float("TS_TRAIL_TIER_3", 20.0)  # 200%+ profit: 20% trail (lock big gains)
+
+# LEGACY TRAILS (for non-adaptive mode - NOT RECOMMENDED)
+TRAIL_AGGRESSIVE = _get_float("TS_TRAIL_AGGRESSIVE", 5.0)  # Deprecated
+TRAIL_DEFAULT = _get_float("TS_TRAIL_DEFAULT", 8.0)        # Deprecated
+TRAIL_CONSERVATIVE = _get_float("TS_TRAIL_CONSERVATIVE", 10.0)  # Deprecated
+EARLY_TRAIL_PCT = _get_float("TS_EARLY_TRAIL_PCT", 25.0)  # Deprecated
+MID_TRAIL_PCT = _get_float("TS_MID_TRAIL_PCT", 15.0)      # Deprecated
+LATE_TRAIL_PCT = _get_float("TS_LATE_TRAIL_PCT", 10.0)    # Deprecated
+
+# TIME-BASED EXIT - EXTENDED FOR SLOW MOVERS
+# Some tokens take 3-6 hours to reach peak. Give them time!
+MAX_HOLD_TIME_SECONDS = _get_int("TS_MAX_HOLD_TIME_SEC", 14400)  # 4 hours (was 90 min)
 
 # ==================== CIRCUIT BREAKERS ====================
 # NEW: Protect against catastrophic losses
