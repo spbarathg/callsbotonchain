@@ -149,10 +149,11 @@ LATE_TRAIL_PCT = _get_float("TS_LATE_TRAIL_PCT", 10.0)    # Deprecated
 MAX_HOLD_TIME_SECONDS = _get_int("TS_MAX_HOLD_TIME_SEC", 14400)  # 4 hours (was 90 min)
 
 # ==================== JUPITER PRO OPTIMIZATION ====================
-# With Pro tier (10 RPS), we can check exits more frequently for faster reactions
-# Free tier: 2s interval (0.5 RPS per position × 5 positions = 2.5 RPS)
-# Pro tier: 0.5s interval (2 RPS per position × 5 positions = 10 RPS, perfect fit!)
-EXIT_CHECK_INTERVAL_SEC = _get_float("TS_EXIT_CHECK_INTERVAL", 0.5 if os.getenv("JUPITER_API_KEY") else 2.0)
+# With Pro tier (10 RPS), we need to balance exit checks with sell attempts
+# Sell attempts use 10-20 API calls, so we need headroom
+# OPTIMIZED: 1.5s interval = 0.67 RPS per position × 5 = 3.3 RPS baseline + 6-7 RPS for sells
+# This prevents rate limit cascade failures during simultaneous sells
+EXIT_CHECK_INTERVAL_SEC = _get_float("TS_EXIT_CHECK_INTERVAL", 1.5 if os.getenv("JUPITER_API_KEY") else 2.0)
 
 # ==================== CIRCUIT BREAKERS ====================
 # NEW: Protect against catastrophic losses
