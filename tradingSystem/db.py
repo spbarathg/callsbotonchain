@@ -196,3 +196,18 @@ def get_open_position_id_by_token(token: str) -> Optional[int]:
 	conn.close()
 	return int(row[0]) if row and row[0] is not None else None
 
+
+def get_open_qty_by_token(token_address: str) -> Optional[float]:
+	"""
+	Get quantity for an open position by token address
+	Used by Jupiter price oracle to get real sellable prices
+	Returns None if position not found
+	"""
+	try:
+		position_id = get_open_position_id_by_token(token_address)
+		if position_id is None:
+			return None
+		return get_open_qty(position_id)
+	except Exception:
+		return None
+
