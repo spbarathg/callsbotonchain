@@ -49,27 +49,52 @@ def init() -> None:
 
 
 def create_position(token: str, strategy: str, entry_price: float, qty: float, usd_size: float, trail_pct: float) -> int:
-	conn = _conn()
-	c = conn.cursor()
-	c.execute(
-		"INSERT INTO positions(token_address,strategy,entry_price,qty,usd_size,peak_price,trail_pct,status) VALUES (?,?,?,?,?,?,?,?)",
-		(token, strategy, entry_price, qty, usd_size, entry_price, trail_pct, "open"),
-	)
-	pid = c.lastrowid
-	conn.commit()
-	conn.close()
-	return pid
+	"""Create position with retry logic to prevent orphaned positions"""
+	max_retries = 3
+	for attempt in range(max_retries):
+		try:
+			conn = _conn()
+			c = conn.cursor()
+			c.execute(
+				"INSERT INTO positions(token_address,strategy,entry_price,qty,usd_size,peak_price,trail_pct,status) VALUES (?,?,?,?,?,?,?,?)",
+				(token, strategy, entry_price, qty, usd_size, entry_price, trail_pct, "open"),
+			)
+			pid = c.lastrowid
+			conn.commit()
+			conn.close()
+			print(f"[DB] ✅ Position #{pid} created for {token[:8]}...", flush=True)
+			return pid
+		except Exception as e:
+			print(f"[DB] ⚠️ Attempt {attempt+1}/{max_retries} failed to create position: {e}", flush=True)
+			if attempt == max_retries - 1:
+				# Last attempt failed - this is critical!
+				print(f"[DB] 🚨 CRITICAL: Failed to create position after {max_retries} attempts!", flush=True)
+				raise  # Re-raise to ensure caller knows it failed
+			import time
+			time.sleep(0.5)  # Wait before retry
 
 
 def add_fill(position_id: int, side: str, price: float, qty: float, usd: float) -> None:
-	conn = _conn()
-	c = conn.cursor()
-	c.execute(
-		"INSERT INTO fills(position_id,side,price,qty,usd) VALUES (?,?,?,?,?)",
-		(position_id, side, price, qty, usd),
-	)
-	conn.commit()
-	conn.close()
+	"""Add fill with retry logic"""
+	max_retries = 3
+	for attempt in range(max_retries):
+		try:
+			conn = _conn()
+			c = conn.cursor()
+			c.execute(
+				"INSERT INTO fills(position_id,side,price,qty,usd) VALUES (?,?,?,?,?)",
+				(position_id, side, price, qty, usd),
+			)
+			conn.commit()
+			conn.close()
+			return
+		except Exception as e:
+			print(f"[DB] ⚠️ Attempt {attempt+1}/{max_retries} failed to add fill: {e}", flush=True)
+			if attempt == max_retries - 1:
+				print(f"[DB] 🚨 CRITICAL: Failed to add fill after {max_retries} attempts!", flush=True)
+				raise
+			import time
+			time.sleep(0.5)
 
 
 def update_peak_and_trail(position_id: int, price: float) -> Tuple[float, float]:
