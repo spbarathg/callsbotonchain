@@ -756,9 +756,10 @@ class Broker:
                             return Fill(price=0.0, qty=0.0, usd=0.0, success=False, 
                                        error="RUG_DETECTED: No liquidity - position closed")
                         
-                        # Check if this is a slippage error (6024) - needs longer wait for price to stabilize
+                        # Check if this is a slippage error (6024)
+                        # CRITICAL: Don't wait too long - rapid dumps can turn -20% into -50% during retries
                         is_slippage_error = "6024" in str(error) or "SlippageToleranceExceeded" in str(error)
-                        wait_time = 8 if is_slippage_error else 3  # Wait longer for slippage errors
+                        wait_time = 3  # Fast retry to minimize loss during rapid dumps (was 8s)
                         
                         print(f"[BROKER] ⚠️ Failed at {slippage_bps/100}% slippage: {error}", flush=True)
                         print(f"[BROKER] 🔄 Waiting {wait_time}s then escalating to {slippage_levels[attempt]/100}% slippage...", flush=True)
