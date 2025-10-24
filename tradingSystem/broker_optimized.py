@@ -62,8 +62,9 @@ class BrokerError(Exception):
 class Broker:
     """Optimized Jupiter v6 broker with bulletproof execution"""
     
-    # Class-level sell lock to prevent simultaneous sells (reduces API burst load)
+    # Class-level locks to prevent simultaneous trades (reduces API burst load)
     _sell_lock = threading.Lock()
+    _buy_lock = threading.Lock()
 
     def __init__(self) -> None:
         self._dry = bool(DRY_RUN or not WALLET_SECRET)
@@ -378,6 +379,14 @@ class Broker:
 
     def market_buy(self, token: str, usd_size: float) -> Fill:
         """Execute buy with comprehensive safety"""
+        # CRITICAL: Use global buy lock to prevent simultaneous buys
+        # This prevents API burst load when multiple signals arrive at once
+        # Example: 2 signals = 6 API calls in <1s → safer with serialization
+        with self._buy_lock:
+            return self._execute_buy(token, usd_size)
+    
+    def _execute_buy(self, token: str, usd_size: float) -> Fill:
+        """Internal buy execution (called with lock held)"""
         try:
             print(f"[BROKER] market_buy called: ${usd_size:.2f} for {token[:8]}...", flush=True)
             # Validation
@@ -427,8 +436,9 @@ class Broker:
             
             print(f"[BROKER] Decimals: base={base_dec}, token={token_dec}, in_amount={in_amount}", flush=True)
             
-            # Escalating slippage for buys: 20%, 30%, 40%, 50%
-            slippage_levels = [2000, 3000, 4000, 5000]
+            # Escalating slippage for buys: 20%, 35%, 50% (reduced to 3 levels for rate limiting)
+            # With Jupiter Pro 10 RPS, fewer attempts = less 429 errors
+            slippage_levels = [2000, 3500, 5000]
             last_error = None
             
             for attempt, slippage_bps in enumerate(slippage_levels, 1):
