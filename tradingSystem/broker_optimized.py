@@ -61,6 +61,9 @@ class BrokerError(Exception):
 
 class Broker:
     """Optimized Jupiter v6 broker with bulletproof execution"""
+    
+    # Class-level sell lock to prevent simultaneous sells (reduces API burst load)
+    _sell_lock = threading.Lock()
 
     def __init__(self) -> None:
         self._dry = bool(DRY_RUN or not WALLET_SECRET)
