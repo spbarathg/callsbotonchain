@@ -72,10 +72,11 @@ MAX_CONCURRENT = _get_int("TS_MAX_CONCURRENT", 5)  # 5 positions max
 # Score 7: 50% WR, 68% avg gain = Strong
 # Smart Money: 57% WR = Premium multiplier
 
-# Base sizes by conviction type (scaled for $20 bankroll)
-SMART_MONEY_BASE = _get_float("TS_SMART_MONEY_BASE", 4.5)  # ~$4.50 per position
-STRICT_BASE = _get_float("TS_STRICT_BASE", 4.0)  # ~$4.00 per position
-GENERAL_BASE = _get_float("TS_GENERAL_BASE", 3.5)  # ~$3.50 per position
+# Base sizes by conviction type - OPTIMIZED FOR 35% HIT RATE + BIG GAINS
+# Your 11.6x MOG calls deserve bigger size to maximize compound growth
+SMART_MONEY_BASE = _get_float("TS_SMART_MONEY_BASE", 5.5)  # ~$5.50 (+22%)
+STRICT_BASE = _get_float("TS_STRICT_BASE", 4.5)  # ~$4.50 (+12.5%)
+GENERAL_BASE = _get_float("TS_GENERAL_BASE", 4.0)  # ~$4.00 (+14%)
 
 # Score multipliers (applied to base)
 SCORE_10_MULT = _get_float("TS_SCORE_10_MULT", 1.2)  # 120%
@@ -90,8 +91,9 @@ MAX_POSITION_SIZE_USD = BANKROLL_USD * (MAX_POSITION_SIZE_PCT / 100.0)
 # ==================== STOPS & TRAILS ====================
 # Optimized for 96% avg gain and 42% WR
 
-# Stop losses (from ENTRY price, not peak) - FIXED BUG
-STOP_LOSS_PCT = _get_float("TS_STOP_LOSS_PCT", 15.0)  # -15% from entry for all
+# Stop losses (from ENTRY price, not peak) - OPTIMIZED FOR MOONSHOTS
+# Widened to -18% to handle normal memecoin volatility before 5-10x pumps
+STOP_LOSS_PCT = _get_float("TS_STOP_LOSS_PCT", 18.0)  # -18% from entry (was -15%)
 
 # EMERGENCY HARD STOP - Absolute maximum loss before force exit
 # If normal stop fails (price feed issues), this is the last line of defense
@@ -105,15 +107,16 @@ TRAIL_AGGRESSIVE = _get_float("TS_TRAIL_AGGRESSIVE", 5.0)  # For Score 9-10 (ver
 TRAIL_DEFAULT = _get_float("TS_TRAIL_DEFAULT", 8.0)  # For Score 8 (tight)
 TRAIL_CONSERVATIVE = _get_float("TS_TRAIL_CONSERVATIVE", 10.0)  # For Score 7 (moderate)
 
-# ADAPTIVE TRAILING STOPS - NEW! Prevents selling late pumpers too early
-ADAPTIVE_TRAILING_ENABLED = _get_bool("TS_ADAPTIVE_TRAILING_ENABLED", False)
+# ADAPTIVE TRAILING STOPS - ENABLED FOR BIG GAINS! 🚀
+# Your signals find 5-10x movers (MOG 11.6x, EBTCoin 5.2x) - this captures them!
+ADAPTIVE_TRAILING_ENABLED = _get_bool("TS_ADAPTIVE_TRAILING_ENABLED", True)  # Changed to True!
 EARLY_TRAIL_PCT = _get_float("TS_EARLY_TRAIL_PCT", 25.0)  # 0-30 min: Wide trail (let it run)
 MID_TRAIL_PCT = _get_float("TS_MID_TRAIL_PCT", 15.0)      # 30-60 min: Standard trail
-LATE_TRAIL_PCT = _get_float("TS_LATE_TRAIL_PCT", 12.0)    # 60+ min: Tight trail
+LATE_TRAIL_PCT = _get_float("TS_LATE_TRAIL_PCT", 10.0)    # 60+ min: Tight trail (lock gains)
 
-# TIME-BASED EXIT - Automatically sell stagnant positions
-# Prevents capital from being stuck in dead/inactive tokens
-MAX_HOLD_TIME_SECONDS = _get_int("TS_MAX_HOLD_TIME_SEC", 3600)  # Default: 1 hour
+# TIME-BASED EXIT - Extended for slow pumpers
+# Your signals include slow movers (wen 5.1x, pup 4.8x) that need time
+MAX_HOLD_TIME_SECONDS = _get_int("TS_MAX_HOLD_TIME_SEC", 5400)  # 90 minutes (was 60)
 
 # ==================== CIRCUIT BREAKERS ====================
 # NEW: Protect against catastrophic losses
