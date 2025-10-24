@@ -76,13 +76,14 @@ class JupiterPriceOracle:
             in_amount = int(holdings * (10 ** token_decimals))
             
             # Get Jupiter quote for selling this amount
+            # Try direct routes first (faster), then allow multi-hop if needed
             result = jupiter.get_quote(
                 input_mint=token,
                 output_mint=SOL_MINT,
                 amount=in_amount,
                 slippage_bps=2000,  # 20% slippage for quote
                 timeout=5.0,
-                only_direct_routes=True  # Faster, more reliable
+                only_direct_routes=False  # Allow multi-hop routes for low-liq tokens
             )
             
             if result["status_code"] != 200 or not result.get("json"):
