@@ -504,13 +504,22 @@ class TradeEngine:
                     if token in self.live:
                         self.live[token]["sell_failures"] = sell_failures + 1
                         
-                        # CRITICAL: Force-close after 15 consecutive failures (rugged or Jupiter issue)
-                        # This prevents positions from being stuck forever
-                        if sell_failures + 1 >= 15:
-                            print(f"[TRADER] 🚨 FORCE CLOSING STUCK POSITION: {token[:8]} after {sell_failures + 1} failures", flush=True)
+                        # CRITICAL: Force-close after fewer failures for dumping positions
+                        # For rapidly dumping tokens, waiting too long can turn -20% into -50%
+                        # Example: C7kWNa3n went from -20% to -48% while stuck on sells
+                        if profit_pct < -10:
+                            max_failures = 5  # Fast exit for dumps (stop loss already triggered)
+                        elif profit_pct < 0:
+                            max_failures = 8  # Moderate for small losses
+                        else:
+                            max_failures = 15  # More patience for profitable positions
+                        
+                        if sell_failures + 1 >= max_failures:
+                            print(f"[TRADER] 🚨 FORCE CLOSING: {token[:8]} after {sell_failures + 1} failures (profit: {profit_pct:.1f}%)", flush=True)
                             close_position(pid)
                             self.live.pop(token, None)
-                            self._log("force_closed_stuck_position", token=token, pid=pid, failures=sell_failures + 1, error=fill.error)
+                            self.inactivity_monitor.reset_position(token)
+                            self._log("force_closed_stuck_position", token=token, pid=pid, failures=sell_failures + 1, profit_pct=profit_pct, error=fill.error)
                             return True
                         
                         # Log failures with backoff info
