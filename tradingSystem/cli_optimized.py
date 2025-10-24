@@ -325,7 +325,7 @@ def _exit_loop(engine: TradeEngine, stop_event: threading.Event) -> None:
                     # Get position data for adaptive monitoring
                     pos_data = engine.live.get(token, {})
                     entry_time = pos_data.get("entry_time", time.time())
-                    entry_price = pos_data.get("entry", 0)
+                    entry_price = pos_data.get("entry_price", 0)  # FIXED: was "entry" (wrong key!)
                     
                     # Get current price (will use cache if available)
                     price = _get_last_price_usd(token, use_cache=True)
