@@ -241,13 +241,19 @@ def _exit_loop(engine: TradeEngine, stop_event: threading.Event) -> None:
     last_portfolio_sync = 0
     iteration = 0
     
-    # Configurable check interval (default: 2 seconds for faster peak tracking)
-    # Reduced from 5s to 2s to catch price spikes and protect profits better
-    # Use centralized config (auto-adjusts for Jupiter Pro tier)
+    # Initialize adaptive monitoring (smart intervals based on position maturity)
+    from tradingSystem.adaptive_monitor import AdaptiveMonitor
+    monitor = AdaptiveMonitor()
+    
+    # Base check interval (for loop sleep)
     check_interval = EXIT_CHECK_INTERVAL_SEC
     is_pro = bool(os.getenv("JUPITER_API_KEY"))
     tier_label = "Pro (10 RPS)" if is_pro else "Free (1 RPS)"
-    print(f"[EXIT_LOOP] Exit check interval: {check_interval}s (Jupiter {tier_label})", flush=True)
+    print(f"[EXIT_LOOP] Base interval: {check_interval}s (Jupiter {tier_label})", flush=True)
+    print(f"[EXIT_LOOP] Adaptive monitoring: ENABLED", flush=True)
+    print(f"[EXIT_LOOP] Tiers: Fast(1.5s) → Medium(30m) → Slow(2h) → Ultra(4h)", flush=True)
+    print(f"[EXIT_LOOP] Inactivity exit: 6+ hours of <5% movement", flush=True)
+    print(f"[EXIT_LOOP] Moonshot mode: High-profit (>200%) + active price = unlimited hold", flush=True)
     
     while not stop_event.is_set():
         try:
@@ -316,12 +322,34 @@ def _exit_loop(engine: TradeEngine, stop_event: threading.Event) -> None:
                             print(f"[EXIT_LOOP] Skipping {token[:8]}... (quantity={qty}, failed fill)", flush=True)
                         continue
                     
-                    # Get price (will use cache if available - reduces API calls by ~90%)
+                    # Get position data for adaptive monitoring
+                    pos_data = engine.live.get(token, {})
+                    entry_time = pos_data.get("entry_time", time.time())
+                    entry_price = pos_data.get("entry", 0)
+                    
+                    # Get current price (will use cache if available)
                     price = _get_last_price_usd(token, use_cache=True)
+                    
                     if price > 0:
-                        if iteration % 300 == 0:
-                            print(f"[EXIT_LOOP] Checking exit for {token[:8]}... at price ${price:.8f}", flush=True)
-                        engine.check_exits(token, price)
+                        # Calculate current profit
+                        current_profit_pct = ((price - entry_price) / entry_price * 100) if entry_price > 0 else 0
+                        
+                        # ADAPTIVE MONITORING: Check if this position needs monitoring right now
+                        should_check, reason = monitor.should_check_position(
+                            token=token,
+                            entry_time=entry_time,
+                            current_profit_pct=current_profit_pct
+                        )
+                        
+                        if should_check:
+                            if iteration % 300 == 0 or "Tier" in reason:
+                                print(f"[EXIT_LOOP] ✓ Checking {token[:8]}... ${price:.8f} ({reason})", flush=True)
+                            engine.check_exits(token, price)
+                        else:
+                            # Position doesn't need checking yet (saves API limits!)
+                            if iteration % 600 == 0:  # Log every 10 minutes for skipped positions
+                                print(f"[EXIT_LOOP] ⏸️  Skipping {token[:8]}... (${price:.8f}, {reason})", flush=True)
+                            continue
                         # Reset price failure counter on success
                         # NOTE: DO NOT reset sell_failures here - it's managed by check_exits
                         if token in engine.live:
@@ -345,6 +373,8 @@ def _exit_loop(engine: TradeEngine, stop_event: threading.Event) -> None:
                                     if data and data.get("pid"):
                                         close_position(data["pid"])
                                     engine.live.pop(token, None)
+                                    monitor.reset_position(token)  # Clean up adaptive monitor
+                                    engine.inactivity_monitor.reset_position(token)  # Clean up inactivity monitor
                                     print(f"[EXIT_LOOP] ✅ Forced position closed: {token[:8]}", flush=True)
                                 except Exception as e:
                                     engine._log("force_close_error", token=token, error=str(e))
