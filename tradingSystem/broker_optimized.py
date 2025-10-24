@@ -577,7 +577,7 @@ class Broker:
             return self._execute_sell(token, qty)
     
     def _execute_sell(self, token: str, qty: float) -> Fill:
-        """Internal sell execution (called with lock held)"""
+        """Internal sell execution (called with lock held) - OPTIMIZED FOR JUPITER PRO"""
         try:
             # Validation
             if qty <= 0:
@@ -585,6 +585,24 @@ class Broker:
             
             if not token or not self._is_valid_solana_address(token):
                 return Fill(price=0.0, qty=0.0, usd=0.0, success=False, error="Invalid token address")
+            
+            # CRITICAL: Check wallet SOL balance before attempting sell
+            # Error 6025 = insufficient SOL for rent/fees, NOT a slippage issue!
+            try:
+                sol_balance_resp = self._rpc.get_balance(self._kp.pubkey())
+                sol_balance_lamports = sol_balance_resp.value if hasattr(sol_balance_resp, 'value') else 0
+                sol_balance = sol_balance_lamports / 1e9
+                
+                # Need at least 0.005 SOL for rent + fees (conservative estimate)
+                MIN_SOL_REQUIRED = 0.005
+                if sol_balance < MIN_SOL_REQUIRED:
+                    print(f"[BROKER] ❌ INSUFFICIENT SOL BALANCE: {sol_balance:.6f} SOL (need {MIN_SOL_REQUIRED})", flush=True)
+                    return Fill(price=0.0, qty=0.0, usd=0.0, success=False, 
+                               error=f"Insufficient SOL balance: {sol_balance:.6f} SOL (need {MIN_SOL_REQUIRED} for fees)")
+                
+                print(f"[BROKER] ✅ Wallet SOL balance: {sol_balance:.6f} SOL", flush=True)
+            except Exception as e:
+                print(f"[BROKER] ⚠️ Could not check SOL balance: {e}", flush=True)
             
             dec = self._get_decimals(token)
             
@@ -601,46 +619,39 @@ class Broker:
             if in_amount <= 0:
                 return Fill(price=0.0, qty=0.0, usd=0.0, success=False, error="Amount too small")
             
-            # Escalating slippage: 20%, 35%, 50% (reduced attempts to save API calls)
-            # With Jupiter Pro 10 RPS, fewer attempts = less 429 errors
-            slippage_levels = [2000, 3500, 5000]
+            # OPTIMIZED: Only 2 slippage attempts to minimize API calls
+            # Jupiter Pro 10 RPS: 2 attempts × 2 calls = 4 calls per sell (safe!)
+            # vs old: 3 attempts × 4 calls = 12 calls per sell (rate limited!)
+            slippage_levels = [2500, 5000]  # 25%, 50% - go aggressive faster
             
             for attempt, slippage_bps in enumerate(slippage_levels, 1):
                 try:
                     print(f"[BROKER] 🎯 SELL attempt {attempt}/{len(slippage_levels)} with {slippage_bps/100}% slippage for {token[:8]}...", flush=True)
                     
-                    # OPTIMIZED ROUTING STRATEGY (reduces API calls from 16 to 4 per sell):
-                    # Priority: Direct routes first (most reliable, fewest API calls)
-                    # Only escalate to multi-hop if direct fails
+                    # ULTRA-OPTIMIZED: Always allow multi-hop routes (low-liq tokens need this)
+                    # Only 1 API call per attempt (vs 2-3 in old logic)
                     output_mint = SOL_MINT
                     quote = None
                     
-                    # Strategy 1: Direct-only route to SOL (FASTEST, most reliable)
                     try:
-                        quote = self._quote(token, SOL_MINT, in_amount, slippage_bps_override=slippage_bps, only_direct_routes=True)
+                        # Get quote with multi-hop routes allowed (needed for low-liquidity tokens)
+                        quote = self._quote(token, SOL_MINT, in_amount, slippage_bps_override=slippage_bps, only_direct_routes=False)
                     except Exception as e:
-                        # Strategy 2: If no direct SOL route, try 2-hop max
-                        # Only use this on FIRST attempt (attempt 1) to save API calls
-                        if attempt == 1:
-                            try:
-                                quote = self._quote(token, SOL_MINT, in_amount, slippage_bps_override=slippage_bps, only_direct_routes=False, max_accounts=20)
-                            except Exception as e2:
-                                # CRITICAL: Check if token is rugged
-                                if "COULD_NOT_FIND_ANY_ROUTE" in str(e2):
-                                    print(f"[BROKER] 🚨 RUG DETECTED: No routes available for {token[:8]}", flush=True)
-                                    return Fill(price=0.0, qty=0.0, usd=0.0, success=False, 
-                                               error="RUG_DETECTED: No liquidity - DO NOT RETRY")
-                        else:
-                            # On subsequent attempts (higher slippage), skip multi-hop to save API calls
-                            # High slippage + direct route is usually enough
-                            if "COULD_NOT_FIND_ANY_ROUTE" in str(e):
-                                print(f"[BROKER] 🚨 RUG DETECTED: No routes available for {token[:8]}", flush=True)
-                                return Fill(price=0.0, qty=0.0, usd=0.0, success=False, 
-                                           error="RUG_DETECTED: No liquidity - DO NOT RETRY")
+                        # CRITICAL: Check if token is rugged (no routes at all)
+                        if "COULD_NOT_FIND_ANY_ROUTE" in str(e) or "NO_ROUTES_FOUND" in str(e):
+                            print(f"[BROKER] 🚨 RUG DETECTED: No routes available for {token[:8]}", flush=True)
+                            return Fill(price=0.0, qty=0.0, usd=0.0, success=False, 
+                                       error="RUG_DETECTED: No liquidity - DO NOT RETRY")
+                        
+                        print(f"[BROKER] ⚠️ Quote error: {e}", flush=True)
+                        if attempt < len(slippage_levels):
+                            time.sleep(1)  # Shorter wait for faster retry
+                            continue
+                        return Fill(price=0.0, qty=0.0, usd=0.0, success=False, error=str(e))
                     
                     if not quote:
                         print(f"[BROKER] ⚠️ Quote failed at {slippage_bps/100}% slippage, trying next level...", flush=True)
-                        time.sleep(2)
+                        time.sleep(1)
                         continue
                     
                     # Calculate expected fill based on output mint
@@ -685,92 +696,51 @@ class Broker:
                     swap_tx = self._swap(quote)
                     if not swap_tx:
                         print(f"[BROKER] ⚠️ Swap failed at {slippage_bps/100}% slippage, trying next level...", flush=True)
-                        time.sleep(2)
+                        time.sleep(1)
                         continue
                     
-                    # Try with simulation first
+                    # Execute transaction
                     sig, error = self._sign_and_send(swap_tx)
                     
-                    # CRITICAL FIX: Handle Error 6024 immediately with fresh quote retry
-                    if error and "6024" in str(error):
-                        print(f"[BROKER] ⚠️ Error 6024 detected during sell execution - attempting fresh quote recovery", flush=True)
-                        try:
-                            # Try to recover with FRESH quote (stale quote is likely cause)
-                            recovery_tx = self._retry_swap_on_6024(token, output_mint, in_amount, dec, current_slippage=slippage_bps)
-                            if recovery_tx:
-                                # Retry execution with fresh transaction
-                                sig, error = self._sign_and_send(recovery_tx)
-                                if not error:
-                                    print(f"[BROKER] ✅ 6024 recovery succeeded!", flush=True)
-                                else:
-                                    print(f"[BROKER] ⚠️ 6024 recovery failed: {error}", flush=True)
-                        except Exception as e:
-                            print(f"[BROKER] ⚠️ 6024 recovery exception: {e}", flush=True)
+                    # CRITICAL: Detect Error 6025 (insufficient SOL balance) and abort immediately
+                    # Error 6025 = NOT ENOUGH SOL FOR RENT/FEES - retrying won't help!
+                    if error and "6025" in str(error):
+                        print(f"[BROKER] ❌ ERROR 6025: Insufficient SOL balance for transaction fees", flush=True)
+                        print(f"[BROKER] This is NOT a slippage issue - need to add more SOL to wallet!", flush=True)
+                        return Fill(price=0.0, qty=0.0, usd=0.0, success=False, 
+                                   error="Error 6025: Insufficient SOL for fees (add more SOL to wallet)")
                     
-                    # If rate limited (common cause), abort early and let higher-level cooldown handle it
+                    # Error 6024 (stale quote / insufficient token balance)
+                    # This can happen with price volatility - try next slippage level
+                    if error and "6024" in str(error):
+                        print(f"[BROKER] ⚠️ Error 6024 at {slippage_bps/100}% slippage (stale quote or balance mismatch)", flush=True)
+                        if attempt < len(slippage_levels):
+                            print(f"[BROKER] 🔄 Trying next slippage level...", flush=True)
+                            time.sleep(1)
+                            continue
+                        # Last attempt failed
+                        return Fill(price=0.0, qty=0.0, usd=0.0, success=False, error=f"Error 6024 persists after all attempts: {error}")
+                    
+                    # Rate limiting - abort and let cooldown handle it
                     if error and ("Rate limited" in str(error) or "429" in str(error)):
                         print(f"[BROKER] ⚠️ Aborting due to Jupiter rate limit: {error}", flush=True)
                         return Fill(price=0.0, qty=0.0, usd=0.0, success=False, error=str(error))
-                    # Skip direct send for sells to avoid unnecessary SOL spend on failures
                     
-                    # If no error or direct send succeeded
+                    # If no error - SUCCESS!
                     if not error:
-                        # CRITICAL: Validate we got reasonable value back
-                        # If we got less than 10% of expected value, treat as failed
-                        if out_usd > 0 and out_usd < (float(qty) * expected_price * 0.10):
-                            print(f"[BROKER] ⚠️ SELL returned only ${out_usd:.4f} (< 10% of expected), treating as FAILED", flush=True)
-                            print(f"[BROKER] Expected: ${float(qty) * expected_price:.4f}, Got: ${out_usd:.4f}", flush=True)
-                            return Fill(price=0.0, qty=0.0, usd=0.0, success=False, 
-                                       error=f"Sell returned only ${out_usd:.4f} (catastrophic slippage)", tx=sig)
-                        
                         # Calculate actual executed price from USD received
                         actual_price = out_usd / float(qty) if float(qty) > 0 else expected_price
                         
-                        # If we got USDC, immediately convert to SOL (wallet stays in SOL)
-                        if output_mint == USDC_MINT:
-                            print(f"[BROKER] 🔄 Converting ${out_usd:.4f} USDC → SOL...", flush=True)
-                            try:
-                                # Get USDC balance (in smallest units: 6 decimals)
-                                usdc_amount = int(out_amount_base * 1e6)
-                                
-                                # Quote USDC → SOL with high slippage tolerance (we need this conversion)
-                                usdc_to_sol_quote = self._quote(USDC_MINT, SOL_MINT, usdc_amount, slippage_bps_override=3000, only_direct_routes=True)
-                                if usdc_to_sol_quote:
-                                    usdc_to_sol_tx = self._swap(usdc_to_sol_quote)
-                                    if usdc_to_sol_tx:
-                                        sol_sig, sol_error = self._sign_and_send(usdc_to_sol_tx)
-                                        if not sol_error:
-                                            sol_received = float(usdc_to_sol_quote.get("outAmount") or 0) / 1e9
-                                            print(f"[BROKER] ✅ Converted to {sol_received:.6f} SOL", flush=True)
-                                        else:
-                                            print(f"[BROKER] ⚠️ USDC→SOL conversion failed: {sol_error} (USDC remains in wallet)", flush=True)
-                                else:
-                                    print(f"[BROKER] ⚠️ USDC→SOL quote failed (USDC remains in wallet)", flush=True)
-                            except Exception as conv_error:
-                                print(f"[BROKER] ⚠️ USDC→SOL conversion error: {conv_error} (USDC remains in wallet)", flush=True)
-                        
-                        route_type = "direct USDC" if output_mint == USDC_MINT else "optimal"
-                        print(f"[BROKER] ✅ SELL SUCCESS at {slippage_bps/100}% slippage ({route_type} route)!", flush=True)
-                        print(f"[BROKER] Actual price: ${actual_price:.8f} (Expected: ${expected_price:.8f})", flush=True)
+                        print(f"[BROKER] ✅ SELL SUCCESS at {slippage_bps/100}% slippage!", flush=True)
+                        print(f"[BROKER] Sold {qty:.0f} tokens for ${out_usd:.4f} at ${actual_price:.10f}/token", flush=True)
                         return Fill(price=actual_price, qty=float(qty), usd=out_usd, 
                                    tx=sig, success=True, slippage_pct=slippage_bps/100)
                     
                     # If still error and not last attempt, try next level
                     if attempt < len(slippage_levels):
-                        # CRITICAL: Detect rugs immediately, don't retry
-                        if "COULD_NOT_FIND_ANY_ROUTE" in str(error) or "RUG_DETECTED" in str(error):
-                            print(f"[BROKER] 🚨 Token is rugged, aborting all retries", flush=True)
-                            return Fill(price=0.0, qty=0.0, usd=0.0, success=False, 
-                                       error="RUG_DETECTED: No liquidity - position closed")
-                        
-                        # Check if this is a slippage error (6024)
-                        # CRITICAL: Don't wait too long - rapid dumps can turn -20% into -50% during retries
-                        is_slippage_error = "6024" in str(error) or "SlippageToleranceExceeded" in str(error)
-                        wait_time = 3  # Fast retry to minimize loss during rapid dumps (was 8s)
-                        
                         print(f"[BROKER] ⚠️ Failed at {slippage_bps/100}% slippage: {error}", flush=True)
-                        print(f"[BROKER] 🔄 Waiting {wait_time}s then escalating to {slippage_levels[attempt]/100}% slippage...", flush=True)
-                        time.sleep(wait_time)
+                        print(f"[BROKER] 🔄 Trying {slippage_levels[attempt]/100}% slippage...", flush=True)
+                        time.sleep(1)  # Fast retry (was 3s)
                         continue
                     else:
                         return Fill(price=0.0, qty=0.0, usd=0.0, success=False, error=error, tx=sig)
@@ -778,14 +748,14 @@ class Broker:
                 except Exception as e:
                     print(f"[BROKER] ❌ Exception at {slippage_bps/100}% slippage: {e}", flush=True)
                     if attempt < len(slippage_levels):
-                        time.sleep(3)
+                        time.sleep(1)
                         continue
                     else:
-                        raise
+                        return Fill(price=0.0, qty=0.0, usd=0.0, success=False, error=f"Exception: {str(e)}")
             
             # If we exhausted all attempts
             return Fill(price=0.0, qty=0.0, usd=0.0, success=False, 
-                       error="Exhausted all slippage levels (20%-50%) - no working route found (tried multi-hop + direct)")
+                       error="Exhausted all slippage levels (25%-50%) - no working route found")
             
         except Exception as e:
             self._error_count += 1
