@@ -210,9 +210,30 @@ class TradeEngine:
                     self._log("open_failed_buy", token=token, error=fill.error)
                     return None
                 
-                # Create position
-                pid = create_position(token, strategy, fill.price, fill.qty, usd, trail_pct)
-                add_fill(pid, "buy", fill.price, fill.qty, fill.usd)
+                # CRITICAL FIX: Ensure position is ALWAYS recorded after successful buy
+                # If DB write fails, we log it prominently but the transaction already happened
+                try:
+                    print(f"[TRADER] Creating position record in database...", flush=True)
+                    pid = create_position(token, strategy, fill.price, fill.qty, usd, trail_pct)
+                    print(f"[TRADER] ✅ Position #{pid} created", flush=True)
+                    
+                    print(f"[TRADER] Adding fill record...", flush=True)
+                    add_fill(pid, "buy", fill.price, fill.qty, fill.usd)
+                    print(f"[TRADER] ✅ Fill recorded", flush=True)
+                    
+                except Exception as db_error:
+                    # CRITICAL: Buy succeeded but DB failed - this is a SEVERE issue!
+                    print(f"[TRADER] 🚨 CRITICAL ERROR: Buy succeeded but failed to record position!", flush=True)
+                    print(f"[TRADER] 🚨 Token: {token}", flush=True)
+                    print(f"[TRADER] 🚨 Transaction: {fill.tx}", flush=True)
+                    print(f"[TRADER] 🚨 Price: {fill.price}, Qty: {fill.qty}, USD: {fill.usd}", flush=True)
+                    print(f"[TRADER] 🚨 DB Error: {db_error}", flush=True)
+                    print(f"[TRADER] 🚨 ORPHANED POSITION - Manual intervention required!", flush=True)
+                    self._log("open_orphaned_position", token=token, error=str(db_error), 
+                             tx=fill.tx, price=fill.price, qty=fill.qty, usd=fill.usd)
+                    # Return None to indicate failure, even though buy succeeded
+                    # This prevents the position from being added to self.live
+                    return None
                 
                 # Add to live with ENTRY PRICE
                 self.live[token] = {
@@ -225,6 +246,7 @@ class TradeEngine:
                     "open_at": time.time(),  # Track when position was opened
                 }
                 
+                print(f"[TRADER] ✅ Position fully tracked and ready for monitoring", flush=True)
                 self._log("open_position", 
                          token=token, strategy=strategy, pid=pid, 
                          price=fill.price, qty=fill.qty, usd=usd, 
