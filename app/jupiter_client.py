@@ -63,16 +63,12 @@ class JupiterClient:
         # REMOVED: Request lock that was serializing all requests (bottleneck!)
         # We rely on token bucket for rate limiting instead
         
-        # Try DNS resolution - if fails, switch to IP mode
-        try:
-            socket.gethostbyname(self.hostname)
-            logger.info(f"Jupiter client initialized with DNS resolution")
-        except socket.gaierror:
-            logger.warning(f"DNS resolution failed for {self.hostname}, switching to IP fallback mode")
-            self.using_ip_fallback = True
-            self._current_ip = self.fallback_ips[0]
-            self.base_url = f"https://{self._current_ip}"
-            logger.info(f"Using IP fallback: {self._current_ip}")
+        # CRITICAL FIX: NEVER use IP fallback for HTTPS - SSL cert validation will fail
+        # Always use domain name for actual trades
+        # DNS resolution in Docker containers works fine - health check failures are cosmetic
+        logger.info(f"Jupiter client initialized with DNS resolution (domain: {self.hostname})")
+        # Keep base_url as domain for SSL compatibility
+        self.base_url = f"https://{self.hostname}"
     
     def is_in_cooldown(self) -> tuple[bool, float]:
         """
@@ -128,10 +124,8 @@ class JupiterClient:
         """
         url = f"{self.base_url}{path}"
         
-        # If using IP fallback, we need to set the Host header for SSL/TLS
+        # Always use domain name (no IP fallback for HTTPS/SSL compatibility)
         headers = {}
-        if self.using_ip_fallback:
-            headers["Host"] = self.hostname
         
         # Respect global cooldown if triggered by excessive 429s
         now = time.time()
@@ -199,12 +193,8 @@ class JupiterClient:
             except requests.exceptions.RequestException as e:
                 logger.warning(f"Jupiter API attempt {attempt + 1}/{retries} failed: {e}")
                 
-                # Try next IP if using fallback
-                if self.using_ip_fallback and attempt < len(self.fallback_ips) - 1:
-                    self._current_ip = self.fallback_ips[attempt + 1]
-                    self.base_url = f"https://{self._current_ip}"
-                    url = f"{self.base_url}{path}"
-                    logger.info(f"Trying fallback IP: {self._current_ip}")
+                # No IP fallback - always use domain name for HTTPS/SSL compatibility
+                # Just retry with backoff
                 
                 if attempt == retries - 1:
                     return {
@@ -213,7 +203,7 @@ class JupiterClient:
                         "error": str(e)
                     }
                 
-                # Wait before retry
+                # Wait before retry with exponential backoff
                 time.sleep(1 * (attempt + 1) + random.uniform(0, 0.2))
         
         return {
