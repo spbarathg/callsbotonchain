@@ -148,17 +148,21 @@ class TradeEngine:
             print(f"[TRADER] Connecting to database...", flush=True)
             con = sqlite3.connect(DB_PATH)
             cur = con.execute("""
-                SELECT id, token_address, strategy, entry_price, peak_price, created_at 
+                SELECT id, token_address, strategy, entry_price, peak_price, open_at 
                 FROM positions 
                 WHERE status='open'
             """)
             rows = cur.fetchall()
             print(f"[TRADER] Found {len(rows)} open positions in database", flush=True)
             
-            for pid, ca, strategy, entry_price, peak_price, created_at in rows:
-                # Parse created_at timestamp for entry_time
+            for pid, ca, strategy, entry_price, peak_price, open_at in rows:
+                # Parse open_at timestamp for entry_time
                 try:
-                    entry_time = datetime.fromisoformat(created_at.replace('Z', '+00:00')).timestamp()
+                    if open_at:
+                        # Try parsing as ISO format first
+                        entry_time = datetime.fromisoformat(open_at.replace('Z', '+00:00')).timestamp()
+                    else:
+                        entry_time = time.time()
                 except:
                     entry_time = time.time()  # Fallback to now if parsing fails
                 
