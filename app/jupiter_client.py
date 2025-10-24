@@ -36,37 +36,52 @@ class JupiterClient:
         
         # Jupiter Pro API Key (optional)
         self.api_key = os.getenv("JUPITER_API_KEY", "")
-        if self.api_key:
-            logger.info("🚀 Jupiter Pro API key detected - using Pro tier")
+        self.is_pro = bool(self.api_key)
+        
+        if self.is_pro:
+            logger.info("🚀 Jupiter Pro API key detected - using Pro tier (10 RPS = 600 RPM)")
+        else:
+            logger.info("📊 Jupiter Free tier - 60 RPM limit")
         
         self.session = requests.Session()
         self._dns_cache = {}
         self._dns_cache_timeout = timedelta(minutes=5)
         
-        # Configure session
+        # Configure session with larger pool for Pro tier
+        pool_size = 50 if self.is_pro else 20
         adapter = requests.adapters.HTTPAdapter(
-            pool_connections=10,
-            pool_maxsize=20,
+            pool_connections=pool_size,
+            pool_maxsize=pool_size * 2,
             max_retries=0  # We handle retries manually
         )
         self.session.mount('https://', adapter)
         self.session.mount('http://', adapter)
         
-        # --- Global rate limiter (token bucket) ---
-        # Increased to 45 RPM (75% of Jupiter's 60 RPM limit) for better throughput
-        rpm_limit = max(10, int(os.getenv("JUP_RPM_LIMIT", "45")))
-        # refill_rate tokens/sec; capacity allows small bursts
-        self._bucket_capacity = int(os.getenv("JUP_RATE_BUCKET", "5"))
+        # --- OPTIMIZED RATE LIMITER FOR PRO TIER ---
+        # Pro: 10 RPS = 600 RPM → use 540 RPM (90% utilization for safety)
+        # Free: 60 RPM → use 45 RPM (75% utilization)
+        if self.is_pro:
+            rpm_limit = int(os.getenv("JUP_PRO_RPM_LIMIT", "540"))  # 9 RPS effective
+            self._bucket_capacity = int(os.getenv("JUP_PRO_RATE_BUCKET", "20"))  # Larger bursts
+            self._429_threshold = int(os.getenv("JUP_PRO_429_THRESHOLD", "10"))  # More tolerant
+            self._cooldown_sec = int(os.getenv("JUP_PRO_COOLDOWN_SEC", "10"))  # Shorter cooldown
+        else:
+            rpm_limit = int(os.getenv("JUP_FREE_RPM_LIMIT", "45"))
+            self._bucket_capacity = int(os.getenv("JUP_FREE_RATE_BUCKET", "5"))
+            self._429_threshold = int(os.getenv("JUP_FREE_429_THRESHOLD", "3"))
+            self._cooldown_sec = int(os.getenv("JUP_FREE_COOLDOWN_SEC", "60"))
+        
         self._bucket_refill_rate = rpm_limit / 60.0  # tokens per second
         self._bucket_tokens = float(self._bucket_capacity)
         self._bucket_last_refill = time.time()
         self._bucket_lock = threading.Lock()
         
+        logger.info(f"Rate limiter: {rpm_limit} RPM ({rpm_limit/60:.1f} RPS), burst={self._bucket_capacity}")
+        
         # 429 handling state
         self._consecutive_429 = 0
         self._cooldown_until: Optional[float] = None
-        # REMOVED: Request lock that was serializing all requests (bottleneck!)
-        # We rely on token bucket for rate limiting instead
+        # NO request serialization lock - full concurrency enabled!
         
         # CRITICAL FIX: NEVER use IP fallback for HTTPS - SSL cert validation will fail
         # Always use domain name for actual trades
@@ -132,9 +147,9 @@ class JupiterClient:
         # Always use domain name (no IP fallback for HTTPS/SSL compatibility)
         headers = {}
         
-        # Add Jupiter Pro API key if available
+        # Add Jupiter Pro API key if available (CORRECT HEADER FORMAT)
         if self.api_key:
-            headers["Authorization"] = f"Bearer {self.api_key}"
+            headers["x-api-key"] = self.api_key
         
         # Respect global cooldown if triggered by excessive 429s
         now = time.time()
@@ -180,18 +195,22 @@ class JupiterClient:
                         "error": None
                     }
                 else:
-                    # Handle explicit 429 with exponential backoff + jitter
+                    # Handle explicit 429 with adaptive backoff (Pro tier gets shorter delays)
                     if response.status_code == 429:
                         self._consecutive_429 += 1
-                        backoff = min(8, (2 ** attempt))
-                        sleep_for = backoff + random.uniform(0, 0.5)
+                        # Pro tier: faster retries (should rarely hit 429)
+                        # Free tier: standard exponential backoff
+                        if self.is_pro:
+                            backoff = min(2, (1.5 ** attempt))  # Max 2s for Pro
+                        else:
+                            backoff = min(8, (2 ** attempt))  # Max 8s for Free
+                        sleep_for = backoff + random.uniform(0, 0.3)
                         logger.warning(f"Jupiter 429 received. attempt={attempt+1}/{retries} backoff={sleep_for:.2f}s")
                         time.sleep(sleep_for)
-                        # Trigger cooldown if persistent (reduced from 5 minutes to 60 seconds)
-                        if self._consecutive_429 >= int(os.getenv("JUP_429_COOLDOWN_THRESHOLD", "3")):
-                            cooldown_sec = int(os.getenv("JUP_429_COOLDOWN_SEC", "60"))
-                            self._cooldown_until = time.time() + cooldown_sec
-                            logger.error(f"Entering Jupiter cooldown for {cooldown_sec}s due to repeated 429s")
+                        # Trigger cooldown if persistent (uses tier-specific thresholds)
+                        if self._consecutive_429 >= self._429_threshold:
+                            self._cooldown_until = time.time() + self._cooldown_sec
+                            logger.error(f"Entering Jupiter cooldown for {self._cooldown_sec}s due to repeated 429s")
                         continue
                     return {
                         "status_code": response.status_code,

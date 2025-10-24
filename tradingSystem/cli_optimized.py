@@ -24,7 +24,7 @@ from .strategy_optimized import decide_trade, get_expected_win_rate, get_expecte
 from .trader_optimized import TradeEngine
 from app.toggles import trading_enabled
 from .db import get_open_position_id_by_token
-from .config_optimized import MAX_CONCURRENT
+from .config_optimized import MAX_CONCURRENT, EXIT_CHECK_INTERVAL_SEC
 from .portfolio_manager import get_portfolio_manager, should_use_portfolio_manager
 from .price_cache import get_price_cache
 
@@ -243,8 +243,11 @@ def _exit_loop(engine: TradeEngine, stop_event: threading.Event) -> None:
     
     # Configurable check interval (default: 2 seconds for faster peak tracking)
     # Reduced from 5s to 2s to catch price spikes and protect profits better
-    check_interval = float(os.getenv("TS_EXIT_CHECK_INTERVAL", "2.0"))
-    print(f"[EXIT_LOOP] Exit check interval: {check_interval}s", flush=True)
+    # Use centralized config (auto-adjusts for Jupiter Pro tier)
+    check_interval = EXIT_CHECK_INTERVAL_SEC
+    is_pro = bool(os.getenv("JUPITER_API_KEY"))
+    tier_label = "Pro (10 RPS)" if is_pro else "Free (1 RPS)"
+    print(f"[EXIT_LOOP] Exit check interval: {check_interval}s (Jupiter {tier_label})", flush=True)
     
     while not stop_event.is_set():
         try:

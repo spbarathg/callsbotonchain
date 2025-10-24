@@ -141,6 +141,12 @@ LATE_TRAIL_PCT = _get_float("TS_LATE_TRAIL_PCT", 10.0)    # Deprecated
 # Some tokens take 3-6 hours to reach peak. Give them time!
 MAX_HOLD_TIME_SECONDS = _get_int("TS_MAX_HOLD_TIME_SEC", 14400)  # 4 hours (was 90 min)
 
+# ==================== JUPITER PRO OPTIMIZATION ====================
+# With Pro tier (10 RPS), we can check exits more frequently for faster reactions
+# Free tier: 2s interval (0.5 RPS per position × 5 positions = 2.5 RPS)
+# Pro tier: 0.5s interval (2 RPS per position × 5 positions = 10 RPS, perfect fit!)
+EXIT_CHECK_INTERVAL_SEC = _get_float("TS_EXIT_CHECK_INTERVAL", 0.5 if os.getenv("JUPITER_API_KEY") else 2.0)
+
 # ==================== CIRCUIT BREAKERS ====================
 # NEW: Protect against catastrophic losses
 MAX_DAILY_LOSS_PCT = _get_float("TS_MAX_DAILY_LOSS_PCT", 20.0)  # Max 20% daily loss
