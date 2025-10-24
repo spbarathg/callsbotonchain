@@ -115,14 +115,11 @@ class TradeEngine:
     """Optimized trade engine with bulletproof risk management"""
     
     def __init__(self) -> None:
-        print(f"[TRADER] __init__ called", flush=True)
         db_init()
-        print(f"[TRADER] db_init complete", flush=True)
         self.broker = Broker()
         self.live: Dict[str, Dict[str, object]] = {}
         self._position_locks = PositionLock()
         self.circuit_breaker = CircuitBreaker()
-        print(f"[TRADER] Core components initialized", flush=True)
         
         # Inactivity monitoring: Exit positions based on price stagnation, not arbitrary time
         self.inactivity_monitor = InactivityMonitor()
@@ -135,17 +132,13 @@ class TradeEngine:
         os.makedirs(os.path.dirname(LOG_JSON_PATH), exist_ok=True)
         os.makedirs(os.path.dirname(LOG_TEXT_PATH), exist_ok=True)
         
-        print(f"[TRADER] About to call _recover_positions(), DB_PATH={DB_PATH}", flush=True)
         self._recover_positions()
-        print(f"[TRADER] _recover_positions() returned", flush=True)
     
     def _recover_positions(self):
         """Recover open positions from database"""
-        print(f"[TRADER] _recover_positions called, DB_PATH={DB_PATH}", flush=True)
         try:
             import sqlite3
             from datetime import datetime
-            print(f"[TRADER] Connecting to database...", flush=True)
             con = sqlite3.connect(DB_PATH)
             cur = con.execute("""
                 SELECT id, token_address, strategy, entry_price, peak_price, open_at 
@@ -153,7 +146,6 @@ class TradeEngine:
                 WHERE status='open'
             """)
             rows = cur.fetchall()
-            print(f"[TRADER] Found {len(rows)} open positions in database", flush=True)
             
             for pid, ca, strategy, entry_price, peak_price, open_at in rows:
                 # Parse open_at timestamp for entry_time
@@ -171,18 +163,13 @@ class TradeEngine:
                     "strategy": str(strategy),
                     "entry_price": float(entry_price or 0),
                     "peak_price": float(peak_price or entry_price or 0),
-                    "entry_time": entry_time,  # ADDED: For adaptive monitoring
-                    "open_at": entry_time,     # ADDED: For time-based exits
+                    "entry_time": entry_time,  # For adaptive monitoring
+                    "open_at": entry_time,     # For time-based exits
                 }
-                print(f"[TRADER] Recovered position {pid}: {str(ca)[:8]}... entry=${entry_price:.8f}", flush=True)
             con.close()
             if self.live:
-                print(f"[TRADER] ✓ Recovery complete: {len(self.live)} positions loaded", flush=True)
                 self._log("recovery_loaded", open_positions=len(self.live), positions=list(self.live.keys()))
-            else:
-                print(f"[TRADER] No open positions to recover", flush=True)
         except Exception as e:
-            print(f"[TRADER] ❌ Recovery failed: {e}", flush=True)
             self._log("recovery_failed", error=str(e))
 
     def _log(self, event: str, **fields) -> None:
