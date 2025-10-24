@@ -93,6 +93,10 @@ MAX_POSITION_SIZE_USD = BANKROLL_USD * (MAX_POSITION_SIZE_PCT / 100.0)
 # Stop losses (from ENTRY price, not peak) - FIXED BUG
 STOP_LOSS_PCT = _get_float("TS_STOP_LOSS_PCT", 15.0)  # -15% from entry for all
 
+# EMERGENCY HARD STOP - Absolute maximum loss before force exit
+# If normal stop fails (price feed issues), this is the last line of defense
+EMERGENCY_HARD_STOP_PCT = _get_float("TS_EMERGENCY_HARD_STOP_PCT", 40.0)  # -40% absolute max
+
 # Trailing stops - TIGHTENED based on live performance analysis
 # OBSERVED: Signals peak at +60-200% but bot misses them with 15-20% trails
 # NEW STRATEGY: Tighter trails (5-10%) to capture peaks before dumps

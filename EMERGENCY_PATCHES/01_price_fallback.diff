@@ -1,0 +1,66 @@
+--- a/tradingSystem/trader_optimized.py
++++ b/tradingSystem/trader_optimized.py
+@@ -288,8 +288,25 @@ class TradeEngine:
+         """
+         try:
+             if price <= 0:
+-                return False
++                # EMERGENCY FIX: Don't silently skip - try fallback and force exit if repeated failures
++                data = self.live.get(token)
++                if data:
++                    price_failures = data.get("price_failures", 0) + 1
++                    data["price_failures"] = price_failures
++                    
++                    # Try emergency price fetch from broker
++                    print(f"[TRADER] ⚠️ Price unavailable for {token[:8]}, attempt {price_failures}/5", flush=True)
++                    emergency_price = self.broker.get_token_price(token)
++                    
++                    if emergency_price > 0:
++                        price = emergency_price
++                        data["price_failures"] = 0  # Reset on success
++                    elif price_failures >= 5:
++                        # FORCE EXIT after 5 failures (better -50% than -95%)
++                        print(f"[TRADER] 🚨 EMERGENCY EXIT: Price unavailable for 5 attempts on {token[:8]}", flush=True)
++                        return self._force_emergency_exit(token, "price_unavailable_5x")
++                    else:
++                        return False
+             
+             data = self.live.get(token)
+             if not data:
+@@ -440,6 +457,37 @@ class TradeEngine:
+             return False
++    
++    def _force_emergency_exit(self, token: str, reason: str) -> bool:
++        """Force exit a position regardless of price (emergency only)"""
++        try:
++            data = self.live.get(token)
++            if not data:
++                return False
++            
++            pid = data.get("pid")
++            qty_open = get_open_qty(int(pid))
++            
++            if qty_open <= 0:
++                self.live.pop(token, None)
++                close_position(pid)
++                return False
++            
++            # Try to sell at market (any price)
++            fill = self.broker.market_sell(token, float(qty_open))
++            
++            if fill.success:
++                add_fill(int(pid), "sell", float(fill.price), float(fill.qty), float(fill.usd))
++                close_position(pid)
++                self.live.pop(token, None)
++                self._log("emergency_exit", token=token, reason=reason, pid=pid, usd=fill.usd)
++                return True
++            else:
++                # Even sell failed - close in DB anyway to prevent infinite loop
++                close_position(pid)
++                self.live.pop(token, None)
++                self._log("emergency_exit_failed", token=token, reason=reason, error=fill.error)
++                return False
++        except Exception as e:
++            self._log("emergency_exit_exception", token=token, error=str(e))
++            return False
+
