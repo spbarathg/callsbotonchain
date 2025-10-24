@@ -97,18 +97,61 @@ def add_fill(position_id: int, side: str, price: float, qty: float, usd: float) 
 			time.sleep(0.5)
 
 
-def update_peak_and_trail(position_id: int, price: float) -> Tuple[float, float]:
+def update_peak_and_trail(position_id: int, price: float, entry_price: float = 0.0) -> Tuple[float, float]:
+	"""
+	Update peak price and calculate PROFIT-BASED trailing stop.
+	
+	MOONSHOT MODE: Trail based on profit, not time!
+	- 0-50% profit: 50% trail (let it run!)
+	- 50-100% profit: 35% trail (still loose)
+	- 100-200% profit: 25% trail (moderate)
+	- 200%+ profit: 20% trail (lock big gains)
+	"""
 	conn = _conn()
 	c = conn.cursor()
-	c.execute("SELECT peak_price, trail_pct FROM positions WHERE id=?", (position_id,))
+	c.execute("SELECT peak_price, trail_pct, entry_price FROM positions WHERE id=?", (position_id,))
 	row = c.fetchone()
-	peak, trail = row if row else (0.0, 0.0)
+	if not row:
+		conn.close()
+		return 0.0, 0.0
+	
+	peak, trail_static, db_entry = row
+	
+	# Use provided entry_price or fall back to DB
+	entry = entry_price if entry_price > 0 else (db_entry or 0.0)
+	
+	# Update peak if price is higher
 	if price > (peak or 0):
 		c.execute("UPDATE positions SET peak_price=? WHERE id=?", (price, position_id))
 		conn.commit()
 		peak = price
 	conn.close()
-	return peak or 0.0, trail or 0.0
+	
+	# Calculate profit-based trail (MOONSHOT MODE!)
+	from tradingSystem.config_optimized import (
+		ADAPTIVE_TRAILING_ENABLED,
+		PROFIT_TIER_1, PROFIT_TIER_2, PROFIT_TIER_3,
+		TRAIL_TIER_0, TRAIL_TIER_1, TRAIL_TIER_2, TRAIL_TIER_3
+	)
+	
+	if ADAPTIVE_TRAILING_ENABLED and entry > 0 and peak > 0:
+		# Calculate current profit %
+		profit_pct = ((peak - entry) / entry) * 100
+		
+		# Select trail based on profit tier
+		if profit_pct < PROFIT_TIER_1:  # < 50% profit
+			trail = TRAIL_TIER_0  # 50% trail
+		elif profit_pct < PROFIT_TIER_2:  # 50-100% profit
+			trail = TRAIL_TIER_1  # 35% trail
+		elif profit_pct < PROFIT_TIER_3:  # 100-200% profit
+			trail = TRAIL_TIER_2  # 25% trail
+		else:  # 200%+ profit
+			trail = TRAIL_TIER_3  # 20% trail
+	else:
+		# Fall back to static trail from position creation
+		trail = trail_static or 10.0
+	
+	return peak or 0.0, trail or 10.0
 
 
 def close_position(position_id: int) -> None:

@@ -348,21 +348,29 @@ class TradeEngine:
                 if token not in self.live:
                     return False
                 
-                # Update peak and get trail stop
-                peak, trail = update_peak_and_trail(pid, price)
-                
-                # Validate database returns
-                if peak <= 0 or trail <= 0:
-                    self._log("exit_invalid_peak_trail", token=token, pid=pid, peak=peak, trail=trail)
-                    return False
-                
                 # CRITICAL: Get ENTRY price (no fallback - must be present)
                 entry_price = data.get("entry_price")
                 if not entry_price or entry_price <= 0:
                     self._log("exit_missing_entry_price", token=token, pid=pid)
                     return False
                 entry_price = float(entry_price)
+                
+                # Update peak and get PROFIT-BASED trail stop (MOONSHOT MODE!)
+                peak, trail = update_peak_and_trail(pid, price, entry_price)
+                
+                # Validate database returns
+                if peak <= 0 or trail <= 0:
+                    self._log("exit_invalid_peak_trail", token=token, pid=pid, peak=peak, trail=trail)
+                    return False
                 strategy = str(data.get("strategy", "unknown"))
+                
+                # Calculate current profit for logging
+                profit_pct = ((peak - entry_price) / entry_price) * 100 if entry_price > 0 else 0
+                
+                # Log trail adjustments (only when peak updates or occasionally)
+                old_peak = self.live[token].get("peak_price", 0)
+                if peak > old_peak:  # New peak reached!
+                    print(f"[TRADER] 🚀 {token[:8]} new peak! Profit: +{profit_pct:.1f}% | Trail: {trail:.0f}% | Price: ${price:.8f}", flush=True)
                 
                 # Update peak in live data
                 self.live[token]["peak_price"] = peak
