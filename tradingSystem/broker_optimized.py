@@ -625,6 +625,11 @@ class Broker:
                                     print(f"[BROKER] ✅ Got unrestricted route", flush=True)
                                 except Exception as e4:
                                     print(f"[BROKER] ⚠️ All routing strategies failed: {e4}", flush=True)
+                                    # CRITICAL: Check if token is rugged
+                                    if "COULD_NOT_FIND_ANY_ROUTE" in str(e4):
+                                        print(f"[BROKER] 🚨 RUG DETECTED: No routes available for {token[:8]}", flush=True)
+                                        return Fill(price=0.0, qty=0.0, usd=0.0, success=False, 
+                                                   error="RUG_DETECTED: No liquidity routes available - DO NOT RETRY")
                     
                     if not quote:
                         print(f"[BROKER] ⚠️ Quote failed at {slippage_bps/100}% slippage, trying next level...", flush=True)
@@ -745,6 +750,12 @@ class Broker:
                     
                     # If still error and not last attempt, try next level
                     if attempt < len(slippage_levels):
+                        # CRITICAL: Detect rugs immediately, don't retry
+                        if "COULD_NOT_FIND_ANY_ROUTE" in str(error) or "RUG_DETECTED" in str(error):
+                            print(f"[BROKER] 🚨 Token is rugged, aborting all retries", flush=True)
+                            return Fill(price=0.0, qty=0.0, usd=0.0, success=False, 
+                                       error="RUG_DETECTED: No liquidity - position closed")
+                        
                         # Check if this is a slippage error (6024) - needs longer wait for price to stabilize
                         is_slippage_error = "6024" in str(error) or "SlippageToleranceExceeded" in str(error)
                         wait_time = 8 if is_slippage_error else 3  # Wait longer for slippage errors

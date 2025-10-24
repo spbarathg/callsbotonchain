@@ -1,0 +1,41 @@
+--- a/tradingSystem/config_optimized.py
++++ b/tradingSystem/config_optimized.py
+@@ -93,6 +93,10 @@ BANKROLL_USD = _get_float("TS_BANKROLL_USD", 20)
+ # Stop losses (from ENTRY price, not peak) - FIXED BUG
+ STOP_LOSS_PCT = _get_float("TS_STOP_LOSS_PCT", 15.0)  # -15% from entry for all
+ 
++# EMERGENCY HARD STOP - Absolute maximum loss before force exit
++# If normal stop fails (price feed issues), this is the last line of defense
++EMERGENCY_HARD_STOP_PCT = _get_float("TS_EMERGENCY_HARD_STOP_PCT", 40.0)  # -40% absolute max
++
+ # Trailing stops - TIGHTENED based on live performance analysis
+ # OBSERVED: Signals peak at +60-200% but bot misses them with 15-20% trails
+ # NEW STRATEGY: Tighter trails (5-10%) to capture peaks before dumps
+--- a/tradingSystem/trader_optimized.py
++++ b/tradingSystem/trader_optimized.py
+@@ -21,6 +21,7 @@ from .config_optimized import (
+     STOP_LOSS_PCT, LOG_JSON_PATH, LOG_TEXT_PATH,
+     MAX_CONCURRENT, MAX_DAILY_LOSS_PCT, MAX_CONSECUTIVE_LOSSES,
+     BANKROLL_USD, DB_PATH, MAX_HOLD_TIME_SECONDS
++    EMERGENCY_HARD_STOP_PCT
+ )
+ from .broker_optimized import Broker
+ from .portfolio_manager import get_portfolio_manager, should_use_portfolio_manager
+@@ -346,6 +347,14 @@ class TradeEngine:
+                 
+                 # Check hard stop loss (from entry)
+                 if not exit_type and price <= stop_price:
+                     exit_type = "stop"
+                     exit_reason = f"Hit stop loss: {price:.8f} <= {stop_price:.8f} (entry: {entry_price:.8f})"
++                
++                # EMERGENCY HARD STOP - Last resort if normal stop failed
++                emergency_stop_price = entry_price * (1.0 - EMERGENCY_HARD_STOP_PCT / 100.0)
++                if not exit_type and price <= emergency_stop_price:
++                    exit_type = "emergency_stop"
++                    loss_pct = ((price - entry_price) / entry_price) * 100
++                    exit_reason = f"EMERGENCY HARD STOP: {loss_pct:.1f}% loss (price: {price:.8f}, entry: {entry_price:.8f})"
++                    print(f"[TRADER] 🚨 {exit_reason}", flush=True)
+                 
+                 # Check trailing stop (from peak)
+                 elif not exit_type and peak > 0 and price <= trail_price:
+

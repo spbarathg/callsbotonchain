@@ -20,7 +20,8 @@ from .db import (
 from .config_optimized import (
     STOP_LOSS_PCT, LOG_JSON_PATH, LOG_TEXT_PATH,
     MAX_CONCURRENT, MAX_DAILY_LOSS_PCT, MAX_CONSECUTIVE_LOSSES,
-    BANKROLL_USD, DB_PATH, MAX_HOLD_TIME_SECONDS
+    BANKROLL_USD, DB_PATH, MAX_HOLD_TIME_SECONDS,
+    EMERGENCY_HARD_STOP_PCT
 )
 from .broker_optimized import Broker
 from .portfolio_manager import get_portfolio_manager, should_use_portfolio_manager
@@ -289,7 +290,27 @@ class TradeEngine:
         """
         try:
             if price <= 0:
-                return False
+                # EMERGENCY FIX: Don't silently skip - try fallback and force exit if repeated failures
+                data = self.live.get(token)
+                if data:
+                    price_failures = data.get("price_failures", 0) + 1
+                    data["price_failures"] = price_failures
+                    
+                    # Try emergency price fetch from broker
+                    print(f"[TRADER] ⚠️ Price unavailable for {token[:8]}, attempt {price_failures}/5", flush=True)
+                    emergency_price = self.broker.get_token_price(token)
+                    
+                    if emergency_price > 0:
+                        price = emergency_price
+                        data["price_failures"] = 0  # Reset on success
+                    elif price_failures >= 5:
+                        # FORCE EXIT after 5 failures (better -50% than -95%)
+                        print(f"[TRADER] 🚨 EMERGENCY EXIT: Price unavailable for 5 attempts on {token[:8]}", flush=True)
+                        return self._force_emergency_exit(token, "price_unavailable_5x")
+                    else:
+                        return False
+                else:
+                    return False
             
             data = self.live.get(token)
             if not data:
@@ -348,6 +369,14 @@ class TradeEngine:
                 if not exit_type and price <= stop_price:
                     exit_type = "stop"
                     exit_reason = f"Hit stop loss: {price:.8f} <= {stop_price:.8f} (entry: {entry_price:.8f})"
+                
+                # EMERGENCY HARD STOP - Last resort if normal stop failed
+                emergency_stop_price = entry_price * (1.0 - EMERGENCY_HARD_STOP_PCT / 100.0)
+                if not exit_type and price <= emergency_stop_price:
+                    exit_type = "emergency_stop"
+                    loss_pct = ((price - entry_price) / entry_price) * 100
+                    exit_reason = f"EMERGENCY HARD STOP: {loss_pct:.1f}% loss (price: {price:.8f}, entry: {entry_price:.8f})"
+                    print(f"[TRADER] 🚨 {exit_reason}", flush=True)
                 
                 # Check trailing stop (from peak)
                 elif not exit_type and peak > 0 and price <= trail_price:
@@ -444,6 +473,47 @@ class TradeEngine:
                 
         except Exception as e:
             self._log("exit_exception", token=token, error=str(e))
+            return False
+    
+    def _force_emergency_exit(self, token: str, reason: str) -> bool:
+        """Force exit a position regardless of price (emergency only)"""
+        try:
+            data = self.live.get(token)
+            if not data:
+                return False
+            
+            pid = data.get("pid")
+            if not pid:
+                return False
+            
+            qty_open = get_open_qty(int(pid))
+            
+            if qty_open <= 0:
+                self.live.pop(token, None)
+                close_position(pid)
+                return False
+            
+            # Try to sell at market (any price)
+            fill = self.broker.market_sell(token, float(qty_open))
+            
+            if fill.success:
+                add_fill(int(pid), "sell", float(fill.price), float(fill.qty), float(fill.usd))
+                close_position(pid)
+                self.live.pop(token, None)
+                self._add_cooldown(token)
+                self._log("emergency_exit", token=token, reason=reason, pid=pid, usd=fill.usd)
+                print(f"[TRADER] 🚨 EMERGENCY EXIT SUCCESS: {token[:8]} sold for ${fill.usd:.2f}", flush=True)
+                return True
+            else:
+                # Even sell failed - close in DB anyway to prevent infinite loop
+                close_position(pid)
+                self.live.pop(token, None)
+                self._log("emergency_exit_failed", token=token, reason=reason, error=fill.error)
+                print(f"[TRADER] ⚠️ EMERGENCY EXIT FAILED: {token[:8]} - {fill.error}", flush=True)
+                return False
+        except Exception as e:
+            self._log("emergency_exit_exception", token=token, error=str(e))
+            print(f"[TRADER] ❌ EMERGENCY EXIT EXCEPTION: {token[:8]} - {e}", flush=True)
             return False
 
     def rebalance_position(self, token_to_sell: str, new_token: str, new_plan: Dict) -> bool:
