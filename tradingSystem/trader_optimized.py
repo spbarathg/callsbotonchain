@@ -115,11 +115,14 @@ class TradeEngine:
     """Optimized trade engine with bulletproof risk management"""
     
     def __init__(self) -> None:
+        print(f"[TRADER] __init__ called", flush=True)
         db_init()
+        print(f"[TRADER] db_init complete", flush=True)
         self.broker = Broker()
         self.live: Dict[str, Dict[str, object]] = {}
         self._position_locks = PositionLock()
         self.circuit_breaker = CircuitBreaker()
+        print(f"[TRADER] Core components initialized", flush=True)
         
         # Inactivity monitoring: Exit positions based on price stagnation, not arbitrary time
         self.inactivity_monitor = InactivityMonitor()
@@ -132,7 +135,9 @@ class TradeEngine:
         os.makedirs(os.path.dirname(LOG_JSON_PATH), exist_ok=True)
         os.makedirs(os.path.dirname(LOG_TEXT_PATH), exist_ok=True)
         
+        print(f"[TRADER] About to call _recover_positions(), DB_PATH={DB_PATH}", flush=True)
         self._recover_positions()
+        print(f"[TRADER] _recover_positions() returned", flush=True)
     
     def _recover_positions(self):
         """Recover open positions from database"""
