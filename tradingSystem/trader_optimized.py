@@ -138,18 +138,27 @@ class TradeEngine:
         """Recover open positions from database"""
         try:
             import sqlite3
+            from datetime import datetime
             con = sqlite3.connect(DB_PATH)
             cur = con.execute("""
-                SELECT id, token_address, strategy, entry_price, peak_price 
+                SELECT id, token_address, strategy, entry_price, peak_price, created_at 
                 FROM positions 
                 WHERE status='open'
             """)
-            for pid, ca, strategy, entry_price, peak_price in cur.fetchall():
+            for pid, ca, strategy, entry_price, peak_price, created_at in cur.fetchall():
+                # Parse created_at timestamp for entry_time
+                try:
+                    entry_time = datetime.fromisoformat(created_at.replace('Z', '+00:00')).timestamp()
+                except:
+                    entry_time = time.time()  # Fallback to now if parsing fails
+                
                 self.live[str(ca)] = {
                     "pid": int(pid),
                     "strategy": str(strategy),
                     "entry_price": float(entry_price or 0),
                     "peak_price": float(peak_price or entry_price or 0),
+                    "entry_time": entry_time,  # ADDED: For adaptive monitoring
+                    "open_at": entry_time,     # ADDED: For time-based exits
                 }
             con.close()
             if self.live:
