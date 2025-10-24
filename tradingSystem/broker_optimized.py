@@ -557,6 +557,14 @@ class Broker:
 
     def market_sell(self, token: str, qty: float) -> Fill:
         """Execute sell with escalating slippage - NEVER GIVE UP!"""
+        # CRITICAL: Use global sell lock to prevent simultaneous sells
+        # This prevents API burst load when multiple positions try to sell at once
+        # Example: 2 positions selling = 8 API calls in <1s → exceeds 10 RPS
+        with self._sell_lock:
+            return self._execute_sell(token, qty)
+    
+    def _execute_sell(self, token: str, qty: float) -> Fill:
+        """Internal sell execution (called with lock held)"""
         try:
             # Validation
             if qty <= 0:
@@ -580,56 +588,42 @@ class Broker:
             if in_amount <= 0:
                 return Fill(price=0.0, qty=0.0, usd=0.0, success=False, error="Amount too small")
             
-            # Escalating slippage: 20%, 30%, 40%, 50% (capped to prevent catastrophic loss)
-            slippage_levels = [2000, 3000, 4000, 5000]
+            # Escalating slippage: 20%, 35%, 50% (reduced attempts to save API calls)
+            # With Jupiter Pro 10 RPS, fewer attempts = less 429 errors
+            slippage_levels = [2000, 3500, 5000]
             
             for attempt, slippage_bps in enumerate(slippage_levels, 1):
                 try:
                     print(f"[BROKER] 🎯 SELL attempt {attempt}/{len(slippage_levels)} with {slippage_bps/100}% slippage for {token[:8]}...", flush=True)
                     
-                    # SMART ROUTING STRATEGY (avoids problematic 3-hop routes):
-                    # 1. Try 2-hop max route to SOL (avoids PancakeSwap 3rd hop issues)
-                    # 2. If that fails, try direct route to SOL
-                    # 3. If that fails, try direct route to USDC with auto-conversion
-                    # 4. Last resort: unrestricted multi-hop route
+                    # OPTIMIZED ROUTING STRATEGY (reduces API calls from 16 to 4 per sell):
+                    # Priority: Direct routes first (most reliable, fewest API calls)
+                    # Only escalate to multi-hop if direct fails
                     output_mint = SOL_MINT
                     quote = None
                     
-                    # Strategy 1: 2-hop maximum route (avoids problematic 3-hop failures)
+                    # Strategy 1: Direct-only route to SOL (FASTEST, most reliable)
                     try:
-                        print(f"[BROKER] Trying 2-hop max route to SOL...", flush=True)
-                        quote = self._quote(token, SOL_MINT, in_amount, slippage_bps_override=slippage_bps, only_direct_routes=False, max_accounts=20)
-                        print(f"[BROKER] ✅ Got 2-hop route", flush=True)
+                        quote = self._quote(token, SOL_MINT, in_amount, slippage_bps_override=slippage_bps, only_direct_routes=True)
                     except Exception as e:
-                        print(f"[BROKER] ⚠️ 2-hop route failed: {e}", flush=True)
-                        
-                        # Strategy 2: Try direct route to SOL
-                        try:
-                            print(f"[BROKER] Trying direct-only route to SOL...", flush=True)
-                            quote = self._quote(token, SOL_MINT, in_amount, slippage_bps_override=slippage_bps, only_direct_routes=True)
-                        except Exception as e2:
-                            print(f"[BROKER] ⚠️ No direct SOL route: {e2}", flush=True)
-                            
-                            # Strategy 3: Try direct route to USDC
-                            print(f"[BROKER] Trying direct route to USDC (will convert to SOL)...", flush=True)
+                        # Strategy 2: If no direct SOL route, try 2-hop max
+                        # Only use this on FIRST attempt (attempt 1) to save API calls
+                        if attempt == 1:
                             try:
-                                quote = self._quote(token, USDC_MINT, in_amount, slippage_bps_override=slippage_bps, only_direct_routes=True)
-                                output_mint = USDC_MINT  # We'll get USDC
-                            except Exception as e3:
-                                print(f"[BROKER] ⚠️ No direct USDC route: {e3}", flush=True)
-                                
-                                # Strategy 4: Last resort - unrestricted multi-hop
-                                print(f"[BROKER] Last resort: unrestricted route...", flush=True)
-                                try:
-                                    quote = self._quote(token, SOL_MINT, in_amount, slippage_bps_override=slippage_bps, only_direct_routes=False)
-                                    print(f"[BROKER] ✅ Got unrestricted route", flush=True)
-                                except Exception as e4:
-                                    print(f"[BROKER] ⚠️ All routing strategies failed: {e4}", flush=True)
-                                    # CRITICAL: Check if token is rugged
-                                    if "COULD_NOT_FIND_ANY_ROUTE" in str(e4):
-                                        print(f"[BROKER] 🚨 RUG DETECTED: No routes available for {token[:8]}", flush=True)
-                                        return Fill(price=0.0, qty=0.0, usd=0.0, success=False, 
-                                                   error="RUG_DETECTED: No liquidity routes available - DO NOT RETRY")
+                                quote = self._quote(token, SOL_MINT, in_amount, slippage_bps_override=slippage_bps, only_direct_routes=False, max_accounts=20)
+                            except Exception as e2:
+                                # CRITICAL: Check if token is rugged
+                                if "COULD_NOT_FIND_ANY_ROUTE" in str(e2):
+                                    print(f"[BROKER] 🚨 RUG DETECTED: No routes available for {token[:8]}", flush=True)
+                                    return Fill(price=0.0, qty=0.0, usd=0.0, success=False, 
+                                               error="RUG_DETECTED: No liquidity - DO NOT RETRY")
+                        else:
+                            # On subsequent attempts (higher slippage), skip multi-hop to save API calls
+                            # High slippage + direct route is usually enough
+                            if "COULD_NOT_FIND_ANY_ROUTE" in str(e):
+                                print(f"[BROKER] 🚨 RUG DETECTED: No routes available for {token[:8]}", flush=True)
+                                return Fill(price=0.0, qty=0.0, usd=0.0, success=False, 
+                                           error="RUG_DETECTED: No liquidity - DO NOT RETRY")
                     
                     if not quote:
                         print(f"[BROKER] ⚠️ Quote failed at {slippage_bps/100}% slippage, trying next level...", flush=True)
