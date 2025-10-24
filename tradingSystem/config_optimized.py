@@ -95,13 +95,15 @@ MAX_POSITION_SIZE_USD = BANKROLL_USD * (MAX_POSITION_SIZE_PCT / 100.0)
 # PHILOSOPHY: Your signal bot finds 5-10x movers. The trading bot should RIDE them,
 # not cut them short! Survive the shakeouts, catch the moonshots.
 
-# Stop losses (from ENTRY price, not peak) - WIDE TO SURVIVE VOLATILITY
-# Memecoins can dump -30% before 5x pumping. Don't get shaken out!
-STOP_LOSS_PCT = _get_float("TS_STOP_LOSS_PCT", 30.0)  # -30% from entry (was -18%)
+# Stop losses (from ENTRY price, not peak) - BALANCED FOR CAPITAL PROTECTION
+# AUDIT OPTIMIZATION: Reduced from -30% to -20% to protect capital better
+# -20% still gives room for memecoin volatility while limiting max loss
+STOP_LOSS_PCT = _get_float("TS_STOP_LOSS_PCT", 20.0)  # -20% from entry (was -30%)
 
 # EMERGENCY HARD STOP - Absolute maximum loss before force exit
 # If normal stop fails (price feed issues), this is the last line of defense
-EMERGENCY_HARD_STOP_PCT = _get_float("TS_EMERGENCY_HARD_STOP_PCT", 50.0)  # -50% absolute max
+# AUDIT OPTIMIZATION: Reduced from -50% to -35% for faster capital recovery
+EMERGENCY_HARD_STOP_PCT = _get_float("TS_EMERGENCY_HARD_STOP_PCT", 35.0)  # -35% absolute max (was -50%)
 
 # ==================== PROFIT-BASED ADAPTIVE TRAILING STOPS ====================
 # OLD PROBLEM: Time-based trails exit too early (sold at +50% when token goes to +400%)
@@ -122,12 +124,17 @@ ADAPTIVE_TRAILING_ENABLED = _get_bool("TS_ADAPTIVE_TRAILING_ENABLED", True)
 PROFIT_TIER_1 = _get_float("TS_PROFIT_TIER_1", 50.0)   # First milestone: +50%
 PROFIT_TIER_2 = _get_float("TS_PROFIT_TIER_2", 100.0)  # Second milestone: +100%
 PROFIT_TIER_3 = _get_float("TS_PROFIT_TIER_3", 200.0)  # Third milestone: +200%
+PROFIT_TIER_4 = _get_float("TS_PROFIT_TIER_4", 500.0)  # Fourth milestone: +500% (NEW)
+PROFIT_TIER_5 = _get_float("TS_PROFIT_TIER_5", 1000.0) # Fifth milestone: +1000% (NEW - Mika-level)
 
 # TRAILING STOPS PER TIER (how much pullback from peak before exit)
-TRAIL_TIER_0 = _get_float("TS_TRAIL_TIER_0", 50.0)  # 0-50% profit: 50% trail (VERY LOOSE - let it run!)
-TRAIL_TIER_1 = _get_float("TS_TRAIL_TIER_1", 35.0)  # 50-100% profit: 35% trail (loose)
-TRAIL_TIER_2 = _get_float("TS_TRAIL_TIER_2", 25.0)  # 100-200% profit: 25% trail (moderate)
-TRAIL_TIER_3 = _get_float("TS_TRAIL_TIER_3", 20.0)  # 200%+ profit: 20% trail (lock big gains)
+# OPTIMIZED BASED ON AUDIT: Tight early (protect capital), loose late (ride moonshots)
+TRAIL_TIER_0 = _get_float("TS_TRAIL_TIER_0", 15.0)  # 0-50% profit: 15% trail (was 50% - CRITICAL FIX)
+TRAIL_TIER_1 = _get_float("TS_TRAIL_TIER_1", 20.0)  # 50-100% profit: 20% trail (was 35% - tightened)
+TRAIL_TIER_2 = _get_float("TS_TRAIL_TIER_2", 25.0)  # 100-200% profit: 25% trail (keep)
+TRAIL_TIER_3 = _get_float("TS_TRAIL_TIER_3", 30.0)  # 200-500% profit: 30% trail (was 20% - loosened for big moves)
+TRAIL_TIER_4 = _get_float("TS_TRAIL_TIER_4", 35.0)  # 500-1000% profit: 35% trail (NEW - survive consolidations)
+TRAIL_TIER_5 = _get_float("TS_TRAIL_TIER_5", 40.0)  # 1000%+ profit: 40% trail (NEW - Mika-level movers)
 
 # LEGACY TRAILS (for non-adaptive mode - NOT RECOMMENDED)
 TRAIL_AGGRESSIVE = _get_float("TS_TRAIL_AGGRESSIVE", 5.0)  # Deprecated

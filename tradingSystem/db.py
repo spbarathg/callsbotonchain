@@ -127,26 +127,30 @@ def update_peak_and_trail(position_id: int, price: float, entry_price: float = 0
 		peak = price
 	conn.close()
 	
-	# Calculate profit-based trail (MOONSHOT MODE!)
+	# Calculate profit-based trail (MOONSHOT MODE - AUDIT OPTIMIZED!)
 	from tradingSystem.config_optimized import (
 		ADAPTIVE_TRAILING_ENABLED,
-		PROFIT_TIER_1, PROFIT_TIER_2, PROFIT_TIER_3,
-		TRAIL_TIER_0, TRAIL_TIER_1, TRAIL_TIER_2, TRAIL_TIER_3
+		PROFIT_TIER_1, PROFIT_TIER_2, PROFIT_TIER_3, PROFIT_TIER_4, PROFIT_TIER_5,
+		TRAIL_TIER_0, TRAIL_TIER_1, TRAIL_TIER_2, TRAIL_TIER_3, TRAIL_TIER_4, TRAIL_TIER_5
 	)
 	
 	if ADAPTIVE_TRAILING_ENABLED and entry > 0 and peak > 0:
 		# Calculate current profit %
 		profit_pct = ((peak - entry) / entry) * 100
 		
-		# Select trail based on profit tier
-		if profit_pct < PROFIT_TIER_1:  # < 50% profit
-			trail = TRAIL_TIER_0  # 50% trail
+		# Select trail based on profit tier (EXTENDED FOR 1000%+ MOVERS!)
+		if profit_pct < PROFIT_TIER_1:  # 0-50% profit
+			trail = TRAIL_TIER_0  # 15% trail (tight early protection)
 		elif profit_pct < PROFIT_TIER_2:  # 50-100% profit
-			trail = TRAIL_TIER_1  # 35% trail
+			trail = TRAIL_TIER_1  # 20% trail
 		elif profit_pct < PROFIT_TIER_3:  # 100-200% profit
 			trail = TRAIL_TIER_2  # 25% trail
-		else:  # 200%+ profit
-			trail = TRAIL_TIER_3  # 20% trail
+		elif profit_pct < PROFIT_TIER_4:  # 200-500% profit
+			trail = TRAIL_TIER_3  # 30% trail (looser for big moves)
+		elif profit_pct < PROFIT_TIER_5:  # 500-1000% profit
+			trail = TRAIL_TIER_4  # 35% trail (survive consolidations)
+		else:  # 1000%+ profit (Mika-level!)
+			trail = TRAIL_TIER_5  # 40% trail (lock massive gains)
 	else:
 		# Fall back to static trail from position creation
 		trail = trail_static or 10.0
