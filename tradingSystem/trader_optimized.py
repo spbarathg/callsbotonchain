@@ -25,6 +25,7 @@ from .config_optimized import (
 )
 from .broker_optimized import Broker
 from .portfolio_manager import get_portfolio_manager, should_use_portfolio_manager
+from .inactivity_monitor import InactivityMonitor
 
 
 class PositionLock:
@@ -119,6 +120,9 @@ class TradeEngine:
         self.live: Dict[str, Dict[str, object]] = {}
         self._position_locks = PositionLock()
         self.circuit_breaker = CircuitBreaker()
+        
+        # Inactivity monitoring: Exit positions based on price stagnation, not arbitrary time
+        self.inactivity_monitor = InactivityMonitor()
         
         # Token cooldown: Prevent immediate rebuy after selling (stops buy-sell-rebuy loops)
         self._token_cooldowns: Dict[str, float] = {}  # token -> timestamp when sold
@@ -375,6 +379,9 @@ class TradeEngine:
                 # Update peak in live data
                 self.live[token]["peak_price"] = peak
                 
+                # Track price for inactivity monitoring
+                self.inactivity_monitor.add_price_sample(token, price)
+                
                 # FIXED: Stop loss relative to ENTRY price!
                 stop_price = entry_price * (1.0 - STOP_LOSS_PCT / 100.0)
                 
@@ -385,15 +392,34 @@ class TradeEngine:
                 exit_type = None
                 exit_reason = ""
                 
-                # Check time-based exit (stagnant position)
+                # Check inactivity-based exit (6+ hours of <5% movement)
+                # KEY INSIGHT: Some tokens pump for 8-10 days to 800x
+                # Don't force-sell winners, but DO exit when price is dead
                 open_at = data.get("open_at", 0)
                 if open_at > 0:
-                    hold_time = time.time() - open_at
-                    if hold_time >= MAX_HOLD_TIME_SECONDS:
-                        exit_type = "timeout"
-                        hold_minutes = int(hold_time / 60)
-                        max_minutes = int(MAX_HOLD_TIME_SECONDS / 60)
-                        exit_reason = f"Max hold time reached: {hold_minutes} min >= {max_minutes} min (freeing capital)"
+                    # Check if position should ignore time limit (high profit + active price)
+                    ignore_time, ignore_reason = self.inactivity_monitor.should_ignore_time_limit(token, profit_pct)
+                    
+                    if ignore_time:
+                        # High-profit moonshot with active price movement - let it run!
+                        if data.get("last_moonshot_log", 0) < time.time() - 3600:  # Log every hour
+                            print(f"[TRADER] 🌙 {token[:8]} in MOONSHOT MODE: {ignore_reason}", flush=True)
+                            data["last_moonshot_log"] = time.time()
+                    else:
+                        # Check for inactivity (price stagnation)
+                        should_exit, inactivity_reason = self.inactivity_monitor.check_inactivity(token)
+                        
+                        if should_exit:
+                            exit_type = "inactivity"
+                            hold_hours = (time.time() - open_at) / 3600
+                            exit_reason = f"Inactivity detected: {inactivity_reason} (held {hold_hours:.1f}h)"
+                        else:
+                            # Also check hard time limit as fallback (24 hours)
+                            hold_time = time.time() - open_at
+                            if hold_time >= MAX_HOLD_TIME_SECONDS:
+                                exit_type = "timeout"
+                                hold_hours = hold_time / 3600
+                                exit_reason = f"Max hold time: {hold_hours:.1f}h (profit: +{profit_pct:.1f}%) - {inactivity_reason}"
                 
                 # Check hard stop loss (from entry)
                 if not exit_type and price <= stop_price:
@@ -449,9 +475,28 @@ class TradeEngine:
                     self._log("exit_failed_sell", token=token, pid=pid, error=fill.error, 
                              failures=sell_failures + 1, next_backoff=backoff_times[min(sell_failures + 1, len(backoff_times) - 1)])
                     
+                    # CRITICAL: Detect rugged/dead tokens and force-close immediately
+                    # If we get "NO_ROUTE" or "RUG_DETECTED" error, the token is dead
+                    if "RUG_DETECTED" in str(fill.error) or "No liquidity" in str(fill.error):
+                        print(f"[TRADER] 🚨 RUGGED TOKEN DETECTED: {token[:8]} - force closing", flush=True)
+                        # Close position in DB (can't sell, but remove from tracking)
+                        close_position(pid)
+                        self.live.pop(token, None)
+                        self._log("rugged_token_closed", token=token, pid=pid, error=fill.error)
+                        return True  # Return True so position is removed
+                    
                     # Track consecutive sell failures with exponential backoff
                     if token in self.live:
                         self.live[token]["sell_failures"] = sell_failures + 1
+                        
+                        # CRITICAL: Force-close after 15 consecutive failures (rugged or Jupiter issue)
+                        # This prevents positions from being stuck forever
+                        if sell_failures + 1 >= 15:
+                            print(f"[TRADER] 🚨 FORCE CLOSING STUCK POSITION: {token[:8]} after {sell_failures + 1} failures", flush=True)
+                            close_position(pid)
+                            self.live.pop(token, None)
+                            self._log("force_closed_stuck_position", token=token, pid=pid, failures=sell_failures + 1, error=fill.error)
+                            return True
                         
                         # Log failures with backoff info
                         if sell_failures + 1 <= 5:  # Log first 5 failures
@@ -476,8 +521,9 @@ class TradeEngine:
                 add_fill(int(pid), "sell", float(fill.price), float(fill.qty), float(fill.usd))
                 close_position(pid)
                 
-                # Remove from live
+                # Remove from live and clean up monitors
                 self.live.pop(token, None)
+                self.inactivity_monitor.reset_position(token)
                 
                 # Add cooldown to prevent immediate rebuy (especially important for stop losses)
                 self._add_cooldown(token)

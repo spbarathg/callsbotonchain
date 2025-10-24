@@ -144,9 +144,12 @@ EARLY_TRAIL_PCT = _get_float("TS_EARLY_TRAIL_PCT", 25.0)  # Deprecated
 MID_TRAIL_PCT = _get_float("TS_MID_TRAIL_PCT", 15.0)      # Deprecated
 LATE_TRAIL_PCT = _get_float("TS_LATE_TRAIL_PCT", 10.0)    # Deprecated
 
-# TIME-BASED EXIT - EXTENDED FOR SLOW MOVERS
-# Some tokens take 3-6 hours to reach peak. Give them time!
-MAX_HOLD_TIME_SECONDS = _get_int("TS_MAX_HOLD_TIME_SEC", 14400)  # 4 hours (was 90 min)
+# TIME-BASED EXIT - EXTENDED FOR MULTI-DAY MOVERS
+# Key insight: Not all tokens are 4-hour pumps
+# Some moonshots develop over 1-3 days with consolidations
+# Adaptive monitoring reduces API usage for mature positions (checks every 2-4h instead of 1.5s)
+# Combined with 30-40% trailing stops, this lets winners run for days!
+MAX_HOLD_TIME_SECONDS = _get_int("TS_MAX_HOLD_TIME_SEC", 86400)  # 24 hours (was 4h)
 
 # ==================== JUPITER PRO OPTIMIZATION ====================
 # With Pro tier (10 RPS), we need to balance exit checks with sell attempts
