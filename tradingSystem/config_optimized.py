@@ -128,13 +128,14 @@ PROFIT_TIER_4 = _get_float("TS_PROFIT_TIER_4", 500.0)  # Fourth milestone: +500%
 PROFIT_TIER_5 = _get_float("TS_PROFIT_TIER_5", 1000.0) # Fifth milestone: +1000% (NEW - Mika-level)
 
 # TRAILING STOPS PER TIER (how much pullback from peak before exit)
-# OPTIMIZED BASED ON AUDIT: Tight early (protect capital), loose late (ride moonshots)
-TRAIL_TIER_0 = _get_float("TS_TRAIL_TIER_0", 15.0)  # 0-50% profit: 15% trail (was 50% - CRITICAL FIX)
-TRAIL_TIER_1 = _get_float("TS_TRAIL_TIER_1", 20.0)  # 50-100% profit: 20% trail (was 35% - tightened)
-TRAIL_TIER_2 = _get_float("TS_TRAIL_TIER_2", 25.0)  # 100-200% profit: 25% trail (keep)
-TRAIL_TIER_3 = _get_float("TS_TRAIL_TIER_3", 30.0)  # 200-500% profit: 30% trail (was 20% - loosened for big moves)
-TRAIL_TIER_4 = _get_float("TS_TRAIL_TIER_4", 35.0)  # 500-1000% profit: 35% trail (NEW - survive consolidations)
-TRAIL_TIER_5 = _get_float("TS_TRAIL_TIER_5", 40.0)  # 1000%+ profit: 40% trail (NEW - Mika-level movers)
+# OPTIMIZED BASED ON USER FEEDBACK: FMCu8yfK +18.6% → -0.4% (15% trail too wide!)
+# FIX: Tighten early stops to lock in gains on volatile micro-caps before they dump
+TRAIL_TIER_0 = _get_float("TS_TRAIL_TIER_0", 8.0)   # 0-50% profit: 8% trail (was 15% - CRITICAL FIX)
+TRAIL_TIER_1 = _get_float("TS_TRAIL_TIER_1", 12.0)  # 50-100% profit: 12% trail (was 20% - tightened)
+TRAIL_TIER_2 = _get_float("TS_TRAIL_TIER_2", 15.0)  # 100-200% profit: 15% trail (was 25% - tightened)
+TRAIL_TIER_3 = _get_float("TS_TRAIL_TIER_3", 20.0)  # 200-500% profit: 20% trail (was 30% - tightened)
+TRAIL_TIER_4 = _get_float("TS_TRAIL_TIER_4", 25.0)  # 500-1000% profit: 25% trail (was 35% - tightened)
+TRAIL_TIER_5 = _get_float("TS_TRAIL_TIER_5", 30.0)  # 1000%+ profit: 30% trail (was 40% - tightened)
 
 # LEGACY TRAILS (for non-adaptive mode - NOT RECOMMENDED)
 TRAIL_AGGRESSIVE = _get_float("TS_TRAIL_AGGRESSIVE", 5.0)  # Deprecated

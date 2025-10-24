@@ -689,7 +689,8 @@ def run() -> None:
                 print(f"[DEBUG] signal_score={signal_score}, conviction_type={conviction_type}", flush=True)
                 
                 # Enforce minimum score unless blind mode
-                MIN_SCORE = int(os.getenv("TS_MIN_SCORE", "8"))
+                # LOWERED FROM 8 TO 7: User's signal provider sends score 7 signals consistently
+                MIN_SCORE = int(os.getenv("TS_MIN_SCORE", "7"))
                 if os.getenv("TS_BLIND_BUY", "false").strip().lower() == "true":
                     MIN_SCORE = 0
                 if signal_score < MIN_SCORE:
