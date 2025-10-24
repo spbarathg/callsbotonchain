@@ -34,6 +34,11 @@ class JupiterClient:
         self.using_ip_fallback = False
         self._current_ip = None
         
+        # Jupiter Pro API Key (optional)
+        self.api_key = os.getenv("JUPITER_API_KEY", "")
+        if self.api_key:
+            logger.info("🚀 Jupiter Pro API key detected - using Pro tier")
+        
         self.session = requests.Session()
         self._dns_cache = {}
         self._dns_cache_timeout = timedelta(minutes=5)
@@ -126,6 +131,10 @@ class JupiterClient:
         
         # Always use domain name (no IP fallback for HTTPS/SSL compatibility)
         headers = {}
+        
+        # Add Jupiter Pro API key if available
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
         
         # Respect global cooldown if triggered by excessive 429s
         now = time.time()
