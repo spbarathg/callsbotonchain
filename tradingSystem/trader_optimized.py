@@ -136,16 +136,21 @@ class TradeEngine:
     
     def _recover_positions(self):
         """Recover open positions from database"""
+        print(f"[TRADER] _recover_positions called, DB_PATH={DB_PATH}", flush=True)
         try:
             import sqlite3
             from datetime import datetime
+            print(f"[TRADER] Connecting to database...", flush=True)
             con = sqlite3.connect(DB_PATH)
             cur = con.execute("""
                 SELECT id, token_address, strategy, entry_price, peak_price, created_at 
                 FROM positions 
                 WHERE status='open'
             """)
-            for pid, ca, strategy, entry_price, peak_price, created_at in cur.fetchall():
+            rows = cur.fetchall()
+            print(f"[TRADER] Found {len(rows)} open positions in database", flush=True)
+            
+            for pid, ca, strategy, entry_price, peak_price, created_at in rows:
                 # Parse created_at timestamp for entry_time
                 try:
                     entry_time = datetime.fromisoformat(created_at.replace('Z', '+00:00')).timestamp()
@@ -160,10 +165,15 @@ class TradeEngine:
                     "entry_time": entry_time,  # ADDED: For adaptive monitoring
                     "open_at": entry_time,     # ADDED: For time-based exits
                 }
+                print(f"[TRADER] Recovered position {pid}: {str(ca)[:8]}... entry=${entry_price:.8f}", flush=True)
             con.close()
             if self.live:
+                print(f"[TRADER] ✓ Recovery complete: {len(self.live)} positions loaded", flush=True)
                 self._log("recovery_loaded", open_positions=len(self.live), positions=list(self.live.keys()))
+            else:
+                print(f"[TRADER] No open positions to recover", flush=True)
         except Exception as e:
+            print(f"[TRADER] ❌ Recovery failed: {e}", flush=True)
             self._log("recovery_failed", error=str(e))
 
     def _log(self, event: str, **fields) -> None:
