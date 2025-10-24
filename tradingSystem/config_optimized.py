@@ -172,9 +172,9 @@ EXIT_CHECK_INTERVAL_SEC = _get_float("TS_EXIT_CHECK_INTERVAL", 3.0 if os.getenv(
 JUPITER_PRICE_CACHE_TTL = _get_int("TS_JUPITER_PRICE_CACHE_TTL", 10)
 
 # ==================== CIRCUIT BREAKERS ====================
-# NEW: Protect against catastrophic losses
-MAX_DAILY_LOSS_PCT = _get_float("TS_MAX_DAILY_LOSS_PCT", 20.0)  # Max 20% daily loss
-MAX_CONSECUTIVE_LOSSES = _get_int("TS_MAX_CONSECUTIVE_LOSSES", 5)  # Pause after 5 losses
+# DISABLED: Let the bot trade freely (Jupiter oracle will protect with proper stop losses)
+MAX_DAILY_LOSS_PCT = _get_float("TS_MAX_DAILY_LOSS_PCT", 999999.0)  # Effectively disabled
+MAX_CONSECUTIVE_LOSSES = _get_int("TS_MAX_CONSECUTIVE_LOSSES", 999999)  # Effectively disabled
 
 # ==================== ENTRY FILTERS ====================
 # These are for additional validation beyond signal score
