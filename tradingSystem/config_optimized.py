@@ -172,7 +172,7 @@ LOG_JSON_PATH = os.getenv("TS_LOG_JSON", "data/logs/trading.jsonl")
 LOG_TEXT_PATH = os.getenv("TS_LOG_TEXT", "data/logs/trading.log")
 
 # ==================== MODE ====================
-DRY_RUN = _get_bool("TS_DRY_RUN", True)
+DRY_RUN = _get_bool("TS_DRY_RUN", False)  # Default to LIVE for production
 
 # ==================== PORTFOLIO REBALANCING ====================
 # "Circle Strategy" - Dynamic portfolio management
