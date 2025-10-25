@@ -288,12 +288,6 @@ def _exit_loop(engine: TradeEngine, stop_event: threading.Event) -> None:
                     engine._log("portfolio_sync_error", error=str(e))
                     print(f"[EXIT_LOOP] Portfolio sync error: {e}", flush=True)
             
-            # Check circuit breaker
-            if engine.circuit_breaker.is_tripped():
-                print("[EXIT_LOOP] Circuit breaker tripped, waiting...", flush=True)
-                time.sleep(60)  # Wait a minute before checking again
-                continue
-            
             # CRITICAL FIX: NEVER pause exit monitoring!
             # Price checks use DexScreener (not Jupiter), so we can always monitor positions
             # The broker's sell function handles Jupiter cooldown gracefully
@@ -428,11 +422,7 @@ def run() -> None:
         print("⚠️  Jupiter API not confirmed healthy yet; starting trading and will rely on client backoff")
     print("="*60)
     
-    engine._log("trading_system_start", mode=mode, 
-                circuit_breaker_enabled=True,
-                max_daily_loss_pct=engine.circuit_breaker.max_daily_loss_pct,
-                max_consecutive_losses=engine.circuit_breaker.max_consecutive_losses,
-                jupiter_api_healthy=True)
+    engine._log("trading_system_start", mode=mode, jupiter_api_healthy=True)
     
     # Start exit loop
     stop_event = threading.Event()
@@ -493,22 +483,6 @@ def run() -> None:
                     time.sleep(0.2)
                     continue
                 print(f"[DEBUG] Trading is enabled, proceeding with {token[:8] if token else 'None'}...", flush=True)
-                
-                # Check circuit breaker (TEMPORARILY BYPASSED DUE TO DEADLOCK)
-                print(f"[DEBUG] Skipping circuit breaker check (known deadlock issue)", flush=True)
-                # try:
-                #     is_tripped = engine.circuit_breaker.is_tripped()
-                #     print(f"[DEBUG] Circuit breaker check returned: {is_tripped}", flush=True)
-                #     if is_tripped:
-                #         print(f"[DEBUG] Circuit breaker tripped, skipping {token[:8] if token else 'None'}...", flush=True)
-                #         time.sleep(5)
-                #         continue
-                #     print(f"[DEBUG] Circuit breaker OK", flush=True)
-                # except Exception as e:
-                #     print(f"[DEBUG] ❌ Circuit breaker check failed: {e}", flush=True)
-                #     import traceback
-                #     traceback.print_exc()
-                #     continue
                 
                 event_type = ev.get("type")
                 print(f"[DEBUG] Event type: {event_type}", flush=True)
