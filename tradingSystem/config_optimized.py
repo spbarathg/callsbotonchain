@@ -96,9 +96,10 @@ MAX_POSITION_SIZE_USD = BANKROLL_USD * (MAX_POSITION_SIZE_PCT / 100.0)
 # not cut them short! Survive the shakeouts, catch the moonshots.
 
 # Stop losses (from ENTRY price, not peak) - BALANCED FOR CAPITAL PROTECTION
-# AUDIT OPTIMIZATION: Reduced from -30% to -20% to protect capital better
-# -20% still gives room for memecoin volatility while limiting max loss
-STOP_LOSS_PCT = _get_float("TS_STOP_LOSS_PCT", 20.0)  # -20% from entry (was -30%)
+# OCT 25 2025 FIX: Tightened to -12% to cut instant dumps faster
+# With wider trailing stops (18%), we can afford tighter stop loss
+# Strategy: Cut losers fast (-12%), let winners run wide (18% trail)
+STOP_LOSS_PCT = _get_float("TS_STOP_LOSS_PCT", 12.0)  # -12% from entry (was -20%)
 
 # EMERGENCY HARD STOP - Absolute maximum loss before force exit
 # If normal stop fails (price feed issues), this is the last line of defense
@@ -128,14 +129,16 @@ PROFIT_TIER_4 = _get_float("TS_PROFIT_TIER_4", 500.0)  # Fourth milestone: +500%
 PROFIT_TIER_5 = _get_float("TS_PROFIT_TIER_5", 1000.0) # Fifth milestone: +1000% (NEW - Mika-level)
 
 # TRAILING STOPS PER TIER (how much pullback from peak before exit)
-# OPTIMIZED BASED ON USER FEEDBACK: FMCu8yfK +18.6% → -0.4% (15% trail too wide!)
-# FIX: Tighten early stops to lock in gains on volatile micro-caps before they dump
-TRAIL_TIER_0 = _get_float("TS_TRAIL_TIER_0", 8.0)   # 0-50% profit: 8% trail (was 15% - CRITICAL FIX)
-TRAIL_TIER_1 = _get_float("TS_TRAIL_TIER_1", 12.0)  # 50-100% profit: 12% trail (was 20% - tightened)
-TRAIL_TIER_2 = _get_float("TS_TRAIL_TIER_2", 15.0)  # 100-200% profit: 15% trail (was 25% - tightened)
-TRAIL_TIER_3 = _get_float("TS_TRAIL_TIER_3", 20.0)  # 200-500% profit: 20% trail (was 30% - tightened)
-TRAIL_TIER_4 = _get_float("TS_TRAIL_TIER_4", 25.0)  # 500-1000% profit: 25% trail (was 35% - tightened)
-TRAIL_TIER_5 = _get_float("TS_TRAIL_TIER_5", 30.0)  # 1000%+ profit: 30% trail (was 40% - tightened)
+# OCT 25 2025 FIX: Analysis of 24 positions showed 8% trail was KILLING moonshots!
+# Position #203: Peak +78.7% → Sold +55.7% (lost 23%)
+# Position #208: Peak +21.3% → Sold +0.9% (lost 20.4%)
+# WIDENING trails to capture 85-90% of moonshot gains instead of 70%
+TRAIL_TIER_0 = _get_float("TS_TRAIL_TIER_0", 18.0)  # 0-50% profit: 18% trail (was 8% - LET WINNERS RUN!)
+TRAIL_TIER_1 = _get_float("TS_TRAIL_TIER_1", 22.0)  # 50-100% profit: 22% trail (was 12% - CAPTURE MOONSHOTS)
+TRAIL_TIER_2 = _get_float("TS_TRAIL_TIER_2", 27.0)  # 100-200% profit: 27% trail (was 15% - HOLD RUNNERS)
+TRAIL_TIER_3 = _get_float("TS_TRAIL_TIER_3", 32.0)  # 200-500% profit: 32% trail (was 20% - widened)
+TRAIL_TIER_4 = _get_float("TS_TRAIL_TIER_4", 37.0)  # 500-1000% profit: 37% trail (was 25% - widened)
+TRAIL_TIER_5 = _get_float("TS_TRAIL_TIER_5", 42.0)  # 1000%+ profit: 42% trail (was 30% - widened)
 
 # LEGACY TRAILS (for non-adaptive mode - NOT RECOMMENDED)
 TRAIL_AGGRESSIVE = _get_float("TS_TRAIL_AGGRESSIVE", 5.0)  # Deprecated
