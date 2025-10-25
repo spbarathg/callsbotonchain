@@ -95,11 +95,12 @@ MAX_POSITION_SIZE_USD = BANKROLL_USD * (MAX_POSITION_SIZE_PCT / 100.0)
 # PHILOSOPHY: Your signal bot finds 5-10x movers. The trading bot should RIDE them,
 # not cut them short! Survive the shakeouts, catch the moonshots.
 
-# Stop losses (from ENTRY price, not peak) - BALANCED FOR CAPITAL PROTECTION
-# OCT 25 2025 FIX: Tightened to -12% to cut instant dumps faster
-# With wider trailing stops (18%), we can afford tighter stop loss
-# Strategy: Cut losers fast (-12%), let winners run wide (18% trail)
-STOP_LOSS_PCT = _get_float("TS_STOP_LOSS_PCT", 12.0)  # -12% from entry (was -20%)
+# Stop losses (from ENTRY price, not peak) - ASYMMETRIC GROWTH STRATEGY
+# OCT 25 2025 V2: Keep at -12% to cut "dumb losses" FAST
+# With VERY wide trailing stops (25-45%), tight stop loss is CRITICAL
+# Strategy: Small losses (-12%), HUGE wins (capture 10.6x moves)
+# This creates asymmetry: Max loss = -12%, Max gain = 1000%+ (83:1 ratio!)
+STOP_LOSS_PCT = _get_float("TS_STOP_LOSS_PCT", 12.0)  # -12% from entry - cut losers fast!
 
 # EMERGENCY HARD STOP - Absolute maximum loss before force exit
 # If normal stop fails (price feed issues), this is the last line of defense
@@ -129,16 +130,16 @@ PROFIT_TIER_4 = _get_float("TS_PROFIT_TIER_4", 500.0)  # Fourth milestone: +500%
 PROFIT_TIER_5 = _get_float("TS_PROFIT_TIER_5", 1000.0) # Fifth milestone: +1000% (NEW - Mika-level)
 
 # TRAILING STOPS PER TIER (how much pullback from peak before exit)
-# OCT 25 2025 FIX: Analysis of 24 positions showed 8% trail was KILLING moonshots!
-# Position #203: Peak +78.7% → Sold +55.7% (lost 23%)
-# Position #208: Peak +21.3% → Sold +0.9% (lost 20.4%)
-# WIDENING trails to capture 85-90% of moonshot gains instead of 70%
-TRAIL_TIER_0 = _get_float("TS_TRAIL_TIER_0", 18.0)  # 0-50% profit: 18% trail (was 8% - LET WINNERS RUN!)
-TRAIL_TIER_1 = _get_float("TS_TRAIL_TIER_1", 22.0)  # 50-100% profit: 22% trail (was 12% - CAPTURE MOONSHOTS)
-TRAIL_TIER_2 = _get_float("TS_TRAIL_TIER_2", 27.0)  # 100-200% profit: 27% trail (was 15% - HOLD RUNNERS)
-TRAIL_TIER_3 = _get_float("TS_TRAIL_TIER_3", 32.0)  # 200-500% profit: 32% trail (was 20% - widened)
-TRAIL_TIER_4 = _get_float("TS_TRAIL_TIER_4", 37.0)  # 500-1000% profit: 37% trail (was 25% - widened)
-TRAIL_TIER_5 = _get_float("TS_TRAIL_TIER_5", 42.0)  # 1000%+ profit: 42% trail (was 30% - widened)
+# OCT 25 2025 V2: MOONSHOT HUNTING MODE - Signal provider has 45% hit rate, 29x avg!
+# Leaderboard: Pumpkin 10.6x, FBA 4.6x, WHITE 3.4x - Bot must RIDE these!
+# Target: $1.5k → $3k in 1 week (100% gain) via asymmetric growth
+# Strategy: Cut losers FAST (-12%), let winners RUN WIDE (25-45% trails)
+TRAIL_TIER_0 = _get_float("TS_TRAIL_TIER_0", 25.0)  # 0-50% profit: 25% trail - VERY WIDE, let it cook!
+TRAIL_TIER_1 = _get_float("TS_TRAIL_TIER_1", 30.0)  # 50-100% profit: 30% trail - developing move
+TRAIL_TIER_2 = _get_float("TS_TRAIL_TIER_2", 35.0)  # 100-200% profit: 35% trail - confirmed runner
+TRAIL_TIER_3 = _get_float("TS_TRAIL_TIER_3", 38.0)  # 200-500% profit: 38% trail - big move brewing
+TRAIL_TIER_4 = _get_float("TS_TRAIL_TIER_4", 42.0)  # 500-1000% profit: 42% trail - moonshot territory
+TRAIL_TIER_5 = _get_float("TS_TRAIL_TIER_5", 45.0)  # 1000%+ profit: 45% trail - 10x+ moves!
 
 # LEGACY TRAILS (for non-adaptive mode - NOT RECOMMENDED)
 TRAIL_AGGRESSIVE = _get_float("TS_TRAIL_AGGRESSIVE", 5.0)  # Deprecated

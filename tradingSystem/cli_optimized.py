@@ -473,7 +473,6 @@ def run() -> None:
                                signals_filtered=signals_filtered,
                                positions_opened=positions_opened,
                                open_positions=len(engine.live))
-                               # circuit_breaker_status removed due to deadlock issue
                     last_health_log = time.time()
                 
                 # Check trading toggle
