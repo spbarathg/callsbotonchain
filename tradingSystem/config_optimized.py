@@ -130,16 +130,16 @@ PROFIT_TIER_4 = _get_float("TS_PROFIT_TIER_4", 500.0)  # Fourth milestone: +500%
 PROFIT_TIER_5 = _get_float("TS_PROFIT_TIER_5", 1000.0) # Fifth milestone: +1000% (NEW - Mika-level)
 
 # TRAILING STOPS PER TIER (how much pullback from peak before exit)
-# OCT 25 2025 V2: MOONSHOT HUNTING MODE - Signal provider has 45% hit rate, 29x avg!
-# Leaderboard: Pumpkin 10.6x, FBA 4.6x, WHITE 3.4x - Bot must RIDE these!
-# Target: $1.5k → $3k in 1 week (100% gain) via asymmetric growth
-# Strategy: Cut losers FAST (-12%), let winners RUN WIDE (25-45% trails)
-TRAIL_TIER_0 = _get_float("TS_TRAIL_TIER_0", 25.0)  # 0-50% profit: 25% trail - VERY WIDE, let it cook!
-TRAIL_TIER_1 = _get_float("TS_TRAIL_TIER_1", 30.0)  # 50-100% profit: 30% trail - developing move
-TRAIL_TIER_2 = _get_float("TS_TRAIL_TIER_2", 35.0)  # 100-200% profit: 35% trail - confirmed runner
-TRAIL_TIER_3 = _get_float("TS_TRAIL_TIER_3", 38.0)  # 200-500% profit: 38% trail - big move brewing
-TRAIL_TIER_4 = _get_float("TS_TRAIL_TIER_4", 42.0)  # 500-1000% profit: 42% trail - moonshot territory
-TRAIL_TIER_5 = _get_float("TS_TRAIL_TIER_5", 45.0)  # 1000%+ profit: 45% trail - 10x+ moves!
+# OCT 25 2025 V3: ULTRA AGGRESSIVE - Allow 35%+ drawdowns for dip-and-rip patterns
+# Key insight: Memecoins dip 20-30% then rebound to 10x. Don't exit on healthy pullbacks!
+# Example: Token at +80% dips to +50% (-37% from peak) then rips to +500%
+# Strategy: Cut losers FAST (-12% entry stop), NEVER exit winners early (35-50% trails)
+TRAIL_TIER_0 = _get_float("TS_TRAIL_TIER_0", 35.0)  # 0-50% profit: 35% trail - survive shakeouts!
+TRAIL_TIER_1 = _get_float("TS_TRAIL_TIER_1", 38.0)  # 50-100% profit: 38% trail - let dips play out
+TRAIL_TIER_2 = _get_float("TS_TRAIL_TIER_2", 42.0)  # 100-200% profit: 42% trail - dip then rip pattern
+TRAIL_TIER_3 = _get_float("TS_TRAIL_TIER_3", 45.0)  # 200-500% profit: 45% trail - massive consolidation room
+TRAIL_TIER_4 = _get_float("TS_TRAIL_TIER_4", 48.0)  # 500-1000% profit: 48% trail - moonshot volatility
+TRAIL_TIER_5 = _get_float("TS_TRAIL_TIER_5", 50.0)  # 1000%+ profit: 50% trail - 10x moves need HUGE room!
 
 # LEGACY TRAILS (for non-adaptive mode - NOT RECOMMENDED)
 TRAIL_AGGRESSIVE = _get_float("TS_TRAIL_AGGRESSIVE", 5.0)  # Deprecated
