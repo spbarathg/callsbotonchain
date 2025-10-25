@@ -95,12 +95,12 @@ MAX_POSITION_SIZE_USD = BANKROLL_USD * (MAX_POSITION_SIZE_PCT / 100.0)
 # PHILOSOPHY: Your signal bot finds 5-10x movers. The trading bot should RIDE them,
 # not cut them short! Survive the shakeouts, catch the moonshots.
 
-# Stop losses (from ENTRY price, not peak) - ASYMMETRIC GROWTH STRATEGY
-# OCT 25 2025 V2: Keep at -12% to cut "dumb losses" FAST
-# With VERY wide trailing stops (25-45%), tight stop loss is CRITICAL
-# Strategy: Small losses (-12%), HUGE wins (capture 10.6x moves)
-# This creates asymmetry: Max loss = -12%, Max gain = 1000%+ (83:1 ratio!)
-STOP_LOSS_PCT = _get_float("TS_STOP_LOSS_PCT", 12.0)  # -12% from entry - cut losers fast!
+# Stop losses (from ENTRY price, not peak) - MAXIMUM PATIENCE STRATEGY
+# OCT 25 2025 V4: WIDENED to -35% - memecoins dip before they rip!
+# Key insight: Even winners can dip -20-30% from ENTRY before going 10x
+# Example: Buy at $1 → Dips to $0.70 (-30%) → Rips to $10 (+900%)
+# Strategy: Give EVERY token maximum room to develop (35% from entry)
+STOP_LOSS_PCT = _get_float("TS_STOP_LOSS_PCT", 35.0)  # -35% from entry - let it breathe!
 
 # EMERGENCY HARD STOP - Absolute maximum loss before force exit
 # If normal stop fails (price feed issues), this is the last line of defense
