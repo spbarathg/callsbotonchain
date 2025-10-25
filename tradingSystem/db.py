@@ -101,14 +101,15 @@ def update_peak_and_trail(position_id: int, price: float, entry_price: float = 0
 	"""
 	Update peak price and calculate PROFIT-BASED trailing stop.
 	
-	MOONSHOT MODE: Trail based on profit, not time!
-	OCT 25 2025 UPDATE: Widened trails after analysis showed 8% was killing moonshots
-	- 0-50% profit: 18% trail (let winners run!)
-	- 50-100% profit: 22% trail (capture moonshots)
-	- 100-200% profit: 27% trail (hold runners)
-	- 200-500% profit: 32% trail (survive consolidations)
-	- 500-1000% profit: 37% trail (lock mega gains)
-	- 1000%+ profit: 42% trail (secure life-changing wins)
+	MOONSHOT HUNTING MODE: Trail based on profit, not time!
+	OCT 25 2025 V2: AGGRESSIVE trails for 45% hit rate, 29x avg return signals
+	Target: Catch 10.6x moves (Pumpkin-level) not just 2x moves
+	- 0-50% profit: 25% trail (VERY WIDE - let it cook!)
+	- 50-100% profit: 30% trail (developing move)
+	- 100-200% profit: 35% trail (confirmed runner)
+	- 200-500% profit: 38% trail (big move brewing)
+	- 500-1000% profit: 42% trail (moonshot territory)
+	- 1000%+ profit: 45% trail (10x+ level gains!)
 	"""
 	conn = _conn()
 	c = conn.cursor()
@@ -142,19 +143,20 @@ def update_peak_and_trail(position_id: int, price: float, entry_price: float = 0
 		profit_pct = ((peak - entry) / entry) * 100
 		
 		# Select trail based on profit tier (EXTENDED FOR 1000%+ MOVERS!)
-		# OCT 25 2025: Widened from 8%/12%/15% to 18%/22%/27%
+		# OCT 25 2025 V2: AGGRESSIVE trails for moonshot hunting (25-45%)
+		# Goal: Capture 10.6x moves like Pumpkin, not exit at 2x!
 		if profit_pct < PROFIT_TIER_1:  # 0-50% profit
-			trail = TRAIL_TIER_0  # 18% trail (let winners run!)
+			trail = TRAIL_TIER_0  # 25% trail (VERY WIDE - give it time!)
 		elif profit_pct < PROFIT_TIER_2:  # 50-100% profit
-			trail = TRAIL_TIER_1  # 22% trail (capture moonshots)
+			trail = TRAIL_TIER_1  # 30% trail (developing move)
 		elif profit_pct < PROFIT_TIER_3:  # 100-200% profit
-			trail = TRAIL_TIER_2  # 27% trail (hold runners)
+			trail = TRAIL_TIER_2  # 35% trail (confirmed runner)
 		elif profit_pct < PROFIT_TIER_4:  # 200-500% profit
-			trail = TRAIL_TIER_3  # 32% trail (survive consolidations)
+			trail = TRAIL_TIER_3  # 38% trail (big move brewing)
 		elif profit_pct < PROFIT_TIER_5:  # 500-1000% profit
-			trail = TRAIL_TIER_4  # 37% trail (mega gains)
-		else:  # 1000%+ profit (Mika-level!)
-			trail = TRAIL_TIER_5  # 42% trail (life-changing wins)
+			trail = TRAIL_TIER_4  # 42% trail (moonshot territory)
+		else:  # 1000%+ profit (10x+ moves!)
+			trail = TRAIL_TIER_5  # 45% trail (capture Pumpkin-level gains!)
 	else:
 		# Fall back to static trail from position creation
 		trail = trail_static or 10.0
