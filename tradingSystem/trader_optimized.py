@@ -1,7 +1,6 @@
 """
 OPTIMIZED TRADER - Proper Risk Management
 - FIXED: Stop loss from ENTRY price (not peak)
-- Circuit breakers (20% daily loss, 5 consecutive losses)
 - Thread-safe position management
 - Comprehensive error handling
 - Position recovery on restart
@@ -19,8 +18,7 @@ from .db import (
 )
 from .config_optimized import (
     STOP_LOSS_PCT, LOG_JSON_PATH, LOG_TEXT_PATH,
-    MAX_CONCURRENT, MAX_DAILY_LOSS_PCT, MAX_CONSECUTIVE_LOSSES,
-    BANKROLL_USD, DB_PATH, MAX_HOLD_TIME_SECONDS,
+    MAX_CONCURRENT, BANKROLL_USD, DB_PATH, MAX_HOLD_TIME_SECONDS,
     EMERGENCY_HARD_STOP_PCT
 )
 from .broker_optimized import Broker
@@ -41,76 +39,6 @@ class PositionLock:
             return self._locks[token]
 
 
-class CircuitBreaker:
-    """Circuit breaker to prevent runaway losses"""
-    def __init__(self):
-        self.max_daily_loss_pct = MAX_DAILY_LOSS_PCT
-        self.max_consecutive_losses = MAX_CONSECUTIVE_LOSSES
-        self.daily_pnl = 0.0
-        self.consecutive_losses = 0
-        self.last_reset = date.today()
-        self.tripped = False
-        self.trip_reason = ""
-        self._lock = threading.Lock()
-    
-    def _check_and_reset_unlocked(self):
-        """Reset daily counters if new day (internal, assumes lock is held)"""
-        today = date.today()
-        if today > self.last_reset:
-            self.daily_pnl = 0.0
-            self.consecutive_losses = 0
-            self.last_reset = today
-            if self.tripped:
-                self.tripped = False
-                self.trip_reason = ""
-    
-    def check_and_reset(self):
-        """Reset daily counters if new day (public, acquires lock)"""
-        with self._lock:
-            self._check_and_reset_unlocked()
-    
-    def record_trade(self, pnl_usd: float) -> bool:
-        """Record trade result, return True if should continue trading"""
-        with self._lock:
-            self._check_and_reset_unlocked()
-            self.daily_pnl += pnl_usd
-            
-            if pnl_usd < 0:
-                self.consecutive_losses += 1
-            else:
-                self.consecutive_losses = 0
-            
-            # Check daily loss limit
-            max_loss = BANKROLL_USD * (self.max_daily_loss_pct / 100.0)
-            if self.daily_pnl < -max_loss:
-                self.tripped = True
-                self.trip_reason = f"Daily loss limit exceeded: ${abs(self.daily_pnl):.2f} (max: ${max_loss:.2f})"
-                return False
-            
-            # Check consecutive losses
-            if self.consecutive_losses >= self.max_consecutive_losses:
-                self.tripped = True
-                self.trip_reason = f"Too many consecutive losses: {self.consecutive_losses}"
-                return False
-            
-            return True
-    
-    def is_tripped(self) -> bool:
-        with self._lock:
-            self._check_and_reset_unlocked()
-            return self.tripped
-    
-    def get_status(self) -> Dict:
-        with self._lock:
-            return {
-                "tripped": self.tripped,
-                "reason": self.trip_reason,
-                "daily_pnl": self.daily_pnl,
-                "consecutive_losses": self.consecutive_losses,
-                "max_daily_loss": BANKROLL_USD * (self.max_daily_loss_pct / 100.0),
-            }
-
-
 class TradeEngine:
     """Optimized trade engine with bulletproof risk management"""
     
@@ -119,7 +47,6 @@ class TradeEngine:
         self.broker = Broker()
         self.live: Dict[str, Dict[str, object]] = {}
         self._position_locks = PositionLock()
-        self.circuit_breaker = CircuitBreaker()
         
         # Inactivity monitoring: Exit positions based on price stagnation, not arbitrary time
         self.inactivity_monitor = InactivityMonitor()
@@ -191,12 +118,6 @@ class TradeEngine:
     def open_position(self, token: str, plan: Dict) -> Optional[int]:
         """Open position with comprehensive safety"""
         try:
-            # Circuit breaker check (TEMPORARILY DISABLED DUE TO DEADLOCK)
-            # TODO: Fix threading issue in CircuitBreaker class
-            # if self.circuit_breaker.is_tripped():
-            #     status = self.circuit_breaker.get_status()
-            #     self._log("open_blocked_circuit_breaker", token=token, reason=status["reason"])
-            #     return None
             print(f"[TRADER] open_position called for {token[:8]}...", flush=True)
             
             # Concurrency limit
@@ -554,20 +475,12 @@ class TradeEngine:
                 self._log("cooldown_added", token=token, cooldown_seconds=self._cooldown_seconds,
                          reason=f"sold_via_{exit_type}")
                 
-                # Record with circuit breaker
-                self.circuit_breaker.record_trade(pnl_usd)
-                
                 self._log(f"exit_{exit_type}", 
                          token=token, pid=pid, strategy=strategy,
                          entry_price=entry_price, exit_price=price, peak=peak,
                          stop_pct=STOP_LOSS_PCT, trail_pct=trail, 
                          pnl_usd=pnl_usd, pnl_pct=pnl_pct,
                          reason=exit_reason, tx=fill.tx)
-                
-                # Check circuit breaker
-                if self.circuit_breaker.is_tripped():
-                    status = self.circuit_breaker.get_status()
-                    self._log("circuit_breaker_tripped", **status)
                 
                 return True
                 
@@ -796,7 +709,6 @@ class TradeEngine:
         status = {
             "open_positions": len(self.live),
             "tokens": list(self.live.keys()),
-            "circuit_breaker": self.circuit_breaker.get_status(),
             "broker_dry_run": self.broker._dry,
             "token_cooldowns": {
                 "active": active_cooldowns,
