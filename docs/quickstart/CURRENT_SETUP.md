@@ -1,8 +1,9 @@
-# Current Bot Setup - October 13, 2025
+# Current Bot Setup - October 25, 2025
 
-**Status:** 🟢 DEPLOYED & ACTIVE (Updated 22:11 UTC / 03:41 IST)
+**Status:** 🟢 DEPLOYED & ACTIVE - ULTRA AGGRESSIVE MOONSHOT MODE
 **Server:** `64.227.157.221`
-**Commit:** `0dc9229` (Fixed: Removed conflicting dump-after-pump filter)
+**Last Updated:** October 25, 2025 17:24 UTC (22:54 IST)
+**Trading Config:** Ultra Aggressive (35-50% trails, -35% stop loss)
 **Analysis Basis:** 673 signals with full performance tracking (55.29% win rate)
 
 ---
@@ -59,7 +60,358 @@ curl http://localhost/api/v2/quick-stats
 
 ---
 
-## 📊 Context: What Changed & Why
+## 🏗️ SYSTEM ARCHITECTURE (CRITICAL FOR AI ASSISTANTS!)
+
+### **⚠️ TWO SEPARATE SYSTEMS - DO NOT CONFUSE THEM!**
+
+This bot has **TWO INDEPENDENT SYSTEMS** that work together:
+
+#### **1. WORKER (Signal Detection Bot)** 
+- **Container:** `callsbot-worker`
+- **Purpose:** Monitors Telegram, scores tokens, sends signals to Redis
+- **Config:** `app/config_unified.py`, `app/analyze_token.py`
+- **Database:** `/opt/callsbotonchain/deployment/var/alerted_tokens.db`
+- **Logs:** `/opt/callsbotonchain/deployment/data/logs/stdout.log`
+- **Key Files:**
+  - `scripts/bot.py` - Main signal detection loop
+  - `app/analyze_token.py` - Token scoring logic
+  - `app/fetch_feed.py` - Telegram feed monitoring
+
+#### **2. TRADER (Trading Execution System)** 
+- **Container:** `callsbot-trader`
+- **Purpose:** Receives signals from Redis, executes trades on Solana
+- **Config:** `tradingSystem/config_optimized.py`
+- **Database:** `/opt/callsbotonchain/deployment/var/trading.db`
+- **Logs:** 
+  - Docker: `docker logs callsbot-trader`
+  - File: `/opt/callsbotonchain/deployment/data/logs/trading.log`
+- **Key Files:**
+  - `tradingSystem/cli_optimized.py` - Main trading loop
+  - `tradingSystem/trader_optimized.py` - Trade execution engine
+  - `tradingSystem/broker_optimized.py` - Jupiter DEX integration
+  - `tradingSystem/strategy_optimized.py` - Entry/exit strategy
+  - `tradingSystem/db.py` - Position management & database
+  - `tradingSystem/config_optimized.py` - **TRADING CONFIG (trails, stop loss)**
+
+---
+
+## 🎯 TRADING SYSTEM CONFIGURATION (October 25, 2025)
+
+### **Current Mode: ULTRA AGGRESSIVE MOONSHOT HUNTING**
+
+**Philosophy:** Cut losers fast (-35% from entry), let winners run huge (35-50% trails from peak)
+
+### **🔧 Configuration File Locations**
+
+**⚠️ PRECEDENCE ORDER (CRITICAL!):**
+1. **Environment variables in `deployment/.env`** (HIGHEST priority - overrides code!)
+2. **Environment variables in `deployment/docker-compose.yml`**
+3. **Code defaults in `tradingSystem/config_optimized.py`** (LOWEST priority)
+
+**🚨 COMMON MISTAKE:** If you change `config_optimized.py` but it doesn't work, check `.env` and `docker-compose.yml` for overrides!
+
+---
+
+### **📊 Current Trailing Stop Configuration**
+
+Located in: `tradingSystem/config_optimized.py`
+
+```python
+# PROFIT-BASED ADAPTIVE TRAILING STOPS
+ADAPTIVE_TRAILING_ENABLED = True  # ✅ MUST BE TRUE!
+
+# Stop loss from entry price
+STOP_LOSS_PCT = 35.0  # -35% from entry (was 20%, then 12%, now 35%)
+
+# Trailing stops based on PROFIT percentage (not time!)
+TRAIL_TIER_0 = 35.0  # 0-50% profit: 35% trail
+TRAIL_TIER_1 = 38.0  # 50-100% profit: 38% trail
+TRAIL_TIER_2 = 42.0  # 100-200% profit: 42% trail
+TRAIL_TIER_3 = 45.0  # 200-500% profit: 45% trail
+TRAIL_TIER_4 = 48.0  # 500-1000% profit: 48% trail
+TRAIL_TIER_5 = 50.0  # 1000%+ profit: 50% trail
+```
+
+**How it works:**
+- Token at +80% profit uses **38% trail** (TRAIL_TIER_1)
+- If peak is $1.00, bot won't exit until price drops to **$0.62** (-38% from peak)
+- This allows healthy dips and consolidation without early exit
+- Old system (8-10% trails) would exit at $0.92, missing huge runs!
+
+---
+
+### **🔍 How to Verify Config is Active**
+
+**Method 1: Check environment variables (fastest)**
+```bash
+ssh root@64.227.157.221
+docker exec callsbot-trader env | grep TS_TRAIL
+docker exec callsbot-trader env | grep TS_ADAPTIVE
+docker exec callsbot-trader env | grep TS_STOP_LOSS
+```
+
+**Expected output:**
+- `TS_ADAPTIVE_TRAILING_ENABLED=true`
+- **NO** `TS_TRAIL_DEFAULT` or `TS_TRAIL_TIER_X` vars (means code values are used)
+- `TS_STOP_LOSS_PCT=35.0` (optional, code default is 35.0)
+
+**If you see `TS_TRAIL_DEFAULT=8.0` or old values:**
+1. Edit `/opt/callsbotonchain/deployment/.env` and remove those lines
+2. Restart: `cd /opt/callsbotonchain/deployment && docker compose restart trader`
+
+---
+
+**Method 2: Watch live position monitoring**
+```bash
+ssh root@64.227.157.221
+docker logs -f callsbot-trader 2>&1 | grep "new peak"
+```
+
+**Expected output:**
+```
+[TRADER] 🚀 5GhEvCMy new peak! Profit: +95.0% | Trail: 38% | Price: $0.00007780
+```
+
+The `Trail: 38%` confirms the new config is active!
+
+---
+
+**Method 3: Check config inside container**
+```bash
+ssh root@64.227.157.221
+cat /opt/callsbotonchain/tradingSystem/config_optimized.py | grep "TRAIL_TIER_0"
+```
+
+Should show: `TRAIL_TIER_0 = _get_float("TS_TRAIL_TIER_0", 35.0)`
+
+---
+
+### **🐛 Common Configuration Issues**
+
+#### **Issue 1: Changes to `config_optimized.py` Not Taking Effect**
+
+**Symptoms:**
+- You change TRAIL_TIER_0 to 35.0 in code
+- Bot still uses 8% trails
+- Database shows trail_pct=8.0 for new positions
+
+**Root Cause:** Environment variables in `.env` or `docker-compose.yml` are overriding code values
+
+**Fix:**
+```bash
+# 1. Check for overrides
+ssh root@64.227.157.221
+cd /opt/callsbotonchain/deployment
+grep -E "TS_TRAIL|TS_ADAPTIVE|TS_STOP_LOSS" .env docker-compose.yml
+
+# 2. Remove bad env vars from .env
+sed -i '/^TS_TRAIL_/d' .env
+
+# 3. Edit docker-compose.yml and remove these lines under trader environment:
+#    - TS_TRAIL_DEFAULT=...
+#    - TS_TRAIL_AGGRESSIVE=...
+#    - TS_TRAIL_CONSERVATIVE=...
+#    - TS_ADAPTIVE_TRAILING_ENABLED=false  (or change to true)
+
+# 4. Rebuild and restart
+docker compose down trader
+docker compose up -d --build trader
+
+# 5. Verify
+docker exec callsbot-trader env | grep TS_TRAIL
+# Should show NOTHING or only TS_TRAIL_TIER_X vars
+```
+
+---
+
+#### **Issue 2: Bot Using Old Trails for Existing Positions**
+
+**Symptoms:**
+- New config deployed
+- Old positions in database still have trail_pct=8.0 or 10.0
+- Positions not exiting as expected
+
+**Explanation:** 
+- Database stores the trail% from when position was OPENED
+- With `ADAPTIVE_TRAILING_ENABLED=true`, this is **IGNORED**
+- Bot calculates trail% dynamically based on current profit
+- Function: `tradingSystem/db.py::update_peak_and_trail()`
+
+**How to verify it's working:**
+```bash
+# Watch for "new peak" messages showing current trail
+docker logs -f callsbot-trader | grep "new peak"
+
+# Example output:
+# [TRADER] 🚀 5GhEvCMy new peak! Profit: +95.0% | Trail: 38% | Price: $0.00007780
+# This shows bot IS using 38% trail despite database showing 10%
+```
+
+**The database trail_pct is ONLY used if:**
+- `ADAPTIVE_TRAILING_ENABLED=false` (not recommended)
+- OR as a fallback if peak_price or entry_price is missing
+
+---
+
+### **📁 Trading System Database Schema**
+
+**Database:** `/opt/callsbotonchain/deployment/var/trading.db`
+
+#### **Table: `positions`**
+```sql
+CREATE TABLE positions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    token_address TEXT NOT NULL,
+    strategy TEXT,                  -- 'smart_money_premium', 'smart_money_good', etc.
+    entry_time REAL,                -- Unix timestamp
+    entry_price REAL,               -- Price in USD when bought
+    quantity REAL,                  -- Number of tokens
+    usd_value REAL,                 -- USD invested
+    peak_price REAL,                -- Highest price reached
+    trail_pct REAL,                 -- Initial trail % (IGNORED if adaptive=true!)
+    status TEXT,                    -- 'open', 'closed'
+    exit_time REAL,                 -- Unix timestamp
+    exit_price REAL,                -- Price when sold
+    pnl_usd REAL,                   -- Profit/loss in USD
+    pnl_pct REAL,                   -- Profit/loss percentage
+    exit_reason TEXT,               -- 'trail', 'stop_loss', 'time_exit', etc.
+    tx_hash TEXT,                   -- Solana transaction hash
+    current_price REAL,             -- Last known price
+    last_check_time REAL            -- Last time price was checked
+);
+```
+
+**Key Fields for Analysis:**
+- `entry_price` and `peak_price` - Used to calculate profit%
+- `trail_pct` - Stored value (ignored if ADAPTIVE_TRAILING_ENABLED=true)
+- `pnl_pct` - Final performance when closed
+- `exit_reason` - Why position was closed
+
+---
+
+### **🔍 How to Check Trading Performance**
+
+**Method 1: Open Positions**
+```bash
+ssh root@64.227.157.221
+cd /opt/callsbotonchain/deployment
+sqlite3 var/trading.db "
+SELECT 
+    id, 
+    substr(token_address, 1, 12) as token,
+    ROUND(entry_price, 8) as entry,
+    ROUND(peak_price, 8) as peak,
+    ROUND(((peak_price - entry_price) / entry_price * 100), 1) as peak_gain_pct,
+    trail_pct
+FROM positions 
+WHERE status='open'
+ORDER BY id DESC;
+"
+```
+
+---
+
+**Method 2: Recently Closed Positions**
+```bash
+sqlite3 var/trading.db "
+SELECT 
+    id,
+    substr(token_address, 1, 12) as token,
+    ROUND(pnl_pct, 1) as pnl_pct,
+    exit_reason,
+    datetime(exit_time, 'unixepoch') as exit_time
+FROM positions 
+WHERE status='closed'
+ORDER BY exit_time DESC
+LIMIT 20;
+"
+```
+
+---
+
+**Method 3: Performance Summary**
+```bash
+sqlite3 var/trading.db "
+SELECT 
+    COUNT(*) as total_trades,
+    SUM(CASE WHEN pnl_pct > 0 THEN 1 ELSE 0 END) as winners,
+    ROUND(AVG(pnl_pct), 2) as avg_pnl_pct,
+    ROUND(MAX(pnl_pct), 2) as best_trade_pct,
+    ROUND(MIN(pnl_pct), 2) as worst_trade_pct,
+    ROUND(SUM(pnl_usd), 2) as total_pnl_usd
+FROM positions 
+WHERE status='closed';
+"
+```
+
+---
+
+### **📊 How to Monitor Live Trading**
+
+**Watch Position Monitoring (Every 5 seconds):**
+```bash
+docker logs -f callsbot-trader 2>&1 | grep EXIT_LOOP
+```
+
+**Watch Buy Signals:**
+```bash
+docker logs -f callsbot-trader 2>&1 | grep "open_position"
+```
+
+**Watch Sell Attempts:**
+```bash
+docker logs -f callsbot-trader 2>&1 | grep -E "exit_trail|exit_stop|SELL"
+```
+
+**Watch Errors:**
+```bash
+docker logs -f callsbot-trader 2>&1 | grep -E "ERROR|FAILED|6024"
+```
+
+---
+
+### **🔧 How to Change Trading Config**
+
+**Step 1: Edit the config file**
+```bash
+# Local machine
+cd /path/to/callsbotonchain
+nano tradingSystem/config_optimized.py
+
+# Make changes to TRAIL_TIER_X values
+```
+
+**Step 2: Upload to server**
+```bash
+scp tradingSystem/config_optimized.py root@64.227.157.221:/opt/callsbotonchain/tradingSystem/
+```
+
+**Step 3: Check for env var conflicts**
+```bash
+ssh root@64.227.157.221
+cd /opt/callsbotonchain/deployment
+grep -E "TS_TRAIL|TS_ADAPTIVE" .env docker-compose.yml
+# Remove any conflicting variables
+```
+
+**Step 4: Restart trader**
+```bash
+docker compose down trader
+docker compose up -d --build trader
+```
+
+**Step 5: Verify new config**
+```bash
+# Wait for a position to update
+docker logs -f callsbot-trader | grep "new peak"
+# Should show new trail percentages
+```
+
+---
+
+## 📊 Signal Detection System (Worker)
+
+### **Context: What Changed & Why
 
 ### **Problem Identified**
 
@@ -603,6 +955,77 @@ if change_24h > 30 and change_1h < -5:
 
 ---
 
+### **October 25, 2025 17:24 UTC / 22:54 IST - ULTRA AGGRESSIVE MOONSHOT MODE**
+
+**Changes:**
+- **Trading System Config:** Widened trailing stops from 8-30% to 35-50%
+- **Stop Loss:** Widened from -20% to -35% from entry
+- **Philosophy Shift:** Allow 35% drawdowns to survive dip-and-rip patterns
+- **Adaptive Trailing:** ENABLED (profit-based trails, not time-based)
+- **Configuration Management:** Removed all env var overrides in `.env` and `docker-compose.yml`
+
+**Technical Details:**
+```python
+# Before (Conservative):
+TRAIL_TIER_0 = 8.0%   # 0-50% profit
+TRAIL_TIER_1 = 12.0%  # 50-100% profit
+STOP_LOSS_PCT = 20.0% # -20% from entry
+
+# After (Ultra Aggressive):
+TRAIL_TIER_0 = 35.0%  # 0-50% profit
+TRAIL_TIER_1 = 38.0%  # 50-100% profit
+TRAIL_TIER_2 = 42.0%  # 100-200% profit
+TRAIL_TIER_3 = 45.0%  # 200-500% profit
+TRAIL_TIER_4 = 48.0%  # 500-1000% profit
+TRAIL_TIER_5 = 50.0%  # 1000%+ profit
+STOP_LOSS_PCT = 35.0% # -35% from entry
+```
+
+**Reason:** 
+Signal provider has 45% hit rate for 2x+ moonshots, but bot was exiting winning trades too early due to conservative 8% trailing stops. Analysis showed:
+- Position #187: Peaked at +83.1%, sold at +61.7% (missed 21.4%)
+- Position #203: Peaked at +78.7%, sold at +55.7% (missed 23.0%)
+- Memecoins exhibit dip-and-rip patterns: can dip 20-30% from entry before going 10x
+- Old 8% trails were exiting during healthy consolidation, missing moonshot potential
+
+**Root Cause of Config Issues:**
+Environment variables in `deployment/.env` and `deployment/docker-compose.yml` were overriding code values:
+- `TS_TRAIL_DEFAULT=8.0` in .env (removed)
+- `TS_TRAIL_AGGRESSIVE=5.0`, `TS_TRAIL_CONSERVATIVE=10.0` in docker-compose.yml (removed)
+- `TS_ADAPTIVE_TRAILING_ENABLED=false` in docker-compose.yml (changed to true)
+
+**Expected Impact:**
+- Capture 85-90% of moonshot gains (vs 72% with old trails)
+- Allow positions to survive healthy -20-30% dips
+- Position at +80% can now dip to +52% before exit (vs +72% with old 8% trail)
+- Enable asymmetric risk/reward: Small losses (-35% max), huge wins (10x+ possible)
+
+**Actual Impact (First Hour):**
+- ✅ Position #215 (5GhEvCMy): Rode from +28% to +95% using 38% trail
+- ✅ Position #214 (Gwf6QBR2): Held until -34% before exit (old 8% would've exited at -19%)
+- ✅ Verified in logs: `[TRADER] 🚀 5GhEvCMy new peak! Profit: +95.0% | Trail: 38%`
+
+**Deployment Steps:**
+1. Updated `tradingSystem/config_optimized.py` with new TRAIL_TIER values
+2. Updated `tradingSystem/db.py` docstrings to reflect new philosophy
+3. Edited `deployment/docker-compose.yml` to remove old env vars and enable adaptive trailing
+4. Removed `TS_TRAIL_*` variables from `deployment/.env`
+5. Rebuilt and restarted trader container: `docker compose down trader && docker compose up -d --build trader`
+6. Verified config: `docker exec callsbot-trader env | grep TS_TRAIL` (no overrides)
+7. Confirmed in logs: Position updates showing 35-38% trails in use
+
+**Files Modified:**
+- `tradingSystem/config_optimized.py` - Changed TRAIL_TIER_0 through TRAIL_TIER_5, STOP_LOSS_PCT
+- `tradingSystem/db.py` - Updated `update_peak_and_trail()` docstring
+- `deployment/docker-compose.yml` - Removed old trail env vars, enabled adaptive trailing
+- `deployment/.env` - Removed `TS_TRAIL_AGGRESSIVE`, `TS_TRAIL_DEFAULT`, `TS_TRAIL_CONSERVATIVE`
+- `docs/quickstart/CURRENT_SETUP.md` - Added comprehensive trading system documentation
+
+**Deployment Time:** October 25, 2025 17:24 UTC (22:54 IST)  
+**Container:** callsbot-trader (rebuilt with clean config)
+
+---
+
 ### **[Future Changes - Template]**
 
 **Date:** YYYY-MM-DD  
@@ -686,6 +1109,28 @@ EOF
 
 ---
 
-**Last Updated:** October 6, 2025  
-**Next Review:** October 20, 2025 (2 weeks after deployment)  
+**Last Updated:** October 25, 2025 17:24 UTC (22:54 IST)  
+**Next Review:** November 8, 2025 (2 weeks after ultra aggressive deployment)  
 **Maintained By:** AI Assistant + User
+
+---
+
+## 📋 Quick Reference Card for AI Assistants
+
+**When asked about trading performance:**
+1. Check `deployment/var/trading.db` (NOT `var/trading.db`)
+2. Use queries from "How to Check Trading Performance" section
+
+**When asked to change trailing stops:**
+1. Edit `tradingSystem/config_optimized.py`
+2. Check for env var overrides: `grep -E "TS_TRAIL" deployment/.env deployment/docker-compose.yml`
+3. Remove overrides if found
+4. Rebuild trader: `docker compose down trader && docker compose up -d --build trader`
+5. Verify: `docker logs -f callsbot-trader | grep "new peak"`
+
+**When asked about signal detection:**
+1. Check `deployment/var/alerted_tokens.db` (NOT `var/alerted_tokens.db`)
+2. Container: `callsbot-worker` (NOT `callsbot-trader`)
+3. Config: `app/config_unified.py` (NOT `tradingSystem/config_optimized.py`)
+
+**Remember:** WORKER = Signals, TRADER = Execution. Two separate systems!
