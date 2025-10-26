@@ -119,7 +119,7 @@ class Broker:
         return 180.0
 
     def _get_decimals(self, mint: str) -> int:
-        """Get token decimals with retry"""
+        """Get token decimals with multiple fallback methods"""
         # Fast-path for common mints to avoid network and wrong defaults
         HARDCODED: Dict[str, int] = {
             # SOL (wSOL)
@@ -135,9 +135,11 @@ class Broker:
             self._token_meta[mint] = HARDCODED[mint]
             return HARDCODED[mint]
 
+        # Check cache
         if mint in self._token_meta:
             return self._token_meta[mint]
         
+        # Method 1: Try Jupiter token list (most reliable for trading tokens)
         for attempt in range(3):
             try:
                 r = request_json("GET", "https://token.jup.ag/all", timeout=10.0)
@@ -148,14 +150,32 @@ class Broker:
                     if item.get("address") == mint:
                         dec = int(item.get("decimals") or 6)
                         self._token_meta[mint] = dec
+                        print(f"[BROKER] ✅ Got decimals from Jupiter token list: {mint[:8]}... = {dec} decimals", flush=True)
                         return dec
-                self._token_meta[mint] = 6
-                return 6
-            except Exception:
+            except Exception as e:
                 if attempt < 2:
                     time.sleep(1 * (attempt + 1))
                 continue
         
+        # Method 2: Try getting from on-chain mint account (backup method)
+        try:
+            from solders.pubkey import Pubkey
+            mint_pubkey = Pubkey.from_string(mint)
+            mint_info = self._rpc.get_account_info(mint_pubkey)
+            if hasattr(mint_info, 'value') and mint_info.value is not None:
+                # Mint account data contains decimals at byte 44
+                data = mint_info.value.data
+                if len(data) >= 45:
+                    decimals = int(data[44])
+                    if 0 <= decimals <= 18:  # Sanity check
+                        self._token_meta[mint] = decimals
+                        print(f"[BROKER] ✅ Got decimals from on-chain: {mint[:8]}... = {decimals} decimals", flush=True)
+                        return decimals
+        except Exception as e:
+            print(f"[BROKER] ⚠️ Could not fetch decimals from on-chain: {e}", flush=True)
+        
+        # Fallback: Most pump.fun and SPL tokens use 6 decimals
+        print(f"[BROKER] ⚠️ Using default 6 decimals for {mint[:8]}...", flush=True)
         self._token_meta[mint] = 6
         return 6
 
@@ -572,13 +592,37 @@ class Broker:
                         if verified_balance is not None and verified_balance > 0:
                             actual_qty = verified_balance
                             print(f"[BROKER] ✅ Verified on-chain: {actual_qty:.4f} tokens received", flush=True)
-                            if abs(actual_qty - out_amt) / out_amt > 0.02:  # >2% difference
-                                print(f"[BROKER] ⚠️ Actual differs from expected by {abs(actual_qty - out_amt):.4f} tokens", flush=True)
+                            
+                            # CRITICAL FIX: Detect decimal place errors (10x+ mismatch)
+                            diff_ratio = abs(actual_qty - out_amt) / out_amt if out_amt > 0 else 0
+                            if diff_ratio > 0.9:  # >90% difference = decimal error
+                                print(f"[BROKER] 🚨 DECIMAL MISMATCH DETECTED!", flush=True)
+                                print(f"[BROKER] Expected: {out_amt:.4f} tokens (from Jupiter quote)", flush=True)
+                                print(f"[BROKER] Actual: {actual_qty:.4f} tokens (on-chain)", flush=True)
+                                print(f"[BROKER] Difference: {diff_ratio*100:.1f}% (likely wrong token decimals)", flush=True)
+                                
+                                # Recalculate decimals from actual vs expected ratio
+                                if out_amt > 0 and actual_qty > 0:
+                                    decimal_diff = out_amt / actual_qty
+                                    if 9 < decimal_diff < 11:  # 10x difference = 1 decimal place off
+                                        print(f"[BROKER] ⚠️ Token decimals off by 1 place (10x mismatch)", flush=True)
+                                    elif 90 < decimal_diff < 110:  # 100x difference = 2 decimal places off
+                                        print(f"[BROKER] ⚠️ Token decimals off by 2 places (100x mismatch)", flush=True)
+                                    elif 900 < decimal_diff < 1100:  # 1000x = 3 decimal places off
+                                        print(f"[BROKER] ⚠️ Token decimals off by 3 places (1000x mismatch)", flush=True)
+                                
+                                # ALWAYS use actual on-chain balance for quantity and price calculation
+                                # This ensures entry price is correct even if decimals were wrong
+                                print(f"[BROKER] ✅ Using ACTUAL on-chain balance: {actual_qty:.4f} tokens", flush=True)
+                            elif diff_ratio > 0.02:  # >2% difference (normal slippage range)
+                                print(f"[BROKER] ⚠️ Slippage: Actual differs from expected by {abs(actual_qty - out_amt):.4f} tokens ({diff_ratio*100:.1f}%)", flush=True)
                         else:
                             print(f"[BROKER] ⚠️ Could not verify balance, using expected: {out_amt:.4f}", flush=True)
                     except Exception as e:
                         print(f"[BROKER] ⚠️ Balance verification failed: {e}, using expected qty", flush=True)
                     
+                    # CRITICAL: Always calculate price from actual received tokens
+                    # This ensures correct entry price even with decimal mismatches
                     actual_price = float(usd_size) / actual_qty if actual_qty > 0 else expected_price
                     print(f"[BROKER] Actual price: ${actual_price:.8f} per token", flush=True)
                     return Fill(price=actual_price, qty=actual_qty, usd=float(usd_size), 
