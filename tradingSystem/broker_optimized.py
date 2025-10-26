@@ -544,18 +544,34 @@ class Broker:
                                 print(f"[BROKER] ✅ BUY SUCCESS at {slippage_bps/100}% slippage (direct send)!", flush=True)
                                 print(f"[BROKER] Expected tokens: {out_amt:.4f} (from Jupiter quote)", flush=True)
                                 
-                                # PERMANENT FIX: Verify actual received tokens
-                                time.sleep(2)  # Wait for settlement
-                                actual_qty = out_amt
-                                try:
-                                    from tradingSystem.token_balance import get_token_balance_simple
-                                    wallet_address = str(self._kp.pubkey())
-                                    verified_balance = get_token_balance_simple(self._rpc, wallet_address, token)
-                                    if verified_balance is not None and verified_balance > 0:
-                                        actual_qty = verified_balance
-                                        print(f"[BROKER] ✅ Verified on-chain: {actual_qty:.4f} tokens", flush=True)
-                                except Exception:
-                                    pass
+                                # PERMANENT FIX: Verify actual received tokens with retries
+                                print(f"[BROKER] 🔍 Verifying on-chain balance (up to 3 retries)...", flush=True)
+                                actual_qty = None
+                                max_retries = 3
+                                for retry in range(max_retries):
+                                    # Wait longer for each retry (2s, 4s, 6s)
+                                    wait_time = 2 * (retry + 1)
+                                    time.sleep(wait_time)
+                                    
+                                    try:
+                                        from tradingSystem.token_balance import get_token_balance_simple
+                                        wallet_address = str(self._kp.pubkey())
+                                        verified_balance = get_token_balance_simple(self._rpc, wallet_address, token)
+                                        if verified_balance is not None and verified_balance > 0:
+                                            actual_qty = verified_balance
+                                            print(f"[BROKER] ✅ Verified on-chain: {actual_qty:.4f} tokens (retry {retry+1}/{max_retries})", flush=True)
+                                            break
+                                        else:
+                                            print(f"[BROKER] ⚠️ Balance check {retry+1}/{max_retries}: No tokens found", flush=True)
+                                    except Exception as e:
+                                        print(f"[BROKER] ⚠️ Balance check {retry+1}/{max_retries} failed: {e}", flush=True)
+                                
+                                # CRITICAL: If balance never appeared, FAIL the transaction
+                                if actual_qty is None or actual_qty <= 0:
+                                    print(f"[BROKER] 🚨 GHOST BUY DETECTED (direct send): NO TOKENS in wallet after {max_retries} retries!", flush=True)
+                                    print(f"[BROKER] ❌ FAILING transaction to prevent ghost position", flush=True)
+                                    return Fill(price=0.0, qty=0.0, usd=0.0, success=False, 
+                                               error="Ghost buy detected: transaction confirmed but tokens never arrived", tx=sig)
                                 
                                 actual_price = float(usd_size) / actual_qty if actual_qty > 0 else expected_price
                                 print(f"[BROKER] Actual price: ${actual_price:.8f} per token", flush=True)
@@ -582,44 +598,67 @@ class Broker:
                     print(f"[BROKER] Expected tokens: {out_amt:.4f} (from Jupiter quote)", flush=True)
                     
                     # PERMANENT FIX: Verify actual received tokens from blockchain
-                    # Wait 2 seconds for transaction to settle
-                    time.sleep(2)
-                    actual_qty = out_amt  # Default to expected
-                    try:
-                        from tradingSystem.token_balance import get_token_balance_simple
-                        wallet_address = str(self._kp.pubkey())
-                        verified_balance = get_token_balance_simple(self._rpc, wallet_address, token)
-                        if verified_balance is not None and verified_balance > 0:
-                            actual_qty = verified_balance
-                            print(f"[BROKER] ✅ Verified on-chain: {actual_qty:.4f} tokens received", flush=True)
+                    # CRITICAL: Retry balance checks to prevent ghost positions
+                    print(f"[BROKER] 🔍 Verifying on-chain balance (up to 3 retries)...", flush=True)
+                    actual_qty = None
+                    max_retries = 3
+                    for retry in range(max_retries):
+                        # Wait longer for each retry (2s, 4s, 6s)
+                        wait_time = 2 * (retry + 1)
+                        time.sleep(wait_time)
+                        
+                        try:
+                            from tradingSystem.token_balance import get_token_balance_simple
+                            wallet_address = str(self._kp.pubkey())
+                            verified_balance = get_token_balance_simple(self._rpc, wallet_address, token)
                             
-                            # CRITICAL FIX: Detect decimal place errors (10x+ mismatch)
-                            diff_ratio = abs(actual_qty - out_amt) / out_amt if out_amt > 0 else 0
-                            if diff_ratio > 0.9:  # >90% difference = decimal error
-                                print(f"[BROKER] 🚨 DECIMAL MISMATCH DETECTED!", flush=True)
-                                print(f"[BROKER] Expected: {out_amt:.4f} tokens (from Jupiter quote)", flush=True)
-                                print(f"[BROKER] Actual: {actual_qty:.4f} tokens (on-chain)", flush=True)
-                                print(f"[BROKER] Difference: {diff_ratio*100:.1f}% (likely wrong token decimals)", flush=True)
+                            if verified_balance is not None and verified_balance > 0:
+                                actual_qty = verified_balance
+                                print(f"[BROKER] ✅ Verified on-chain: {actual_qty:.4f} tokens received (retry {retry+1}/{max_retries})", flush=True)
                                 
-                                # Recalculate decimals from actual vs expected ratio
-                                if out_amt > 0 and actual_qty > 0:
-                                    decimal_diff = out_amt / actual_qty
-                                    if 9 < decimal_diff < 11:  # 10x difference = 1 decimal place off
-                                        print(f"[BROKER] ⚠️ Token decimals off by 1 place (10x mismatch)", flush=True)
-                                    elif 90 < decimal_diff < 110:  # 100x difference = 2 decimal places off
-                                        print(f"[BROKER] ⚠️ Token decimals off by 2 places (100x mismatch)", flush=True)
-                                    elif 900 < decimal_diff < 1100:  # 1000x = 3 decimal places off
-                                        print(f"[BROKER] ⚠️ Token decimals off by 3 places (1000x mismatch)", flush=True)
+                                # CRITICAL FIX: Detect decimal place errors (10x+ mismatch)
+                                diff_ratio = abs(actual_qty - out_amt) / out_amt if out_amt > 0 else 0
+                                if diff_ratio > 0.9:  # >90% difference = decimal error
+                                    print(f"[BROKER] 🚨 DECIMAL MISMATCH DETECTED!", flush=True)
+                                    print(f"[BROKER] Expected: {out_amt:.4f} tokens (from Jupiter quote)", flush=True)
+                                    print(f"[BROKER] Actual: {actual_qty:.4f} tokens (on-chain)", flush=True)
+                                    print(f"[BROKER] Difference: {diff_ratio*100:.1f}% (likely wrong token decimals)", flush=True)
+                                    
+                                    # Recalculate decimals from actual vs expected ratio
+                                    if out_amt > 0 and actual_qty > 0:
+                                        decimal_diff = out_amt / actual_qty
+                                        if 9 < decimal_diff < 11:  # 10x difference = 1 decimal place off
+                                            print(f"[BROKER] ⚠️ Token decimals off by 1 place (10x mismatch)", flush=True)
+                                        elif 90 < decimal_diff < 110:  # 100x difference = 2 decimal places off
+                                            print(f"[BROKER] ⚠️ Token decimals off by 2 places (100x mismatch)", flush=True)
+                                        elif 900 < decimal_diff < 1100:  # 1000x = 3 decimal places off
+                                            print(f"[BROKER] ⚠️ Token decimals off by 3 places (1000x mismatch)", flush=True)
+                                    
+                                    # ALWAYS use actual on-chain balance for quantity and price calculation
+                                    # This ensures entry price is correct even if decimals were wrong
+                                    print(f"[BROKER] ✅ Using ACTUAL on-chain balance: {actual_qty:.4f} tokens", flush=True)
+                                elif diff_ratio > 0.02:  # >2% difference (normal slippage range)
+                                    print(f"[BROKER] ⚠️ Slippage: Actual differs from expected by {abs(actual_qty - out_amt):.4f} tokens ({diff_ratio*100:.1f}%)", flush=True)
                                 
-                                # ALWAYS use actual on-chain balance for quantity and price calculation
-                                # This ensures entry price is correct even if decimals were wrong
-                                print(f"[BROKER] ✅ Using ACTUAL on-chain balance: {actual_qty:.4f} tokens", flush=True)
-                            elif diff_ratio > 0.02:  # >2% difference (normal slippage range)
-                                print(f"[BROKER] ⚠️ Slippage: Actual differs from expected by {abs(actual_qty - out_amt):.4f} tokens ({diff_ratio*100:.1f}%)", flush=True)
-                        else:
-                            print(f"[BROKER] ⚠️ Could not verify balance, using expected: {out_amt:.4f}", flush=True)
-                    except Exception as e:
-                        print(f"[BROKER] ⚠️ Balance verification failed: {e}, using expected qty", flush=True)
+                                # Balance verified successfully, break retry loop
+                                break
+                            else:
+                                print(f"[BROKER] ⚠️ Balance check {retry+1}/{max_retries}: No tokens found (verified_balance={verified_balance})", flush=True)
+                                if retry < max_retries - 1:
+                                    print(f"[BROKER] 🔄 Retrying balance check in {2 * (retry + 2)}s...", flush=True)
+                        except Exception as e:
+                            print(f"[BROKER] ⚠️ Balance check {retry+1}/{max_retries} failed: {e}", flush=True)
+                            if retry < max_retries - 1:
+                                print(f"[BROKER] 🔄 Retrying balance check in {2 * (retry + 2)}s...", flush=True)
+                    
+                    # CRITICAL: If balance never appeared, FAIL the transaction
+                    if actual_qty is None or actual_qty <= 0:
+                        print(f"[BROKER] 🚨 GHOST BUY DETECTED: Transaction confirmed but NO TOKENS in wallet after {max_retries} retries!", flush=True)
+                        print(f"[BROKER] Transaction: {sig}", flush=True)
+                        print(f"[BROKER] Expected: {out_amt:.4f} tokens, Actual: 0 tokens", flush=True)
+                        print(f"[BROKER] ❌ FAILING transaction to prevent ghost position", flush=True)
+                        return Fill(price=0.0, qty=0.0, usd=0.0, success=False, 
+                                   error="Ghost buy detected: transaction confirmed but tokens never arrived in wallet", tx=sig)
                     
                     # CRITICAL: Always calculate price from actual received tokens
                     # This ensures correct entry price even with decimal mismatches
