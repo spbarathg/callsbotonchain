@@ -234,6 +234,7 @@ def _exit_loop(engine: TradeEngine, stop_event: threading.Event) -> None:
     print("[EXIT_LOOP] Starting exit monitoring thread...", flush=True)
     last_status_log = 0
     last_portfolio_sync = 0
+    last_health_check = 0  # CRITICAL FIX: Position health monitoring
     iteration = 0
     
     # Initialize adaptive monitoring (smart intervals based on position maturity)
@@ -246,8 +247,8 @@ def _exit_loop(engine: TradeEngine, stop_event: threading.Event) -> None:
     tier_label = "Pro (10 RPS)" if is_pro else "Free (1 RPS)"
     print(f"[EXIT_LOOP] Base interval: {check_interval}s (Jupiter {tier_label})", flush=True)
     print(f"[EXIT_LOOP] Adaptive monitoring: ENABLED", flush=True)
-    print(f"[EXIT_LOOP] Tiers: Fast(1.5s) → Medium(30m) → Slow(2h) → Ultra(4h)", flush=True)
-    print(f"[EXIT_LOOP] Inactivity exit: 6+ hours of <5% movement", flush=True)
+    print(f"[EXIT_LOOP] Tiers: Fast(3s) → Medium(30m) → Slow(2h) → Ultra(4h)", flush=True)
+    print(f"[EXIT_LOOP] Inactivity exit: 10 minutes of <5% movement (AGGRESSIVE)", flush=True)
     print(f"[EXIT_LOOP] Moonshot mode: High-profit (>200%) + active price = unlimited hold", flush=True)
     
     while not stop_event.is_set():
@@ -270,6 +271,41 @@ def _exit_loop(engine: TradeEngine, stop_event: threading.Event) -> None:
                 print(f"[EXIT_LOOP] Price cache: {cache_stats}", flush=True)
                 
                 last_status_log = now
+            
+            # CRITICAL FIX: Position health check every 2 minutes
+            # Problem: IDs 219(+505%), 212(+191%), 211(+133%) peaked but never sold
+            # Solution: Verify high-profit positions are still sellable, force action if not
+            if now - last_health_check > 120:  # Every 2 minutes
+                try:
+                    for token in list(engine.live.keys()):
+                        pos_data = engine.live.get(token, {})
+                        entry_price = pos_data.get("entry_price", 0)
+                        peak_price = pos_data.get("peak_price", 0)
+                        
+                        if peak_price > 0 and entry_price > 0:
+                            peak_profit_pct = ((peak_price - entry_price) / entry_price * 100)
+                            
+                            # High-profit positions need health monitoring
+                            if peak_profit_pct >= 50:
+                                print(f"[HEALTH] Checking high-profit position {token[:8]}... (peak: +{peak_profit_pct:.1f}%)", flush=True)
+                                
+                                # Verify position is in exit monitoring
+                                if token not in engine.live:
+                                    print(f"[HEALTH] ⚠️ HIGH PROFIT POSITION {token[:8]} NOT IN LIVE TRACKING!", flush=True)
+                                    continue
+                                
+                                # Check if we've attempted profit-take
+                                profit_level = int(peak_profit_pct // 100) * 100
+                                profit_take_key = f"profit_take_attempted_{profit_level}"
+                                if not pos_data.get(profit_take_key, False):
+                                    print(f"[HEALTH] 🚨 ALERT: {token[:8]} at +{peak_profit_pct:.1f}% but NO PROFIT-TAKE ATTEMPTED!", flush=True)
+                                    print(f"[HEALTH] Forcing profit-take check on next iteration...", flush=True)
+                                    # Force a price check to trigger profit-take logic
+                                    engine.live[token]["force_check"] = True
+                    
+                    last_health_check = now
+                except Exception as e:
+                    print(f"[HEALTH] Health check error: {e}", flush=True)
             
             # Sync portfolio manager every minute
             if should_use_portfolio_manager() and (now - last_portfolio_sync > 60):

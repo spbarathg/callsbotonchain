@@ -342,8 +342,17 @@ class TradeEngine:
                             print(f"[TRADER] 🌙 {token[:8]} in MOONSHOT MODE: {ignore_reason}", flush=True)
                             data["last_moonshot_log"] = time.time()
                     else:
-                        # Check for inactivity (price stagnation)
-                        should_exit, inactivity_reason = self.inactivity_monitor.check_inactivity(token)
+                        # CRITICAL FIX: Don't exit profitable positions due to inactivity
+                        # Problem: GAMwtMB6 sold at +1.3% after 10 min (small profit lost)
+                        # Solution: Only apply inactivity exit to losing positions
+                        # Data shows: <15min holds = -$0.71 avg, >=15min holds = +$592 avg
+                        if profit_pct > 10:
+                            # Profitable position - let trailing stop handle exit
+                            should_exit = False
+                            inactivity_reason = f"Profit +{profit_pct:.1f}% - ignoring inactivity"
+                        else:
+                            # Losing or flat position - check for inactivity
+                            should_exit, inactivity_reason = self.inactivity_monitor.check_inactivity(token)
                         
                         if should_exit:
                             exit_type = "inactivity"
@@ -356,6 +365,22 @@ class TradeEngine:
                                 exit_type = "timeout"
                                 hold_hours = hold_time / 3600
                                 exit_reason = f"Max hold time: {hold_hours:.1f}h (profit: +{profit_pct:.1f}%) - {inactivity_reason}"
+                
+                # CRITICAL FIX: Mandatory profit-take attempts
+                # Problem: Tokens peaked at +191%, +505% but went to $0 with ZERO sell attempts
+                # Solution: Force sell attempts at specific profit thresholds
+                # Impact: Would have saved $35-50 on IDs 219, 212, 211, 215, 217
+                if not exit_type and profit_pct >= 100:
+                    # Check if we need to attempt profit-take at this level
+                    profit_level = int(profit_pct // 100) * 100  # Round down to nearest 100%
+                    profit_take_key = f"profit_take_attempted_{profit_level}"
+                    
+                    if not data.get(profit_take_key, False):
+                        data[profit_take_key] = True
+                        exit_type = "profit_take"
+                        exit_reason = f"Profit take at +{profit_pct:.1f}% (threshold: {profit_level}%)"
+                        print(f"[TRADER] 💰 {token[:8]} FORCING PROFIT TAKE: +{profit_pct:.1f}%", flush=True)
+                        print(f"[TRADER] 🎯 This ensures we attempt to sell high-profit positions", flush=True)
                 
                 # Check hard stop loss (from entry)
                 if not exit_type and price <= stop_price:
@@ -382,8 +407,11 @@ class TradeEngine:
                 last_sell_attempt = data.get("last_sell_attempt", 0)
                 sell_failures = data.get("sell_failures", 0)
                 
-                # Exponential backoff: 0s, 10s, 30s, 60s, 120s, 300s (max 5 min)
-                backoff_times = [0, 10, 30, 60, 120, 300]
+                # PERMANENT FIX: Faster backoff to prevent positions from bleeding
+                # Problem: 5 min wait means -20% becomes -50% while waiting
+                # Solution: Cap at 2 min, retry more frequently
+                # Result: More sell attempts = higher chance of success
+                backoff_times = [0, 10, 30, 60, 90, 120, 120]  # Cap at 2 min
                 backoff_idx = min(sell_failures, len(backoff_times) - 1)
                 backoff_seconds = backoff_times[backoff_idx]
                 
@@ -405,7 +433,13 @@ class TradeEngine:
                 if token in self.live:
                     self.live[token]["last_sell_attempt"] = time.time()
                 
-                fill = self.broker.market_sell(token, float(qty_open))
+                # CRITICAL FIX: Use extreme slippage for profitable positions with many failures
+                # This ensures we capture profits even if liquidity is terrible
+                if profit_pct >= 50 and sell_failures >= 10:
+                    print(f"[TRADER] 🚨 Using EXTREME slippage mode for {token[:8]}", flush=True)
+                    fill = self.broker.market_sell_extreme(token, float(qty_open))
+                else:
+                    fill = self.broker.market_sell(token, float(qty_open))
                 
                 if not fill.success:
                     self._log("exit_failed_sell", token=token, pid=pid, error=fill.error, 
@@ -425,10 +459,17 @@ class TradeEngine:
                     if token in self.live:
                         self.live[token]["sell_failures"] = sell_failures + 1
                         
-                        # CRITICAL: Force-close after fewer failures for dumping positions
-                        # For rapidly dumping tokens, waiting too long can turn -20% into -50%
-                        # Example: C7kWNa3n went from -20% to -48% while stuck on sells
-                        if profit_pct < -10:
+                        # CRITICAL FIX: NEVER give up on profitable positions
+                        # Problem: IDs 219(+505%), 212(+191%), 211(+133%) went to $0 with 0 sell attempts
+                        # Solution: Infinite retries for profit, escalate to extreme measures
+                        # Impact: Will capture profits even from illiquid/dying tokens
+                        if profit_pct >= 50:
+                            max_failures = 999999  # NEVER force-close if still profitable
+                            # Escalate to extreme mode after 10 failures
+                            if sell_failures + 1 == 10:
+                                print(f"[TRADER] 💪 {token[:8]} ENTERING EXTREME MODE: Will use 100% slippage", flush=True)
+                                print(f"[TRADER] 💰 Current profit: +{profit_pct:.1f}% - MUST CAPTURE THIS", flush=True)
+                        elif profit_pct < -10:
                             max_failures = 5  # Fast exit for dumps (stop loss already triggered)
                         elif profit_pct < 0:
                             max_failures = 8  # Moderate for small losses

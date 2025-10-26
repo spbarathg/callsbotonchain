@@ -520,11 +520,26 @@ class Broker:
                                 sig = str(sig_result)
                                 print(f"[BROKER] ✅ Direct send successful (no simulation): {sig[:8]}...", flush=True)
                                 
-                                # SUCCESS! Calculate actual executed price from tokens received
-                                actual_price = float(usd_size) / out_amt if out_amt > 0 else expected_price
-                                print(f"[BROKER] ✅ BUY SUCCESS at {slippage_bps/100}% slippage!", flush=True)
-                                print(f"[BROKER] Actual price: ${actual_price:.8f} (Expected: ${expected_price:.8f})", flush=True)
-                                return Fill(price=actual_price, qty=out_amt, usd=float(usd_size), 
+                                # SUCCESS! Query ACTUAL on-chain balance
+                                print(f"[BROKER] ✅ BUY SUCCESS at {slippage_bps/100}% slippage (direct send)!", flush=True)
+                                print(f"[BROKER] Expected tokens: {out_amt:.4f} (from Jupiter quote)", flush=True)
+                                
+                                # PERMANENT FIX: Verify actual received tokens
+                                time.sleep(2)  # Wait for settlement
+                                actual_qty = out_amt
+                                try:
+                                    from tradingSystem.token_balance import get_token_balance_simple
+                                    wallet_address = str(self._kp.pubkey())
+                                    verified_balance = get_token_balance_simple(self._rpc, wallet_address, token)
+                                    if verified_balance is not None and verified_balance > 0:
+                                        actual_qty = verified_balance
+                                        print(f"[BROKER] ✅ Verified on-chain: {actual_qty:.4f} tokens", flush=True)
+                                except Exception:
+                                    pass
+                                
+                                actual_price = float(usd_size) / actual_qty if actual_qty > 0 else expected_price
+                                print(f"[BROKER] Actual price: ${actual_price:.8f} per token", flush=True)
+                                return Fill(price=actual_price, qty=actual_qty, usd=float(usd_size), 
                                            tx=sig, success=True, slippage_pct=slippage_bps/100)
                             except Exception as e2:
                                 print(f"[BROKER] ❌ Direct send also failed: {e2}", flush=True)
@@ -542,11 +557,31 @@ class Broker:
                     else:
                         print(f"[BROKER] ✅ Transaction sent: {sig[:8]}...", flush=True)
                     
-                    # SUCCESS! Calculate actual executed price from tokens received
-                    actual_price = float(usd_size) / out_amt if out_amt > 0 else expected_price
+                    # SUCCESS! Query ACTUAL on-chain balance to verify received tokens
                     print(f"[BROKER] ✅ BUY SUCCESS at {slippage_bps/100}% slippage!", flush=True)
-                    print(f"[BROKER] Actual price: ${actual_price:.8f} (Expected: ${expected_price:.8f})", flush=True)
-                    return Fill(price=actual_price, qty=out_amt, usd=float(usd_size), 
+                    print(f"[BROKER] Expected tokens: {out_amt:.4f} (from Jupiter quote)", flush=True)
+                    
+                    # PERMANENT FIX: Verify actual received tokens from blockchain
+                    # Wait 2 seconds for transaction to settle
+                    time.sleep(2)
+                    actual_qty = out_amt  # Default to expected
+                    try:
+                        from tradingSystem.token_balance import get_token_balance_simple
+                        wallet_address = str(self._kp.pubkey())
+                        verified_balance = get_token_balance_simple(self._rpc, wallet_address, token)
+                        if verified_balance is not None and verified_balance > 0:
+                            actual_qty = verified_balance
+                            print(f"[BROKER] ✅ Verified on-chain: {actual_qty:.4f} tokens received", flush=True)
+                            if abs(actual_qty - out_amt) / out_amt > 0.02:  # >2% difference
+                                print(f"[BROKER] ⚠️ Actual differs from expected by {abs(actual_qty - out_amt):.4f} tokens", flush=True)
+                        else:
+                            print(f"[BROKER] ⚠️ Could not verify balance, using expected: {out_amt:.4f}", flush=True)
+                    except Exception as e:
+                        print(f"[BROKER] ⚠️ Balance verification failed: {e}, using expected qty", flush=True)
+                    
+                    actual_price = float(usd_size) / actual_qty if actual_qty > 0 else expected_price
+                    print(f"[BROKER] Actual price: ${actual_price:.8f} per token", flush=True)
+                    return Fill(price=actual_price, qty=actual_qty, usd=float(usd_size), 
                                tx=sig, success=True, slippage_pct=slippage_bps/100)
                     
                 except Exception as e:
@@ -575,6 +610,158 @@ class Broker:
         # Example: 2 positions selling = 8 API calls in <1s → exceeds 10 RPS
         with self._sell_lock:
             return self._execute_sell(token, qty)
+    
+    def market_sell_extreme(self, token: str, qty: float) -> Fill:
+        """
+        EXTREME MODE: Sell at ANY price with maximum slippage
+        Used when position is highly profitable but can't sell normally
+        
+        Problem: IDs 219(+505%), 212(+191%), 211(+133%) went to $0 with 0 sell attempts
+        Solution: Accept 100% slippage, ignore price impact caps, retry aggressively
+        Impact: Will capture profits even from nearly-dead tokens
+        """
+        print(f"[BROKER] 💪 EXTREME SELL MODE ACTIVATED for {token[:8]}", flush=True)
+        print(f"[BROKER] 🎯 Will accept up to 100% slippage to capture profit", flush=True)
+        
+        with self._sell_lock:
+            return self._execute_sell_extreme(token, qty)
+    
+    def _execute_sell_extreme(self, token: str, qty: float) -> Fill:
+        """Internal extreme sell execution - NO LIMITS, SELL AT ANY COST"""
+        try:
+            # Basic validation only
+            if qty <= 0:
+                return Fill(price=0.0, qty=0.0, usd=0.0, success=False, error="Invalid quantity")
+            
+            if not token or not self._is_valid_solana_address(token):
+                return Fill(price=0.0, qty=0.0, usd=0.0, success=False, error="Invalid token address")
+            
+            # Check SOL balance
+            try:
+                sol_balance_resp = self._rpc.get_balance(self._kp.pubkey())
+                sol_balance_lamports = sol_balance_resp.value if hasattr(sol_balance_resp, 'value') else 0
+                sol_balance = sol_balance_lamports / 1e9
+                
+                MIN_SOL_REQUIRED = 0.005
+                if sol_balance < MIN_SOL_REQUIRED:
+                    print(f"[BROKER] ❌ INSUFFICIENT SOL: {sol_balance:.6f}", flush=True)
+                    return Fill(price=0.0, qty=0.0, usd=0.0, success=False, 
+                               error=f"Insufficient SOL: {sol_balance:.6f}")
+                
+                print(f"[BROKER] ✅ SOL balance: {sol_balance:.6f}", flush=True)
+            except Exception as e:
+                print(f"[BROKER] ⚠️ Could not check SOL: {e}", flush=True)
+            
+            dec = self._get_decimals(token)
+            
+            # Get actual on-chain balance
+            print(f"[BROKER] Querying on-chain balance...", flush=True)
+            try:
+                from tradingSystem.token_balance import get_token_balance_simple
+                wallet_address = str(self._kp.pubkey())
+                actual_balance = get_token_balance_simple(self._rpc, wallet_address, token)
+                
+                if actual_balance is not None and actual_balance > 0:
+                    qty_to_sell = actual_balance
+                    safety_pct = 0.95
+                    print(f"[BROKER] ✅ On-chain balance: {actual_balance:.4f} tokens", flush=True)
+                elif actual_balance == 0.0:
+                    print(f"[BROKER] 🚨 ZERO balance on-chain!", flush=True)
+                    return Fill(price=0.0, qty=0.0, usd=0.0, success=False, 
+                               error="Zero balance on-chain")
+                else:
+                    qty_to_sell = float(qty)
+                    safety_pct = 0.95
+                    print(f"[BROKER] ⚠️ Using database qty: {qty:.4f}", flush=True)
+            except Exception as e:
+                qty_to_sell = float(qty)
+                safety_pct = 0.95
+                print(f"[BROKER] ⚠️ Balance query failed: {e}", flush=True)
+            
+            in_amount = int(qty_to_sell * (10 ** dec) * safety_pct)
+            
+            if in_amount <= 0:
+                return Fill(price=0.0, qty=0.0, usd=0.0, success=False, error="Amount too small")
+            
+            # EXTREME SLIPPAGE: 50% → 75% → 100%
+            # NO PRICE IMPACT GUARDS - just sell!
+            slippage_levels = [5000, 7500, 10000]  # 50%, 75%, 100%
+            
+            for attempt, slippage_bps in enumerate(slippage_levels, 1):
+                try:
+                    print(f"[BROKER] 🚨 EXTREME SELL attempt {attempt}/{len(slippage_levels)}: {slippage_bps/100}% slippage", flush=True)
+                    
+                    # Get quote (allow any routes)
+                    quote = None
+                    try:
+                        quote = self._quote(token, SOL_MINT, in_amount, slippage_bps_override=slippage_bps, only_direct_routes=False)
+                    except Exception as e:
+                        if "COULD_NOT_FIND_ANY_ROUTE" in str(e):
+                            print(f"[BROKER] 🚨 No routes at {slippage_bps/100}% slippage", flush=True)
+                            if attempt < len(slippage_levels):
+                                time.sleep(2)
+                                continue
+                        return Fill(price=0.0, qty=0.0, usd=0.0, success=False, error=str(e))
+                    
+                    if not quote:
+                        print(f"[BROKER] ⚠️ No quote at {slippage_bps/100}%, trying next...", flush=True)
+                        time.sleep(2)
+                        continue
+                    
+                    # Calculate output (NO price impact checks!)
+                    base_dec = self._get_decimals(SOL_MINT)
+                    out_amount_base = float(quote.get("outAmount") or 0) / (10 ** base_dec)
+                    
+                    sol_price = self._get_sol_price_fallback()
+                    out_usd = out_amount_base * sol_price
+                    
+                    print(f"[BROKER] 💰 Will receive: {out_amount_base:.6f} SOL = ${out_usd:.4f}", flush=True)
+                    
+                    if out_usd <= 0:
+                        print(f"[BROKER] ⚠️ Zero output, trying next slippage...", flush=True)
+                        if attempt < len(slippage_levels):
+                            time.sleep(2)
+                            continue
+                        return Fill(price=0.0, qty=0.0, usd=0.0, success=False, error="Zero output amount")
+                    
+                    expected_price = out_usd / float(qty)
+                    
+                    # Get swap transaction
+                    swap_tx = self._swap(quote)
+                    if not swap_tx:
+                        print(f"[BROKER] ⚠️ Swap failed, trying next slippage...", flush=True)
+                        if attempt < len(slippage_levels):
+                            time.sleep(2)
+                            continue
+                        return Fill(price=0.0, qty=0.0, usd=0.0, success=False, error="Swap transaction failed")
+                    
+                    # Execute!
+                    sig, err = self._sign_and_send(swap_tx)
+                    if err:
+                        print(f"[BROKER] ⚠️ Send failed: {err}, trying next slippage...", flush=True)
+                        if attempt < len(slippage_levels):
+                            time.sleep(3)
+                            continue
+                        return Fill(price=0.0, qty=0.0, usd=0.0, success=False, error=err)
+                    
+                    # SUCCESS!
+                    print(f"[BROKER] ✅ EXTREME SELL SUCCESS at {slippage_bps/100}% slippage!", flush=True)
+                    print(f"[BROKER] Sold {float(qty):.0f} tokens for ${out_usd:.4f} at ${expected_price:.10f}/token", flush=True)
+                    
+                    return Fill(price=expected_price, qty=float(qty), usd=out_usd, success=True)
+                
+                except Exception as e:
+                    print(f"[BROKER] ⚠️ Attempt {attempt} error: {e}", flush=True)
+                    if attempt < len(slippage_levels):
+                        time.sleep(3)
+                        continue
+                    return Fill(price=0.0, qty=0.0, usd=0.0, success=False, error=str(e))
+            
+            return Fill(price=0.0, qty=0.0, usd=0.0, success=False, error="All extreme sell attempts failed")
+        
+        except Exception as e:
+            print(f"[BROKER] ❌ EXTREME SELL EXCEPTION: {e}", flush=True)
+            return Fill(price=0.0, qty=0.0, usd=0.0, success=False, error=str(e))
     
     def _execute_sell(self, token: str, qty: float) -> Fill:
         """Internal sell execution (called with lock held) - OPTIMIZED FOR JUPITER PRO"""
@@ -606,23 +793,55 @@ class Broker:
             
             dec = self._get_decimals(token)
             
-            # CRITICAL FIX: Sell 99% instead of 100% to avoid Error 6024 (InsufficientFunds)
-            # Reasons for 99% (leaving 1% dust):
-            # 1. Rounding/precision errors during buy mean actual balance might be slightly less
-            # 2. Jupiter API rejects if you try to sell even 1 raw unit more than you have
-            # 3. 1% dust is small enough loss (~$0.10 on $10 position) but safe buffer
-            # 4. Standard practice in DEX trading to leave dust to avoid stuck positions
-            in_amount = int(float(qty) * (10 ** dec) * 0.99)  # Sell 99%, leave 1% dust for safety
+            # PERMANENT FIX: Get ACTUAL on-chain balance before selling
+            # Problem: Database qty may not match actual balance due to slippage during buy
+            # Solution: Query blockchain for real balance, sell 95% of THAT
+            print(f"[BROKER] Querying on-chain balance for {token[:8]}...", flush=True)
+            try:
+                from tradingSystem.token_balance import get_token_balance_simple
+                # Convert Keypair to pubkey string
+                wallet_address = str(self._kp.pubkey())
+                actual_balance = get_token_balance_simple(self._rpc, wallet_address, token)
+                
+                if actual_balance is not None and actual_balance > 0:
+                    # Use actual on-chain balance (95% for safety)
+                    qty_to_sell = actual_balance
+                    safety_pct = 0.95  # Sell 95% to leave 5% buffer
+                    print(f"[BROKER] ✅ Using actual on-chain balance: {actual_balance:.4f} tokens", flush=True)
+                    if abs(actual_balance - float(qty)) / float(qty) > 0.05:  # >5% difference
+                        print(f"[BROKER] ⚠️ Database qty ({qty:.4f}) differs from actual ({actual_balance:.4f})", flush=True)
+                elif actual_balance == 0.0:
+                    # CRITICAL: No tokens in wallet! Database is wrong or tokens already sold
+                    print(f"[BROKER] 🚨 ZERO balance on-chain! Database shows {qty:.4f} tokens but wallet is EMPTY", flush=True)
+                    print(f"[BROKER] This position cannot be sold (no tokens exist)", flush=True)
+                    return Fill(price=0.0, qty=0.0, usd=0.0, success=False, 
+                               error="Zero balance on-chain (tokens don't exist or already sold)")
+                else:
+                    # Query failed (None returned), fallback to database
+                    qty_to_sell = float(qty)
+                    safety_pct = 0.95
+                    print(f"[BROKER] ⚠️ Could not query balance, using database qty: {qty:.4f}", flush=True)
+            except Exception as e:
+                # Fallback to database qty
+                qty_to_sell = float(qty)
+                safety_pct = 0.95
+                print(f"[BROKER] ⚠️ Balance query exception: {e}, using database qty", flush=True)
             
-            print(f"[BROKER] Sell: {qty} tokens → {in_amount} raw units (99% to prevent Error 6024)", flush=True)
+            # Sell 95% of actual balance (5% buffer prevents Error 6025)
+            # Old: 99% buffer was too small (1% = ~200 tokens on 20K position)
+            # New: 95% buffer is safer (5% = ~1000 tokens on 20K position)
+            in_amount = int(qty_to_sell * (10 ** dec) * safety_pct)
+            
+            print(f"[BROKER] Sell: {qty_to_sell:.4f} tokens × 95% = {in_amount} raw units (5% buffer)", flush=True)
             
             if in_amount <= 0:
                 return Fill(price=0.0, qty=0.0, usd=0.0, success=False, error="Amount too small")
             
-            # OPTIMIZED: Only 2 slippage attempts to minimize API calls
-            # Jupiter Pro 10 RPS: 2 attempts × 2 calls = 4 calls per sell (safe!)
-            # vs old: 3 attempts × 4 calls = 12 calls per sell (rate limited!)
-            slippage_levels = [2500, 5000]  # 25%, 50% - go aggressive faster
+            # PERMANENT FIX: Graduated slippage for illiquid memecoins
+            # Problem: 50% max slippage was too low, causing Error 6024
+            # Solution: Try up to 100% slippage for tokens that can't sell
+            # Jupiter Pro 10 RPS: 4 attempts × 2 calls = 8 calls per sell (still safe!)
+            slippage_levels = [2500, 5000, 7500, 10000]  # 25%, 50%, 75%, 100%
             
             for attempt, slippage_bps in enumerate(slippage_levels, 1):
                 try:
@@ -702,13 +921,19 @@ class Broker:
                     # Execute transaction
                     sig, error = self._sign_and_send(swap_tx)
                     
-                    # CRITICAL: Detect Error 6025 (insufficient SOL balance) and abort immediately
-                    # Error 6025 = NOT ENOUGH SOL FOR RENT/FEES - retrying won't help!
+                    # PERMANENT FIX: Error 6025 is MISLEADING - it's usually a TOKEN balance issue!
+                    # Error 6025 = InsufficientFunds
+                    # Despite the name, this usually means:
+                    # - Trying to sell MORE tokens than you actually own (most common)
+                    # - OR insufficient SOL for fees (rare)
+                    # This fix queries actual balance before selling, preventing this error
                     if error and "6025" in str(error):
-                        print(f"[BROKER] ❌ ERROR 6025: Insufficient SOL balance for transaction fees", flush=True)
-                        print(f"[BROKER] This is NOT a slippage issue - need to add more SOL to wallet!", flush=True)
+                        print(f"[BROKER] ❌ ERROR 6025: InsufficientFunds", flush=True)
+                        print(f"[BROKER] This usually means: Trying to sell more tokens than owned", flush=True)
+                        print(f"[BROKER] (Rarely means: Insufficient SOL for fees)", flush=True)
+                        print(f"[BROKER] The actual balance query should have prevented this!", flush=True)
                         return Fill(price=0.0, qty=0.0, usd=0.0, success=False, 
-                                   error="Error 6025: Insufficient SOL for fees (add more SOL to wallet)")
+                                   error="Error 6025: InsufficientFunds (token balance mismatch)")
                     
                     # Error 6024 (stale quote / insufficient token balance)
                     # This can happen with price volatility - try next slippage level
