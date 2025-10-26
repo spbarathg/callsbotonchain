@@ -164,6 +164,27 @@ def update_peak_and_trail(position_id: int, price: float, entry_price: float = 0
 	return peak or 0.0, trail or 10.0
 
 
+def update_position_qty(position_id: int, new_qty: float) -> None:
+	"""Update position quantity after partial sell"""
+	max_retries = 3
+	for attempt in range(max_retries):
+		try:
+			conn = _conn()
+			c = conn.cursor()
+			c.execute("UPDATE positions SET qty=? WHERE id=?", (new_qty, position_id))
+			conn.commit()
+			conn.close()
+			print(f"[DB] ✅ Updated position #{position_id} qty to {new_qty:.4f}", flush=True)
+			return
+		except Exception as e:
+			print(f"[DB] ⚠️ Attempt {attempt+1}/{max_retries} failed to update qty: {e}", flush=True)
+			if attempt == max_retries - 1:
+				print(f"[DB] 🚨 CRITICAL: Failed to update qty after {max_retries} attempts!", flush=True)
+				raise
+			import time
+			time.sleep(0.5)
+
+
 def close_position(position_id: int) -> None:
 	conn = _conn()
 	c = conn.cursor()

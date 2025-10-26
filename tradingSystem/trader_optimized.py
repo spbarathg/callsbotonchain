@@ -14,7 +14,7 @@ from typing import Dict, Optional
 
 from .db import (
     init as db_init, create_position, add_fill, update_peak_and_trail,
-    close_position, get_open_qty
+    close_position, get_open_qty, update_position_qty
 )
 from .config_optimized import (
     STOP_LOSS_PCT, LOG_JSON_PATH, LOG_TEXT_PATH,
@@ -577,6 +577,10 @@ class TradeEngine:
                 
                 # Handle partial vs full exit
                 if is_partial:
+                    # CRITICAL FIX: Update database qty after partial sell
+                    update_position_qty(int(pid), qty_remaining)
+                    # Update in-memory holdings to match
+                    data["holdings"] = qty_remaining
                     # Partial sell: Keep position open, reset sell_percentage flag for next exit
                     data.pop("sell_percentage", None)  # Clear for next milestone
                     print(f"[TRADER] ✅ Partial exit SUCCESS: Sold {sell_percentage}% @ ${fill.price:.8f}", flush=True)
