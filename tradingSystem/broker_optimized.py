@@ -194,11 +194,12 @@ class Broker:
                 sig_str = str(sig)
                 print(f"[BROKER] Transaction submitted: {sig_str}", flush=True)
                 
-                # Wait for confirmation (up to 120s) at finalized commitment
-                # CRITICAL FIX: Increased from 60s to 120s to avoid false failures
-                # Many successful transactions take 60-90s to finalize on Solana
+                # Wait for confirmation (optimized for speed)
+                # OPTIMIZED: Accept 'confirmed' status immediately for faster feedback (1-2s vs 30-120s)
+                # Trade-off: 'confirmed' = cluster majority (very safe), 'finalized' = absolute (safest)
+                # For memecoin trading, 'confirmed' is sufficient and much faster
                 confirmed = False
-                for conf_attempt in range(120):
+                for conf_attempt in range(60):  # Max 60s (reduced from 120s)
                     try:
                         result = self._rpc.get_signature_statuses([sig])
                         if result and result.value and result.value[0]:
@@ -213,11 +214,11 @@ class Broker:
                                 conf = getattr(tx_status, 'confirmation_status', None)
                                 if conf and str(conf) == 'finalized':
                                     confirmed = True
-                                elif conf and str(conf) in ['confirmed', 'processed']:
-                                    # Accept confirmed status after 60s if finalized not reached
-                                    if conf_attempt >= 60:
-                                        print(f"[BROKER] ✅ Transaction {str(conf).upper()}: {sig_str[:16]}... (accepting after 60s)", flush=True)
-                                        confirmed = True
+                                    print(f"[BROKER] ✅ Transaction FINALIZED: {sig_str[:16]}... (absolute finality)", flush=True)
+                                elif conf and str(conf) == 'confirmed':
+                                    # Accept confirmed status immediately (cluster majority = very safe)
+                                    confirmed = True
+                                    print(f"[BROKER] ✅ Transaction CONFIRMED: {sig_str[:16]}... (~2s, cluster majority)", flush=True)
                             except Exception:
                                 # Fallback: if confirmation_status not available, consider after sufficient waits
                                 if conf_attempt >= 60:
@@ -227,19 +228,18 @@ class Broker:
                                 break
                         else:
                             if conf_attempt % 10 == 0:
-                                print(f"[BROKER] ⏳ Waiting for FINALIZED... ({conf_attempt}/120)", flush=True)
+                                print(f"[BROKER] ⏳ Waiting for confirmation... ({conf_attempt}/60)", flush=True)
                     except Exception as e:
-                        if conf_attempt == 119:
-                            # CRITICAL FIX: Return success with signature even on timeout
-                            # The transaction may still succeed; we'll check status later
+                        if conf_attempt == 59:
+                            # Return success with signature even on timeout
                             print(f"[BROKER] ⚠️ Confirmation check timeout (RPC error), but transaction submitted: {sig_str[:16]}...", flush=True)
                             return sig_str, None  # Return success to record position
                     time.sleep(1)
 
                 if confirmed:
                     return sig_str, None
-                # CRITICAL FIX: Return success even on timeout - transaction likely succeeded
-                print(f"[BROKER] ⚠️ Transaction timeout: {sig_str[:16]}... (not finalized within 120s, but may still succeed)", flush=True)
+                # Return success even on timeout - transaction likely succeeded
+                print(f"[BROKER] ⚠️ Transaction timeout: {sig_str[:16]}... (not confirmed within 60s, but may still succeed)", flush=True)
                 return sig_str, None  # Return success to record position anyway
                 
             except Exception as e:

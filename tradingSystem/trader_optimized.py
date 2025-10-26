@@ -367,29 +367,44 @@ class TradeEngine:
                                 exit_reason = f"Max hold time: {hold_hours:.1f}h (profit: +{profit_pct:.1f}%) - {inactivity_reason}"
                 
                 # CRITICAL FIX: Mandatory profit-take attempts
-                # Problem: Tokens peaked at +191%, +505% but went to $0 with ZERO sell attempts
-                # Solution: Force sell attempts at specific profit thresholds
-                # Impact: Would have saved $35-50 on IDs 219, 212, 211, 215, 217
+                # SMART PROFIT-TAKE STRATEGY: Partial sells at milestones
+                # At +100%: Sell 50%, keep 50% riding with trailing stop
+                # At +200%: Sell another 25%, keep 25% for moonshots
+                # At +500%: Sell another 15%, keep 10% for 10x+ runs
+                # Remaining: Let trailing stop handle final exit
                 # 
-                # FLAG BEHAVIOR (by design):
-                # - Each 100% threshold triggers ONE forced attempt
-                # - Flag prevents spam (no re-attempts every 3s at same level)
-                # - If sell fails, regular retry logic (with backoff) continues attempts
-                # - Each new threshold (200%, 300%) gets independent attempt
-                # - This ensures we try to sell at each major profit milestone
+                # This captures guaranteed profits while staying exposed to massive runs
                 if not exit_type and profit_pct >= 100:
-                    # Check if we need to attempt profit-take at this level
+                    # Check if we need to attempt partial profit-take
                     profit_level = int(profit_pct // 100) * 100  # Round down to nearest 100%
                     profit_take_key = f"profit_take_attempted_{profit_level}"
                     
                     if not data.get(profit_take_key, False):
-                        # Set flag BEFORE attempt to prevent race condition spam
-                        # If this attempt fails, regular retry logic will continue trying
-                        data[profit_take_key] = True
-                        exit_type = "profit_take"
-                        exit_reason = f"Profit take at +{profit_pct:.1f}% (threshold: {profit_level}%)"
-                        print(f"[TRADER] 💰 {token[:8]} FORCING PROFIT TAKE: +{profit_pct:.1f}%", flush=True)
-                        print(f"[TRADER] 🎯 This ensures we attempt to sell high-profit positions", flush=True)
+                        # Determine sell percentage based on profit level
+                        if profit_level == 100:
+                            # At 2x: Sell 50%, keep 50% for potential moonshot
+                            data["sell_percentage"] = 50
+                            data[profit_take_key] = True
+                            exit_type = "partial_profit_take"
+                            exit_reason = f"Taking 50% profit at +{profit_pct:.1f}% (2x), keeping 50% for moonshot"
+                            print(f"[TRADER] 💰 {token[:8]} PARTIAL SELL: 50% at +{profit_pct:.1f}% (2x)", flush=True)
+                            print(f"[TRADER] 🚀 Keeping 50% for potential moonshot with trailing stop", flush=True)
+                        elif profit_level == 200:
+                            # At 3x: Sell another 25% of original, keep 25% riding
+                            data["sell_percentage"] = 50  # 50% of remaining = 25% of original
+                            data[profit_take_key] = True
+                            exit_type = "partial_profit_take"
+                            exit_reason = f"Taking 25% more profit at +{profit_pct:.1f}% (3x), keeping 25% riding"
+                            print(f"[TRADER] 💰 {token[:8]} PARTIAL SELL: 25% more at +{profit_pct:.1f}% (3x)", flush=True)
+                            print(f"[TRADER] 🌙 Keeping 25% for mega moonshot", flush=True)
+                        elif profit_level >= 500:
+                            # At 6x+: Sell another 60% of remaining, keep 10% for 50x+ runs
+                            data["sell_percentage"] = 60  # 60% of remaining = 15% of original
+                            data[profit_take_key] = True
+                            exit_type = "partial_profit_take"
+                            exit_reason = f"Taking profit at +{profit_pct:.1f}%, keeping 10% lottery ticket"
+                            print(f"[TRADER] 💰 {token[:8]} PARTIAL SELL: More profit at +{profit_pct:.1f}%", flush=True)
+                            print(f"[TRADER] 🎰 Keeping 10% lottery ticket for 50x+ run", flush=True)
                 
                 # Check hard stop loss (from entry)
                 if not exit_type and price <= stop_price:
@@ -455,13 +470,26 @@ class TradeEngine:
                         print(f"[TRADER] ⏳ Position {token[:8]} in cooldown: {remaining}s remaining (failures={sell_failures})", flush=True)
                     return False
                 
-                # Execute sell
+                # Execute sell (full or partial)
                 qty_open = get_open_qty(int(pid))
                 if qty_open <= 0:
                     self._log("exit_zero_qty", token=token, pid=pid)
                     self.live.pop(token, None)
                     close_position(pid)
                     return False
+                
+                # Check if this is a partial sell
+                sell_percentage = data.get("sell_percentage", 100)  # Default to 100% (full sell)
+                is_partial = sell_percentage < 100
+                
+                # Calculate quantity to sell
+                if is_partial:
+                    qty_to_sell = float(qty_open) * (sell_percentage / 100.0)
+                    qty_remaining = float(qty_open) - qty_to_sell
+                    print(f"[TRADER] 📊 Partial sell: {sell_percentage}% of {qty_open:.2f} = {qty_to_sell:.2f} tokens", flush=True)
+                    print(f"[TRADER] 💎 Keeping {qty_remaining:.2f} tokens ({100-sell_percentage}%) riding", flush=True)
+                else:
+                    qty_to_sell = float(qty_open)
                 
                 # Update last attempt time
                 if token in self.live:
@@ -471,9 +499,9 @@ class TradeEngine:
                 # This ensures we capture profits even if liquidity is terrible
                 if profit_pct >= 50 and sell_failures >= 10:
                     print(f"[TRADER] 🚨 Using EXTREME slippage mode for {token[:8]}", flush=True)
-                    fill = self.broker.market_sell_extreme(token, float(qty_open))
+                    fill = self.broker.market_sell_extreme(token, qty_to_sell)
                 else:
-                    fill = self.broker.market_sell(token, float(qty_open))
+                    fill = self.broker.market_sell(token, qty_to_sell)
                 
                 if not fill.success:
                     self._log("exit_failed_sell", token=token, pid=pid, error=fill.error, 
@@ -546,25 +574,35 @@ class TradeEngine:
                 
                 # Update database
                 add_fill(int(pid), "sell", float(fill.price), float(fill.qty), float(fill.usd))
-                close_position(pid)
                 
-                # Remove from live and clean up monitors
-                self.live.pop(token, None)
-                self.inactivity_monitor.reset_position(token)
+                # Handle partial vs full exit
+                if is_partial:
+                    # Partial sell: Keep position open, reset sell_percentage flag for next exit
+                    data.pop("sell_percentage", None)  # Clear for next milestone
+                    print(f"[TRADER] ✅ Partial exit SUCCESS: Sold {sell_percentage}% @ ${fill.price:.8f}", flush=True)
+                    print(f"[TRADER] 💎 Position still OPEN: {qty_remaining:.2f} tokens riding with trailing stop", flush=True)
+                    # Don't close position, don't remove from live - keep monitoring
+                    return False
+                else:
+                    # Full exit: Close position completely
+                    close_position(pid)
+                    # Remove from live and clean up monitors
+                    self.live.pop(token, None)
+                    self.inactivity_monitor.reset_position(token)
                 
-                # Add cooldown to prevent immediate rebuy (especially important for stop losses)
-                self._add_cooldown(token)
-                self._log("cooldown_added", token=token, cooldown_seconds=self._cooldown_seconds,
-                         reason=f"sold_via_{exit_type}")
-                
-                self._log(f"exit_{exit_type}", 
-                         token=token, pid=pid, strategy=strategy,
-                         entry_price=entry_price, exit_price=price, peak=peak,
-                         stop_pct=STOP_LOSS_PCT, trail_pct=trail, 
-                         pnl_usd=pnl_usd, pnl_pct=pnl_pct,
-                         reason=exit_reason, tx=fill.tx)
-                
-                return True
+                    # Add cooldown to prevent immediate rebuy (only for full exits)
+                    self._add_cooldown(token)
+                    self._log("cooldown_added", token=token, cooldown_seconds=self._cooldown_seconds,
+                             reason=f"sold_via_{exit_type}")
+                    
+                    self._log(f"exit_{exit_type}", 
+                             token=token, pid=pid, strategy=strategy,
+                             entry_price=entry_price, exit_price=price, peak=peak,
+                             stop_pct=STOP_LOSS_PCT, trail_pct=trail, 
+                             pnl_usd=pnl_usd, pnl_pct=pnl_pct,
+                             reason=exit_reason, tx=fill.tx)
+                    
+                    return True
                 
         except Exception as e:
             self._log("exit_exception", token=token, error=str(e))
