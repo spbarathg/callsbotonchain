@@ -655,18 +655,26 @@ class Broker:
         with self._sell_lock:
             return self._execute_sell(token, qty)
     
-    def _verify_sell_success(self, token: str, pre_token_balance: float, pre_sol_balance: float, expected_sol_received: float) -> bool:
+    def _verify_sell_success(self, token: str, pre_token_balance: float, pre_sol_balance: float, expected_sol_received: float, qty_requested: float = None) -> bool:
         """
         CRITICAL FIX: Verify sell actually succeeded on-chain
         Problem: Can log "SELL SUCCESS" even if transaction failed/reverted
         Solution: Check wallet deltas post-trade
+        
+        Args:
+            token: Token mint address
+            pre_token_balance: Full token balance before sell
+            pre_sol_balance: SOL balance before sell
+            expected_sol_received: Expected SOL to receive
+            qty_requested: Quantity requested to sell (None = full balance)
+        
         Returns: True if verified, False if ghost sell detected
         """
         try:
             # Wait a moment for blockchain to finalize
             time.sleep(2)
             
-            # Check token balance (should be ~0 or close to 0)
+            # Check token balance (should be reduced by qty_requested)
             from tradingSystem.token_balance import get_token_balance_simple
             wallet_address = str(self._kp.pubkey())
             post_token_balance = get_token_balance_simple(self._rpc, wallet_address, token)
@@ -676,11 +684,26 @@ class Broker:
                 return True  # Assume success if can't verify
             
             tokens_sold = pre_token_balance - post_token_balance
-            if tokens_sold < pre_token_balance * 0.90:  # Should have sold at least 90%
-                print(f"[VERIFY] 🚨 GHOST SELL DETECTED!", flush=True)
-                print(f"[VERIFY] Pre-balance: {pre_token_balance:.4f}, Post-balance: {post_token_balance:.4f}", flush=True)
-                print(f"[VERIFY] Only {tokens_sold:.4f} tokens sold ({tokens_sold/pre_token_balance*100:.1f}%)", flush=True)
-                return False
+            
+            # CRITICAL FIX: Handle partial sells correctly
+            # For partial sells: verify at least 80% of requested qty was sold
+            # For full exits: verify at least 90% of full balance was sold
+            if qty_requested is not None and qty_requested < pre_token_balance * 0.99:
+                # Partial sell: check if we sold the requested amount
+                min_expected = qty_requested * 0.80  # Allow 20% slippage/buffer
+                if tokens_sold < min_expected:
+                    print(f"[VERIFY] 🚨 PARTIAL SELL FAILED!", flush=True)
+                    print(f"[VERIFY] Requested: {qty_requested:.4f}, Sold: {tokens_sold:.4f}", flush=True)
+                    print(f"[VERIFY] Pre: {pre_token_balance:.4f}, Post: {post_token_balance:.4f}", flush=True)
+                    return False
+                print(f"[VERIFY] ✅ Partial sell verified: {tokens_sold:.4f} of {qty_requested:.4f} requested", flush=True)
+            else:
+                # Full exit: check if we sold at least 90% of full balance
+                if tokens_sold < pre_token_balance * 0.90:
+                    print(f"[VERIFY] 🚨 GHOST SELL DETECTED!", flush=True)
+                    print(f"[VERIFY] Pre-balance: {pre_token_balance:.4f}, Post-balance: {post_token_balance:.4f}", flush=True)
+                    print(f"[VERIFY] Only {tokens_sold:.4f} tokens sold ({tokens_sold/pre_token_balance*100:.1f}%)", flush=True)
+                    return False
             
             # Check SOL balance increased
             sol_balance_resp = self._rpc.get_balance(self._kp.pubkey())
@@ -751,10 +774,14 @@ class Broker:
                 actual_balance = get_token_balance_simple(self._rpc, wallet_address, token)
                 
                 if actual_balance is not None and actual_balance > 0:
-                    qty_to_sell = actual_balance
-                    pre_token_balance = actual_balance  # Store for verification
+                    # CRITICAL FIX: Respect qty parameter for partial sells
+                    requested_qty = float(qty)
+                    qty_to_sell = min(requested_qty, actual_balance)
+                    pre_token_balance = actual_balance  # Store full balance for verification
                     safety_pct = 0.95
                     print(f"[BROKER] ✅ On-chain balance: {actual_balance:.4f} tokens", flush=True)
+                    if requested_qty < actual_balance * 0.99:  # Partial sell
+                        print(f"[BROKER] 🎯 EXTREME PARTIAL SELL: {requested_qty:.4f} of {actual_balance:.4f}", flush=True)
                 elif actual_balance == 0.0:
                     print(f"[BROKER] 🚨 ZERO balance on-chain!", flush=True)
                     return Fill(price=0.0, qty=0.0, usd=0.0, success=False, 
@@ -842,7 +869,7 @@ class Broker:
                     
                     # CRITICAL FIX: Verify sell actually succeeded on-chain
                     out_amount_base = float(quote.get("outAmount") or 0) / (10 ** self._get_decimals(SOL_MINT))
-                    is_verified = self._verify_sell_success(token, pre_token_balance, sol_balance, out_amount_base)
+                    is_verified = self._verify_sell_success(token, pre_token_balance, sol_balance, out_amount_base, qty_requested=qty_to_sell)
                     
                     if not is_verified:
                         print(f"[BROKER] 🚨 Sell verification FAILED - transaction may have reverted!", flush=True)
@@ -897,7 +924,7 @@ class Broker:
             
             # PERMANENT FIX: Get ACTUAL on-chain balance before selling
             # Problem: Database qty may not match actual balance due to slippage during buy
-            # Solution: Query blockchain for real balance, sell 95% of THAT
+            # Solution: Query blockchain for real balance, use as safety cap
             print(f"[BROKER] Querying on-chain balance for {token[:8]}...", flush=True)
             pre_token_balance = 0.0  # For verification
             try:
@@ -907,13 +934,20 @@ class Broker:
                 actual_balance = get_token_balance_simple(self._rpc, wallet_address, token)
                 
                 if actual_balance is not None and actual_balance > 0:
-                    # Use actual on-chain balance (95% for safety)
-                    qty_to_sell = actual_balance
-                    pre_token_balance = actual_balance  # Store for verification
+                    # CRITICAL FIX FOR PARTIAL SELLS: Respect qty parameter!
+                    # Use on-chain balance as safety cap, not replacement
+                    # For partial sells: qty < actual_balance (e.g., sell 50% at 2x)
+                    # For full exits: qty ≈ actual_balance (sell everything)
+                    requested_qty = float(qty)
+                    qty_to_sell = min(requested_qty, actual_balance)
+                    pre_token_balance = actual_balance  # Store full balance for verification
                     safety_pct = 0.95  # Sell 95% to leave 5% buffer
-                    print(f"[BROKER] ✅ Using actual on-chain balance: {actual_balance:.4f} tokens", flush=True)
-                    if abs(actual_balance - float(qty)) / float(qty) > 0.05:  # >5% difference
-                        print(f"[BROKER] ⚠️ Database qty ({qty:.4f}) differs from actual ({actual_balance:.4f})", flush=True)
+                    print(f"[BROKER] ✅ On-chain balance: {actual_balance:.4f} tokens", flush=True)
+                    if requested_qty < actual_balance * 0.99:  # Partial sell detected
+                        print(f"[BROKER] 🎯 PARTIAL SELL: Requested {requested_qty:.4f}, have {actual_balance:.4f}", flush=True)
+                        print(f"[BROKER] 💎 Will sell {qty_to_sell:.4f} tokens ({qty_to_sell/actual_balance*100:.1f}% of position)", flush=True)
+                    elif abs(actual_balance - requested_qty) / requested_qty > 0.05:  # >5% difference
+                        print(f"[BROKER] ⚠️ Database qty ({requested_qty:.4f}) differs from actual ({actual_balance:.4f})", flush=True)
                 elif actual_balance == 0.0:
                     # CRITICAL: No tokens in wallet! Database is wrong or tokens already sold
                     print(f"[BROKER] 🚨 ZERO balance on-chain! Database shows {qty:.4f} tokens but wallet is EMPTY", flush=True)
@@ -1067,7 +1101,7 @@ class Broker:
                         
                         # CRITICAL FIX: Verify sell actually succeeded on-chain
                         out_amount_base = float(quote.get("outAmount") or 0) / (10 ** self._get_decimals(SOL_MINT))
-                        is_verified = self._verify_sell_success(token, pre_token_balance, pre_sol_balance, out_amount_base)
+                        is_verified = self._verify_sell_success(token, pre_token_balance, pre_sol_balance, out_amount_base, qty_requested=qty_to_sell)
                         
                         if not is_verified:
                             print(f"[BROKER] 🚨 Sell verification FAILED - transaction may have reverted!", flush=True)
