@@ -100,12 +100,12 @@ MAX_POSITION_SIZE_USD = BANKROLL_USD * (MAX_POSITION_SIZE_PCT / 100.0)
 # Key insight: Even winners can dip -20-30% from ENTRY before going 10x
 # Example: Buy at $1 → Dips to $0.70 (-30%) → Rips to $10 (+900%)
 # Strategy: Give EVERY token maximum room to develop (35% from entry)
-STOP_LOSS_PCT = _get_float("TS_STOP_LOSS_PCT", 35.0)  # -35% from entry - let it breathe!
+STOP_LOSS_PCT = _get_float("TS_STOP_LOSS_PCT", 30.0)  # -30% from entry - tighter risk control
 
 # EMERGENCY HARD STOP - Absolute maximum loss before force exit
 # If normal stop fails (price feed issues), this is the last line of defense
 # AUDIT OPTIMIZATION: Reduced from -50% to -35% for faster capital recovery
-EMERGENCY_HARD_STOP_PCT = _get_float("TS_EMERGENCY_HARD_STOP_PCT", 35.0)  # -35% absolute max (was -50%)
+EMERGENCY_HARD_STOP_PCT = _get_float("TS_EMERGENCY_HARD_STOP_PCT", 30.0)  # -30% absolute max (tightened for capital preservation)
 
 # ==================== PROFIT-BASED ADAPTIVE TRAILING STOPS ====================
 # OLD PROBLEM: Time-based trails exit too early (sold at +50% when token goes to +400%)

@@ -24,6 +24,7 @@ from .config_optimized import (
 from .broker_optimized import Broker
 from .portfolio_manager import get_portfolio_manager, should_use_portfolio_manager
 from .inactivity_monitor import InactivityMonitor
+from .momentum_tracker import MomentumTracker
 
 
 class PositionLock:
@@ -50,6 +51,9 @@ class TradeEngine:
         
         # Inactivity monitoring: Exit positions based on price stagnation, not arbitrary time
         self.inactivity_monitor = InactivityMonitor()
+        
+        # Momentum intelligence: Scam detection + velocity-based exits
+        self.momentum_tracker = MomentumTracker()
         
         # Token cooldown: Prevent immediate rebuy after selling (stops buy-sell-rebuy loops)
         self._token_cooldowns: Dict[str, float] = {}  # token -> timestamp when sold
@@ -176,6 +180,7 @@ class TradeEngine:
                     return None
                 
                 # Add to live with ENTRY PRICE
+                entry_time = time.time()
                 self.live[token] = {
                     "pid": pid,
                     "strategy": strategy,
@@ -183,8 +188,12 @@ class TradeEngine:
                     "peak_price": fill.price,
                     "price_failures": 0,  # Track consecutive price fetch failures
                     "sell_failures": 0,  # Track consecutive sell attempt failures
-                    "open_at": time.time(),  # Track when position was opened
+                    "open_at": entry_time,  # Track when position was opened
                 }
+                
+                # Initialize momentum tracking for intelligent exits
+                self.momentum_tracker.init_position(token, fill.price, entry_time)
+                print(f"[TRADER] 🧠 Momentum tracking initialized for {token[:8]}", flush=True)
                 
                 print(f"[TRADER] ✅ Position fully tracked and ready for monitoring", flush=True)
                 self._log("open_position", 
@@ -318,15 +327,56 @@ class TradeEngine:
                 # Track price for inactivity monitoring
                 self.inactivity_monitor.add_price_sample(token, price)
                 
+                # Track price for momentum intelligence
+                self.momentum_tracker.add_price_sample(token, price)
+                
                 # FIXED: Stop loss relative to ENTRY price!
                 stop_price = entry_price * (1.0 - STOP_LOSS_PCT / 100.0)
                 
-                # Trail stop relative to peak
+                # Trail stop relative to peak (may be overridden by momentum-based adaptive trail)
                 trail_price = peak * (1.0 - trail / 100.0) if peak > 0 else 0
                 
                 # Determine exit type
                 exit_type = None
                 exit_reason = ""
+                
+                # ========== BREAKTHROUGH INTELLIGENCE LAYER ==========
+                # Phase 1: 60-Second Scam Detector
+                is_scam, scam_reason = self.momentum_tracker.check_scam(token, price)
+                if is_scam:
+                    exit_type = "scam_detected"
+                    exit_reason = f"🚨 SCAM DETECTED: {scam_reason}"
+                    print(f"[TRADER] {exit_reason}", flush=True)
+                    print(f"[TRADER] Executing instant exit to prevent heavy loss", flush=True)
+                
+                # Phase 2: Momentum Calculation & Adaptive Exits
+                if not exit_type:
+                    momentum = self.momentum_tracker.calculate_momentum(token, price)
+                    
+                    if momentum:
+                        # Log momentum classification once
+                        if not data.get("momentum_logged", False):
+                            print(f"[TRADER] 🎯 {token[:8]} momentum: {momentum.upper()} | Profit: +{profit_pct:.1f}%", flush=True)
+                            data["momentum_logged"] = True
+                        
+                        # Get momentum-based exit threshold
+                        exit_threshold = self.momentum_tracker.get_momentum_exit_threshold(token)
+                        
+                        if exit_threshold and profit_pct >= exit_threshold:
+                            # Momentum-based early exit (weak/moderate tokens at +30-40%)
+                            exit_type = "momentum_exit"
+                            exit_reason = f"{momentum.capitalize()} token: Exiting at +{profit_pct:.1f}% (threshold: +{exit_threshold}%)"
+                            print(f"[TRADER] 💰 {token[:8]} MOMENTUM EXIT: {exit_reason}", flush=True)
+                        
+                        # Phase 3: Adaptive Trailing Stop
+                        # Override default trail with momentum-based trail
+                        adaptive_trail = self.momentum_tracker.get_adaptive_trailing_stop(token)
+                        if adaptive_trail and not data.get("adaptive_trail_set", False):
+                            # Recalculate trail_price with adaptive percentage
+                            trail_price = peak * (1.0 - adaptive_trail / 100.0) if peak > 0 else 0
+                            print(f"[TRADER] 🔧 {token[:8]} adaptive trail: {adaptive_trail}% (momentum: {momentum})", flush=True)
+                            data["adaptive_trail_set"] = True
+                # ========== END INTELLIGENCE LAYER ==========
                 
                 # Check inactivity-based exit (6+ hours of <5% movement)
                 # KEY INSIGHT: Some tokens pump for 8-10 days to 800x
@@ -599,6 +649,7 @@ class TradeEngine:
                     # Remove from live and clean up monitors
                     self.live.pop(token, None)
                     self.inactivity_monitor.reset_position(token)
+                    self.momentum_tracker.cleanup(token)
                 
                     # Add cooldown to prevent immediate rebuy (only for full exits)
                     self._add_cooldown(token)
@@ -643,6 +694,8 @@ class TradeEngine:
                 add_fill(int(pid), "sell", float(fill.price), float(fill.qty), float(fill.usd))
                 close_position(pid)
                 self.live.pop(token, None)
+                self.inactivity_monitor.reset_position(token)
+                self.momentum_tracker.cleanup(token)
                 self._add_cooldown(token)
                 self._log("emergency_exit", token=token, reason=reason, pid=pid, usd=fill.usd)
                 print(f"[TRADER] 🚨 EMERGENCY EXIT SUCCESS: {token[:8]} sold for ${fill.usd:.2f}", flush=True)
@@ -651,6 +704,8 @@ class TradeEngine:
                 # Even sell failed - close in DB anyway to prevent infinite loop
                 close_position(pid)
                 self.live.pop(token, None)
+                self.inactivity_monitor.reset_position(token)
+                self.momentum_tracker.cleanup(token)
                 self._log("emergency_exit_failed", token=token, reason=reason, error=fill.error)
                 print(f"[TRADER] ⚠️ EMERGENCY EXIT FAILED: {token[:8]} - {fill.error}", flush=True)
                 return False
