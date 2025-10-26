@@ -75,13 +75,16 @@ class JupiterPriceOracle:
             # Convert holdings to smallest unit
             in_amount = int(holdings * (10 ** token_decimals))
             
-            # Get Jupiter quote for selling this amount
-            # Try direct routes first (faster), then allow multi-hop if needed
+            # FIXED: Single quote with moderate slippage to avoid rate limits
+            # Problem: Multiple slippage attempts (50%→75%→100%) cause API burst
+            # Solution: Use 50% slippage for price quotes (matches most successful sells)
+            # Result: 1 API call per position instead of 3, avoids rate limits
+            # Note: Sell execution still uses graduated slippage (25%→50%→75%→100%)
             result = jupiter.get_quote(
                 input_mint=token,
                 output_mint=SOL_MINT,
                 amount=in_amount,
-                slippage_bps=2000,  # 20% slippage for quote
+                slippage_bps=5000,  # 50% - matches most successful sell attempts
                 timeout=5.0,
                 only_direct_routes=False  # Allow multi-hop routes for low-liq tokens
             )

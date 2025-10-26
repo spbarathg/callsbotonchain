@@ -20,9 +20,12 @@ class InactivityMonitor:
         self.price_history: Dict[str, deque] = {}
         
         # Thresholds
+        # USER REQUIREMENT: "auto close positions with less than 5% movement in 10 minutes"
         self.MIN_SAMPLES = 10  # Need 10 price checks before judging
         self.INACTIVITY_THRESHOLD_PCT = 5.0  # <5% movement = inactive
-        self.INACTIVITY_DURATION_HOURS = 6.0  # 6 hours of no movement = exit
+        self.INACTIVITY_DURATION_MINUTES = 10.0  # 10 minutes of no movement = exit (AGGRESSIVE)
+        self.INACTIVITY_DURATION_HOURS = self.INACTIVITY_DURATION_MINUTES / 60.0  # Convert to hours for internal use
+        # This automatically closes positions that are dead/stagnant
         
         # Track when position entered "inactive" state
         self.inactive_since: Dict[str, float] = {}
@@ -52,10 +55,10 @@ class InactivityMonitor:
         if len(history) < self.MIN_SAMPLES:
             return False, f"Insufficient data ({len(history)}/{self.MIN_SAMPLES} samples)"
         
-        # Get recent time window (last 6 hours or all data if < 6 hours)
+        # Get recent time window (last 10 minutes or all data if less)
         now = time.time()
-        six_hours_ago = now - (self.INACTIVITY_DURATION_HOURS * 3600)
-        recent_samples = [(t, p) for t, p in history if t >= six_hours_ago]
+        duration_ago = now - (self.INACTIVITY_DURATION_HOURS * 3600)
+        recent_samples = [(t, p) for t, p in history if t >= duration_ago]
         
         if len(recent_samples) < self.MIN_SAMPLES:
             # Not enough recent data - use all available
@@ -84,12 +87,13 @@ class InactivityMonitor:
             
             # Exit if inactive for full duration
             if inactive_duration_hours >= self.INACTIVITY_DURATION_HOURS:
-                oldest_sample_age = (now - recent_samples[0][0]) / 3600
-                return True, (f"INACTIVE: {price_range_pct:.2f}% movement in {oldest_sample_age:.1f}h "
-                             f"(threshold: {self.INACTIVITY_THRESHOLD_PCT}%)")
+                oldest_sample_age_min = (now - recent_samples[0][0]) / 60
+                return True, (f"INACTIVE: {price_range_pct:.2f}% movement in {oldest_sample_age_min:.1f}min "
+                             f"(threshold: {self.INACTIVITY_THRESHOLD_PCT}%, duration: {self.INACTIVITY_DURATION_MINUTES}min)")
             else:
+                inactive_duration_min = (now - self.inactive_since[token]) / 60
                 return False, (f"Entering inactivity: {price_range_pct:.2f}% movement, "
-                              f"{inactive_duration_hours:.1f}h/{self.INACTIVITY_DURATION_HOURS}h")
+                              f"{inactive_duration_min:.1f}min/{self.INACTIVITY_DURATION_MINUTES}min")
         else:
             # Price is moving - reset inactivity tracker
             if token in self.inactive_since:

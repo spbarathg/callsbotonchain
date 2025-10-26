@@ -55,9 +55,10 @@ class PriceCache:
 
 
 # Global price cache instance
-# Increased to 10 seconds to ensure we stay well within Jupiter's 60 RPM limit
-# With 4 positions × 6 fetches/min = 24 API calls/min (40% of limit)
-_price_cache = PriceCache(ttl_seconds=3)  # 3 second cache for faster exit monitoring
+# JUPITER API SAFETY: 10 RPS hard limit must never be exceeded
+# 5 second cache ensures safe API usage even with many positions
+# With 6 positions × 12 calls/min = 72 calls/min = 1.2 RPS (12% of limit) ✅
+_price_cache = PriceCache(ttl_seconds=5)  # 5 second cache for API safety
 
 def get_price_cache() -> PriceCache:
     """Get global price cache instance"""

@@ -16,7 +16,10 @@ class AdaptiveMonitor:
     
     def __init__(self):
         # Intervals in seconds
-        self.FAST_INTERVAL = 1.5      # New/volatile positions
+        # JUPITER API SAFETY: Tier 1 set to 3s (was 1.5s) to respect 10 RPS limit
+        # With 5s cache, this = 1 API call per 5s per position = 12 calls/min
+        # 6 positions = 72 calls/min = 1.2 RPS (12% of limit) ✅
+        self.FAST_INTERVAL = 3.0      # New/volatile positions (was 1.5s)
         self.MEDIUM_INTERVAL = 1800   # 30 min - Established positions
         self.SLOW_INTERVAL = 7200     # 2 hours - Confirmed moonshots
         self.ULTRA_SLOW_INTERVAL = 14400  # 4 hours - Mega pumpers (500%+)

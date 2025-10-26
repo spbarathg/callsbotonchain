@@ -370,12 +370,21 @@ class TradeEngine:
                 # Problem: Tokens peaked at +191%, +505% but went to $0 with ZERO sell attempts
                 # Solution: Force sell attempts at specific profit thresholds
                 # Impact: Would have saved $35-50 on IDs 219, 212, 211, 215, 217
+                # 
+                # FLAG BEHAVIOR (by design):
+                # - Each 100% threshold triggers ONE forced attempt
+                # - Flag prevents spam (no re-attempts every 3s at same level)
+                # - If sell fails, regular retry logic (with backoff) continues attempts
+                # - Each new threshold (200%, 300%) gets independent attempt
+                # - This ensures we try to sell at each major profit milestone
                 if not exit_type and profit_pct >= 100:
                     # Check if we need to attempt profit-take at this level
                     profit_level = int(profit_pct // 100) * 100  # Round down to nearest 100%
                     profit_take_key = f"profit_take_attempted_{profit_level}"
                     
                     if not data.get(profit_take_key, False):
+                        # Set flag BEFORE attempt to prevent race condition spam
+                        # If this attempt fails, regular retry logic will continue trying
                         data[profit_take_key] = True
                         exit_type = "profit_take"
                         exit_reason = f"Profit take at +{profit_pct:.1f}% (threshold: {profit_level}%)"
@@ -400,6 +409,21 @@ class TradeEngine:
                     exit_type = "trail"
                     exit_reason = f"Hit trailing stop: {price:.8f} <= {trail_price:.8f} (peak: {peak:.8f}, trail: {trail}%)"
                 
+                # CRITICAL FIX: Panic trigger for flash dumps
+                # Problem: At 3s intervals, price can crash 60% before we poll again
+                # Solution: If price drops MORE than trailing stop threshold, immediate sell
+                # Example: Trail stop at $10, but price is $8 (20% below stop) = PANIC
+                elif not exit_type and peak > 0 and trail_price > 0:
+                    panic_threshold = trail_price * 0.8  # 20% below trailing stop = panic
+                    if price < panic_threshold:
+                        # Flash dump detected!
+                        drop_from_peak = ((price - peak) / peak) * 100
+                        drop_from_stop = ((price - trail_price) / trail_price) * 100
+                        exit_type = "panic_sell"
+                        exit_reason = f"FLASH DUMP: {price:.8f} < {panic_threshold:.8f} (20% below trail stop, {drop_from_peak:.1f}% from peak)"
+                        print(f"[TRADER] 🚨 PANIC SELL: {token[:8]} crashed {drop_from_stop:.1f}% below trailing stop!", flush=True)
+                        print(f"[TRADER] Peak: {peak:.8f}, Trail Stop: {trail_price:.8f}, Current: {price:.8f}", flush=True)
+                
                 if not exit_type:
                     return False
                 
@@ -407,13 +431,23 @@ class TradeEngine:
                 last_sell_attempt = data.get("last_sell_attempt", 0)
                 sell_failures = data.get("sell_failures", 0)
                 
-                # PERMANENT FIX: Faster backoff to prevent positions from bleeding
-                # Problem: 5 min wait means -20% becomes -50% while waiting
-                # Solution: Cap at 2 min, retry more frequently
-                # Result: More sell attempts = higher chance of success
-                backoff_times = [0, 10, 30, 60, 90, 120, 120]  # Cap at 2 min
-                backoff_idx = min(sell_failures, len(backoff_times) - 1)
-                backoff_seconds = backoff_times[backoff_idx]
+                # CRITICAL FIX: Adaptive backoff with progressive slowdown
+                # Problem: Fixed 120s backoff = constant API load, can hit rate limits
+                # Solution: Increase backoff with failures to reduce API pressure over time
+                # Formula: min(3s * (1 + 0.2 * failures), max_backoff)
+                # Impact: Early retries are fast, later retries are slower to avoid API bans
+                if profit_pct >= 50:
+                    # High-profit positions: slower escalation, max 5min backoff
+                    # Early: 3s, 4s, 5s... Later: 60s, 120s, 180s, 240s, 300s (cap)
+                    backoff_seconds = min(3 * (1 + 0.3 * sell_failures), 300)
+                elif profit_pct < -10:
+                    # Losing positions: fast retries, cap at 30s
+                    backoff_times = [0, 5, 10, 20, 30, 30]
+                    backoff_idx = min(sell_failures, len(backoff_times) - 1)
+                    backoff_seconds = backoff_times[backoff_idx]
+                else:
+                    # Moderate profit/small loss: standard escalation, cap at 60s
+                    backoff_seconds = min(3 * (1 + 0.2 * sell_failures), 60)
                 
                 if last_sell_attempt > 0 and (time.time() - last_sell_attempt) < backoff_seconds:
                     remaining = int(backoff_seconds - (time.time() - last_sell_attempt))
@@ -455,26 +489,33 @@ class TradeEngine:
                         self._log("rugged_token_closed", token=token, pid=pid, error=fill.error)
                         return True  # Return True so position is removed
                     
-                    # Track consecutive sell failures with exponential backoff
+                    # Track consecutive sell failures with adaptive backoff
                     if token in self.live:
                         self.live[token]["sell_failures"] = sell_failures + 1
                         
-                        # CRITICAL FIX: NEVER give up on profitable positions
-                        # Problem: IDs 219(+505%), 212(+191%), 211(+133%) went to $0 with 0 sell attempts
-                        # Solution: Infinite retries for profit, escalate to extreme measures
-                        # Impact: Will capture profits even from illiquid/dying tokens
+                        # CRITICAL FIX: Bounded retries with adaptive backoff
+                        # Problem: Infinite retries (999999) = 9600 attempts over 8h = API abuse
+                        # Solution: Cap at 300 attempts, increase backoff over time
+                        # Impact: Still gives plenty of chances (10+ hours) but prevents API spam
                         if profit_pct >= 50:
-                            max_failures = 999999  # NEVER force-close if still profitable
+                            # High-profit positions get extended retries, not infinite
+                            max_failures = 300  # ~10 hours of retries at 2-min intervals
+                            
                             # Escalate to extreme mode after 10 failures
                             if sell_failures + 1 == 10:
                                 print(f"[TRADER] 💪 {token[:8]} ENTERING EXTREME MODE: Will use 100% slippage", flush=True)
                                 print(f"[TRADER] 💰 Current profit: +{profit_pct:.1f}% - MUST CAPTURE THIS", flush=True)
+                            
+                            # Warn when approaching limit
+                            if sell_failures + 1 == 250:
+                                print(f"[TRADER] ⚠️ {token[:8]} has 250 failures - may be permanently dead", flush=True)
+                                print(f"[TRADER] Will try 50 more times then mark as dead", flush=True)
                         elif profit_pct < -10:
                             max_failures = 5  # Fast exit for dumps (stop loss already triggered)
                         elif profit_pct < 0:
                             max_failures = 8  # Moderate for small losses
                         else:
-                            max_failures = 15  # More patience for profitable positions
+                            max_failures = 15  # More patience for small profits
                         
                         if sell_failures + 1 >= max_failures:
                             print(f"[TRADER] 🚨 FORCE CLOSING: {token[:8]} after {sell_failures + 1} failures (profit: {profit_pct:.1f}%)", flush=True)
