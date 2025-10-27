@@ -416,20 +416,44 @@ class TradeEngine:
                                 hold_hours = hold_time / 3600
                                 exit_reason = f"Max hold time: {hold_hours:.1f}h (profit: +{profit_pct:.1f}%) - {inactivity_reason}"
                 
-                # OPTIMIZED HYBRID EXIT STRATEGY:
-                # Goal: Capture 30-80% profits while preserving 100%+ moonshot potential
+                # OPTIMIZED TIERED EXIT STRATEGY - Capture gains from 40% to 10x+
+                # Based on analysis: Your bot found an 11x that peaked at 18x
+                # Strategy: Scale out as it moons, but keep riding for mega gains
                 # 
                 # TIER 1 (+40%): Sell 25% - Safety exit for moderate winners
-                # TIER 2 (+100%): Sell 25% more (50% total) - Moonshot confirmation
-                # REMAINING (50%): Trail with 40% stop - Mega moonshot potential
+                # TIER 2 (+100%): Sell 25% more (50% total) - 2x moonshot confirmed
+                # TIER 3 (+300%): Sell 15% more (65% total) - 4x mega moonshot
+                # TIER 4 (+900%): Sell 20% more (85% total) - 10x ultra moonshot
+                # REMAINING (15%): Trail with wide stop - Ride to 20x+
                 # 
-                # Why this works:
-                # - If token peaks at 30-80%: We capture 25% of position at +40%
-                # - If token moons to 100%+: We still sell 50% at 2x and trail the rest
-                # - Simpler than complex tiers, preserves moonshot upside
-                # - Captures missed profits without over-exiting
+                # Impact: Would've auto-sold your 11x at 2x, 4x, 10x checkpoints
                 if not exit_type and profit_pct >= 40:
-                    if profit_pct >= 100 and not data.get("profit_take_100", False):
+                    # TIER 4: ULTRA MOONSHOT (+900% = 10x)
+                    if profit_pct >= 900 and not data.get("profit_take_900", False):
+                        # At 10x! Sell another 20% (of remaining)
+                        # If all previous tiers hit: 65% already sold, remaining 35%
+                        # Sell 20% of original = 57% of remaining 35%
+                        data["sell_percentage"] = 57  # 20% of original from 35% remaining
+                        data["profit_take_900"] = True
+                        exit_type = "partial_profit_take"
+                        exit_reason = f"🌟 ULTRA MOONSHOT: Selling 20% at +{profit_pct:.1f}% (10x), 85% total sold"
+                        print(f"[TRADER] 🌟🌟🌟 {token[:8]} TIER 4 (10x): Selling 20% more at +{profit_pct:.1f}%", flush=True)
+                        print(f"[TRADER] 💎💎💎 Total sold: 85% | Keeping 15% for potential 20x+ with wide trail", flush=True)
+                    
+                    # TIER 3: MEGA MOONSHOT (+300% = 4x)
+                    elif profit_pct >= 300 and not data.get("profit_take_300", False):
+                        # At 4x! Sell another 15% (of remaining)
+                        # If tiers 1&2 hit: 50% already sold, remaining 50%
+                        # Sell 15% of original = 30% of remaining 50%
+                        data["sell_percentage"] = 30  # 15% of original from 50% remaining
+                        data["profit_take_300"] = True
+                        exit_type = "partial_profit_take"
+                        exit_reason = f"🌙 MEGA MOONSHOT: Selling 15% at +{profit_pct:.1f}% (4x), 65% total sold"
+                        print(f"[TRADER] 🌙🌙 {token[:8]} TIER 3 (4x): Selling 15% more at +{profit_pct:.1f}%", flush=True)
+                        print(f"[TRADER] 💎💎 Total sold: 65% | Keeping 35% for potential 10x run", flush=True)
+                    
+                    # TIER 2: MOONSHOT (+100% = 2x)
+                    elif profit_pct >= 100 and not data.get("profit_take_100", False):
                         # MOONSHOT DETECTED: At 100%+ profit
                         # Strategy: Sell 25% more (for total 50% if tier1 done, or 50% if tier1 skipped)
                         
@@ -440,8 +464,8 @@ class TradeEngine:
                             data["profit_take_100"] = True
                             exit_type = "partial_profit_take"
                             exit_reason = f"Moonshot! Selling 25% more at +{profit_pct:.1f}% (2x), 50% total sold"
-                            print(f"[TRADER] 🚀 {token[:8]} MOONSHOT TIER 2: Selling 25% more at +{profit_pct:.1f}%", flush=True)
-                            print(f"[TRADER] 💎 Total sold: 50% | Keeping 50% for mega moonshot with trailing stop", flush=True)
+                            print(f"[TRADER] 🚀 {token[:8]} TIER 2 (2x): Selling 25% more at +{profit_pct:.1f}%", flush=True)
+                            print(f"[TRADER] 💎 Total sold: 50% | Keeping 50% for mega moonshot", flush=True)
                         else:
                             # Skipped +40% tier (fast moonshot), sell 50% now
                             data["sell_percentage"] = 50
@@ -449,9 +473,10 @@ class TradeEngine:
                             data["moonshot_mode"] = True
                             exit_type = "partial_profit_take"
                             exit_reason = f"Fast moonshot! Selling 50% at +{profit_pct:.1f}% (2x)"
-                            print(f"[TRADER] 🚀🚀 {token[:8]} FAST MOONSHOT: Selling 50% at +{profit_pct:.1f}% (2x)", flush=True)
+                            print(f"[TRADER] 🚀🚀 {token[:8]} FAST 2x: Selling 50% at +{profit_pct:.1f}%", flush=True)
                             print(f"[TRADER] 🌙 Keeping 50% for potential 5-10x run", flush=True)
                     
+                    # TIER 1: SAFETY EXIT (+40%)
                     elif profit_pct >= 40 and not data.get("profit_take_40", False):
                         # TIER 1: Safety exit for moderate performers
                         # Sell 25% at +40% profit

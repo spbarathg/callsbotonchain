@@ -768,6 +768,43 @@ def run() -> None:
                 else:
                     print(f"[DEBUG] Blind buy mode: skipping FOMO/dump filters", flush=True)
                 
+                # === RUGPULL DETECTION: Prevent -$268 in complete wipeouts ===
+                # Analysis: 8 rugpulls (10.4% of trades) = -$268.65 lost
+                # This check runs BEFORE buying to prevent -100% losses
+                from tradingSystem.rugpull_detector import get_rugpull_detector
+                detector = get_rugpull_detector()
+                liquidity_usd = float(stats.get("liquidity_usd", 0))
+                
+                is_rugpull, rugpull_reason = detector.is_likely_rugpull(token_norm, liquidity_usd)
+                if is_rugpull:
+                    signals_filtered += 1
+                    engine._log("entry_rejected_rugpull", token=token_norm, reason=rugpull_reason,
+                               liquidity_usd=liquidity_usd)
+                    print(f"[RUGPULL] 🚨 Rejected {token_norm[:8]}: {rugpull_reason} (liquidity=${liquidity_usd:.0f})", flush=True)
+                    continue
+                else:
+                    print(f"[RUGPULL] ✅ Passed checks for {token_norm[:8]} ({rugpull_reason})", flush=True)
+                
+                # === MOMENTUM VALIDATION: Increase moonshot rate 1.3% → 5-8% ===
+                # Analysis: Good wins held 45min (entered early), losses held 11min (bought top)
+                # Only enter if momentum is building UP
+                from tradingSystem.momentum_validator import get_momentum_validator
+                momentum_val = get_momentum_validator()
+                signal_timestamp = float(stats.get("timestamp") or stats.get("ts") or time.time())
+                signal_price = float(stats.get("price", 0))
+                
+                should_enter, momentum_reason = momentum_val.should_enter(
+                    token_norm, signal_price, signal_timestamp, current_price, stats
+                )
+                
+                if not should_enter:
+                    signals_filtered += 1
+                    engine._log("entry_rejected_momentum", token=token_norm, reason=momentum_reason)
+                    print(f"[MOMENTUM] ⚠️ Rejected {token_norm[:8]}: {momentum_reason}", flush=True)
+                    continue
+                else:
+                    print(f"[MOMENTUM] ✅ Strong momentum for {token_norm[:8]} ({momentum_reason})", flush=True)
+                
                 # Execute trade
                 print(f"[DEBUG] Logging trade decision for {token_norm[:8]}...", flush=True)
                 engine._log("trade_decision", token=token_norm, score=signal_score,
