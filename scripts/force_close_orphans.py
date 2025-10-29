@@ -22,7 +22,7 @@ def main():
     
     for pid, token in positions:
         cur.execute(
-            "UPDATE positions SET status=?, close_at=datetime('now') WHERE id=?",
+            "UPDATE positions SET status=? WHERE id=?",
             ("closed", pid)
         )
         print(f"  ✅ Closed position #{pid} - {token[:12]}...")
