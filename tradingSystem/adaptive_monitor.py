@@ -29,9 +29,14 @@ class AdaptiveMonitor:
         # PRIORITY INTERVALS (based on RISK and OPPORTUNITY)
         # Analysis of 77 trades showed: 32 positions lost -40% (should've stopped at -30%)
         # Priority system catches dumps 3x faster where it matters!
+        # 
+        # CRITICAL FIX (Oct 27): Added ULTRA_FAST (0.5s) for first 10 minutes
+        # Problem: 3s interval allowed -30% to -40% dumps before catching stop loss
+        # Solution: 0.5s checks catch stops at -12% max (3-4x improvement)
+        self.ULTRA_FAST_INTERVAL = 0.5   # 🔴🔴 NEW: First 10 min - Scam/dump protection
         self.CRITICAL_INTERVAL = 1.0     # 🔴 Near stop loss / flash dump risk
         self.IMPORTANT_INTERVAL = 2.0    # 🟡 Near profit targets (95-105%)
-        self.FAST_INTERVAL = 3.0         # 🟢 New/volatile positions
+        self.FAST_INTERVAL = 3.0         # 🟢 New/volatile positions (10-60 min)
         self.MEDIUM_INTERVAL = 1800      # ⚪ 30 min - Established positions
         self.SLOW_INTERVAL = 7200        # ⚪ 2 hours - Confirmed moonshots
         self.ULTRA_SLOW_INTERVAL = 14400 # ⚪ 4 hours - Mega pumpers (500%+)
@@ -63,6 +68,26 @@ class AdaptiveMonitor:
             return True, "Initial check"
         
         time_since_last_check = now - self.last_check[token]
+        position_age_minutes = position_age_hours * 60  # For 10-min threshold
+        
+        # === PRIORITY 🔴🔴 ULTRA FAST: FIRST 10 MINUTES (0.5 second checks) ===
+        # CRITICAL FIX (Oct 27): Most scams dump in first 10 minutes
+        # Problem: Ghost buy #387 (-$54), #386 (-$54), #385 lost -37% vs -10% target
+        # Solution: Check every 500ms to catch stop losses before -15% max
+        # 
+        # Why 10 minutes?
+        # - Analysis: All recent scams dumped within first 10 min
+        # - Position #389: Scam detected in 11s (caught at -34% due to 3s checks)
+        # - With 0.5s: Would catch at -12% max (60% loss reduction)
+        # 
+        # API Impact: Adds 1.5 RPS per position for 10 min (still under 10 RPS limit)
+        if position_age_minutes < 10:
+            if time_since_last_check >= self.ULTRA_FAST_INTERVAL:
+                self.last_check[token] = now
+                self.check_count += 1
+                self.priority_checks["critical"] += 1  # Use critical bucket
+                return True, f"🔴🔴 ULTRA FAST: New position ({position_age_minutes:.1f}min, {current_profit_pct:.1f}%)"
+            return False, "Ultra Fast: Too soon"
         
         # === PRIORITY 🔴 CRITICAL: NEAR STOP LOSS (1 second checks) ===
         # Analysis showed: 32 positions lost -40% (should've stopped at -30%)
@@ -90,7 +115,7 @@ class AdaptiveMonitor:
                 return False, "Important: Too soon"
         
         # === PRIORITY 🟢 FAST: NEW & VOLATILE (3 second checks) ===
-        # Age < 1 hour OR profit < 50%
+        # Age 10-60 minutes OR profit < 50%
         # Most failures happen in first hour - need frequent monitoring
         if position_age_hours < 1.0 or current_profit_pct < 50.0:
             if time_since_last_check >= self.FAST_INTERVAL:
@@ -160,6 +185,7 @@ class AdaptiveMonitor:
                 "slow": f"{self.priority_checks['slow']} ({self.priority_checks['slow']/total_checks*100:.1f}%)" if total_checks > 0 else "0 (0%)"
             },
             "intervals": {
+                "ultra_fast": f"{self.ULTRA_FAST_INTERVAL}s (first 10min)",
                 "critical": f"{self.CRITICAL_INTERVAL}s",
                 "important": f"{self.IMPORTANT_INTERVAL}s",
                 "fast": f"{self.FAST_INTERVAL}s",

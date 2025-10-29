@@ -27,6 +27,8 @@ from .db import get_open_position_id_by_token
 from .config_optimized import MAX_CONCURRENT, EXIT_CHECK_INTERVAL_SEC
 from .portfolio_manager import get_portfolio_manager, should_use_portfolio_manager
 from .price_cache import get_price_cache
+from .watch_list_manager import get_watch_list_manager
+from .watch_list_monitor import get_watch_list_monitor
 
 
 def _get_last_price_usd(token: str, use_cache: bool = True) -> float:
@@ -370,6 +372,19 @@ def _exit_loop(engine: TradeEngine, stop_event: threading.Event) -> None:
                             if iteration % 300 == 0 or "Tier" in reason:
                                 print(f"[EXIT_LOOP] ✓ Checking {token[:8]}... ${price:.8f} ({reason})", flush=True)
                             engine.check_exits(token, price)
+                            
+                            # PYRAMIDING: Check if we should add to this winning position
+                            from .config_optimized import PYRAMIDING_ENABLED
+                            if PYRAMIDING_ENABLED and current_profit_pct > 30:
+                                # Only check pyramiding for profitable positions
+                                # Fetch token stats for momentum validation
+                                try:
+                                    stats = _fetch_real_stats(token)
+                                    if stats:
+                                        engine.add_to_position(token, price, stats)
+                                except Exception as pyramid_error:
+                                    # Don't crash the exit loop on pyramid failures
+                                    pass
                         else:
                             # Position doesn't need checking yet (saves API limits!)
                             if iteration % 600 == 0:  # Log every 10 minutes for skipped positions
@@ -434,6 +449,19 @@ def run() -> None:
     engine = TradeEngine()
     mode = "dry_run" if engine.broker._dry else "LIVE"
     
+    # Initialize Watch & Strike system
+    print("="*60)
+    print("🎯 INITIALIZING WATCH & STRIKE SYSTEM")
+    print("="*60)
+    watch_manager = get_watch_list_manager()
+    watch_monitor = get_watch_list_monitor(engine)
+    watch_monitor.start()
+    print("✅ Watch List Manager: ACTIVE")
+    print("✅ Background Price Monitor: RUNNING")
+    print("   Strategy: Track ALL signals, enter only best movers")
+    print("   API: Jupiter (reliable), Rate: <1 RPS average")
+    print("="*60)
+    
     # Verify Jupiter API connectivity before starting trading (non-blocking with backoff)
     print("="*60)
     print("🔍 JUPITER API HEALTH CHECK")
@@ -490,6 +518,84 @@ def run() -> None:
     try:
         for ev in signal_source:
             try:
+                # === WATCH LIST RECOMMENDATION PROCESSING ===
+                # Check for tokens that are ready to enter (showing real movement)
+                entries, reentries = watch_monitor.get_pending_recommendations()
+                
+                for entry_rec in entries:
+                    try:
+                        entry_token = entry_rec['token']
+                        entry_price = entry_rec['current_price']
+                        entry_reason = entry_rec['reason']
+                        
+                        # Check if we have capital and position slots
+                        if len(engine.live) >= MAX_CONCURRENT:
+                            print(f"[WATCHLIST] ⏸️  Max positions reached, delaying entry for {entry_token[:8]}", flush=True)
+                            continue
+                        
+                        if engine.has_position(entry_token):
+                            print(f"[WATCHLIST] ⏸️  Already have position for {entry_token[:8]}", flush=True)
+                            continue
+                        
+                        # Fetch stats and create plan
+                        print(f"[WATCHLIST] 🎯 ENTRY TRIGGERED: {entry_token[:8]} | {entry_reason}", flush=True)
+                        entry_stats = _fetch_real_stats(entry_token)
+                        if not entry_stats:
+                            print(f"[WATCHLIST] ❌ Failed to fetch stats for {entry_token[:8]}", flush=True)
+                            continue
+                        
+                        entry_score = entry_rec.get('score', 7)
+                        entry_conviction = entry_rec.get('conviction', 'Medium Confidence')
+                        entry_plan = decide_trade(entry_stats, entry_score, entry_conviction)
+                        
+                        if entry_plan:
+                            print(f"[WATCHLIST] 💰 Opening ${entry_plan['usd_size']:.2f} position for {entry_token[:8]}", flush=True)
+                            pid = engine.open_position(entry_token, entry_plan)
+                            if pid:
+                                watch_manager.mark_entered(entry_token, pid, entry_price)
+                                positions_opened += 1
+                                print(f"[WATCHLIST] ✅ Position #{pid} opened for {entry_token[:8]}", flush=True)
+                    except Exception as e:
+                        print(f"[WATCHLIST] ❌ Error processing entry: {e}", flush=True)
+                
+                for reentry_rec in reentries:
+                    try:
+                        reentry_token = reentry_rec['token']
+                        reentry_price = reentry_rec['current_price']
+                        reentry_reason = reentry_rec['reason']
+                        
+                        # Check if we have capital and position slots
+                        if len(engine.live) >= MAX_CONCURRENT:
+                            print(f"[WATCHLIST] ⏸️  Max positions reached, delaying re-entry for {reentry_token[:8]}", flush=True)
+                            continue
+                        
+                        if engine.has_position(reentry_token):
+                            print(f"[WATCHLIST] ⏸️  Already have position for {reentry_token[:8]}", flush=True)
+                            continue
+                        
+                        # Fetch stats and create plan
+                        print(f"[WATCHLIST] 🔄 RE-ENTRY TRIGGERED: {reentry_token[:8]} | {reentry_reason}", flush=True)
+                        reentry_stats = _fetch_real_stats(reentry_token)
+                        if not reentry_stats:
+                            print(f"[WATCHLIST] ❌ Failed to fetch stats for {reentry_token[:8]}", flush=True)
+                            continue
+                        
+                        reentry_score = reentry_rec.get('score', 7)
+                        reentry_conviction = reentry_rec.get('conviction', 'Medium Confidence')
+                        reentry_plan = decide_trade(reentry_stats, reentry_score, reentry_conviction)
+                        
+                        if reentry_plan:
+                            print(f"[WATCHLIST] 💰 RE-OPENING ${reentry_plan['usd_size']:.2f} position for {reentry_token[:8]}", flush=True)
+                            pid = engine.open_position(reentry_token, reentry_plan)
+                            if pid:
+                                watch_manager.mark_reentered(reentry_token, pid, reentry_price)
+                                positions_opened += 1
+                                print(f"[WATCHLIST] ✅ Position #{pid} re-opened for {reentry_token[:8]}", flush=True)
+                    except Exception as e:
+                        print(f"[WATCHLIST] ❌ Error processing re-entry: {e}", flush=True)
+                
+                # === END WATCH LIST PROCESSING ===
+                
                 signals_processed += 1
                 
                 # DEBUG: Log every signal received
@@ -785,25 +891,60 @@ def run() -> None:
                 else:
                     print(f"[RUGPULL] ✅ Passed checks for {token_norm[:8]} ({rugpull_reason})", flush=True)
                 
-                # === MOMENTUM VALIDATION: Increase moonshot rate 1.3% → 5-8% ===
-                # Analysis: Good wins held 45min (entered early), losses held 11min (bought top)
-                # Only enter if momentum is building UP
-                from tradingSystem.momentum_validator import get_momentum_validator
-                momentum_val = get_momentum_validator()
-                signal_timestamp = float(stats.get("timestamp") or stats.get("ts") or time.time())
-                signal_price = float(stats.get("price", 0))
+                # === PRE-ENTRY VALIDATION: Prevent scams & ghost buys ===
+                # CRITICAL FIX (Oct 27): Multi-layer validation BEFORE buying
+                # Problem: Lost $212 in recent trades to preventable issues
+                #   - #380, #379, #378: $104 to rugpulls (brand new tokens)
+                #   - #387, #386: $108 to ghost buys (untradeable tokens)
+                # Solution: Validate token age, recent dumps, and tradeability
+                from tradingSystem.pre_entry_validator import get_pre_entry_validator
+                pre_validator = get_pre_entry_validator()
                 
-                should_enter, momentum_reason = momentum_val.should_enter(
-                    token_norm, signal_price, signal_timestamp, current_price, stats
-                )
-                
-                if not should_enter:
+                is_valid, validation_reason = pre_validator.validate_token(token_norm, stats)
+                if not is_valid:
                     signals_filtered += 1
-                    engine._log("entry_rejected_momentum", token=token_norm, reason=momentum_reason)
-                    print(f"[MOMENTUM] ⚠️ Rejected {token_norm[:8]}: {momentum_reason}", flush=True)
+                    engine._log("entry_rejected_validation", token=token_norm, reason=validation_reason)
+                    print(f"[VALIDATOR] {validation_reason}", flush=True)
+                    print(f"[VALIDATOR] Skipping {token_norm[:8]} to prevent potential scam/ghost buy", flush=True)
                     continue
                 else:
-                    print(f"[MOMENTUM] ✅ Strong momentum for {token_norm[:8]} ({momentum_reason})", flush=True)
+                    print(f"[VALIDATOR] ✅ {validation_reason}", flush=True)
+                
+                # === TIERED ENTRY SYSTEM: Watch & Strike ===
+                # Score 8+: INSTANT ENTRY (trust premium signals)
+                # Score 5-7: ADD TO WATCH LIST (wait for movement confirmation)
+                #
+                # Why: Signals are predictive (CF43Wpjn showed "dead", then +594%)
+                # Solution: High-conviction = instant, others = prove themselves
+                
+                if signal_score >= 8:
+                    # TIER 1: INSTANT ENTRY (Premium Signals)
+                    print(f"[ENTRY] 🚀 HIGH CONVICTION (Score {signal_score}) → INSTANT ENTRY", flush=True)
+                    print(f"[ENTRY] Strategy: Enter immediately with ${plan['usd_size']:.2f}, trust the signal", flush=True)
+                    # Continue to position opening below
+                else:
+                    # TIER 2: WATCH LIST (Medium/Low Conviction)
+                    print(f"[ENTRY] 👁️  MEDIUM CONVICTION (Score {signal_score}) → ADDING TO WATCH LIST", flush=True)
+                    print(f"[ENTRY] Will enter if shows +5% movement at 2%/min velocity", flush=True)
+                    
+                    # Add to watch list
+                    signal_timestamp = float(stats.get("timestamp") or stats.get("ts") or time.time())
+                    signal_price = float(stats.get("price", 0))
+                    conviction_type = stats.get("conviction_type", "Medium Confidence")
+                    
+                    watch_manager.add_signal(
+                        token=token_norm,
+                        signal_time=signal_timestamp,
+                        signal_price=signal_price,
+                        signal_score=signal_score,
+                        conviction=conviction_type
+                    )
+                    
+                    signals_filtered += 1
+                    engine._log("entry_deferred_watchlist", token=token_norm, 
+                               score=signal_score, reason="waiting_for_movement_confirmation")
+                    print(f"[WATCHLIST] ✅ Added {token_norm[:8]} | Will enter if pump confirmed", flush=True)
+                    continue  # Skip immediate entry, let watch list handle it
                 
                 # Execute trade
                 print(f"[DEBUG] Logging trade decision for {token_norm[:8]}...", flush=True)
@@ -824,6 +965,11 @@ def run() -> None:
                         engine._log("position_opened_success", token=token_norm, pid=pid,
                                    total_positions=positions_opened)
                         print(f"[DEBUG] ✅ Position opened successfully: {pid}", flush=True)
+                        
+                        # Mark in watch list (for high-conviction instant entries)
+                        if signal_score >= 8:
+                            watch_manager.mark_entered(token_norm, pid, current_price)
+                            print(f"[WATCHLIST] ✅ Marked {token_norm[:8]} as entered (instant entry)", flush=True)
                     else:
                         engine._log("position_open_failed", token=token_norm)
                         print(f"[DEBUG] ❌ Position open failed (returned None)", flush=True)

@@ -545,12 +545,16 @@ class Broker:
                                 print(f"[BROKER] Expected tokens: {out_amt:.4f} (from Jupiter quote)", flush=True)
                                 
                                 # PERMANENT FIX: Verify actual received tokens with retries
-                                print(f"[BROKER] 🔍 Verifying on-chain balance (up to 3 retries)...", flush=True)
+                                # CRITICAL FIX (Oct 27): Increased retries and delays for ghost buy prevention
+                                # Problem: #387 (-$54), #386 (-$54) ghost buys (tokens never arrived)
+                                # Old: 3 retries at 2s, 4s, 6s (total 12s) - missed 15-30s delivery
+                                # New: 5 retries at 5s, 10s, 15s, 20s, 25s (total 75s) - catches delayed deliveries
+                                print(f"[BROKER] 🔍 Verifying on-chain balance (up to 5 retries, 75s total)...", flush=True)
                                 actual_qty = None
-                                max_retries = 3
+                                max_retries = 5  # Increased from 3
                                 for retry in range(max_retries):
-                                    # Wait longer for each retry (2s, 4s, 6s)
-                                    wait_time = 2 * (retry + 1)
+                                    # Wait longer for each retry (5s, 10s, 15s, 20s, 25s)
+                                    wait_time = 5 * (retry + 1)  # Increased from 2 * (retry + 1)
                                     time.sleep(wait_time)
                                     
                                     try:
@@ -599,12 +603,16 @@ class Broker:
                     
                     # PERMANENT FIX: Verify actual received tokens from blockchain
                     # CRITICAL: Retry balance checks to prevent ghost positions
-                    print(f"[BROKER] 🔍 Verifying on-chain balance (up to 3 retries)...", flush=True)
+                    # CRITICAL FIX (Oct 27): Increased retries and delays for ghost buy prevention
+                    # Problem: #387 (-$54), #386 (-$54) ghost buys (tokens never arrived)
+                    # Old: 3 retries at 2s, 4s, 6s (total 12s) - missed 15-30s delivery
+                    # New: 5 retries at 5s, 10s, 15s, 20s, 25s (total 75s) - catches delayed deliveries
+                    print(f"[BROKER] 🔍 Verifying on-chain balance (up to 5 retries, 75s total)...", flush=True)
                     actual_qty = None
-                    max_retries = 3
+                    max_retries = 5  # Increased from 3
                     for retry in range(max_retries):
-                        # Wait longer for each retry (2s, 4s, 6s)
-                        wait_time = 2 * (retry + 1)
+                        # Wait longer for each retry (5s, 10s, 15s, 20s, 25s)
+                        wait_time = 5 * (retry + 1)  # Increased from 2 * (retry + 1)
                         time.sleep(wait_time)
                         
                         try:

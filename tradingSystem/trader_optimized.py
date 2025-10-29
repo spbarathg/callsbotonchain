@@ -4,11 +4,13 @@ OPTIMIZED TRADER - Proper Risk Management
 - Thread-safe position management
 - Comprehensive error handling
 - Position recovery on restart
+- Trade lifecycle tracing with correlation IDs
 """
 import json
 import os
 import time
 import threading
+import uuid
 from datetime import datetime, date
 from typing import Dict, Optional
 
@@ -25,6 +27,8 @@ from .broker_optimized import Broker
 from .portfolio_manager import get_portfolio_manager, should_use_portfolio_manager
 from .inactivity_monitor import InactivityMonitor
 from .momentum_tracker import MomentumTracker
+from .token_classifier import get_classifier
+from .circuit_breaker import get_circuit_breaker
 
 
 class PositionLock:
@@ -54,6 +58,12 @@ class TradeEngine:
         
         # Momentum intelligence: Scam detection + velocity-based exits
         self.momentum_tracker = MomentumTracker()
+        
+        # Token classifier: Identify behavior patterns (pump/dump, slow grower, sustained)
+        self.classifier = get_classifier()
+        
+        # Circuit breaker: Halt trading under dangerous conditions
+        self.circuit_breaker = get_circuit_breaker()
         
         # Token cooldown: Prevent immediate rebuy after selling (stops buy-sell-rebuy loops)
         self._token_cooldowns: Dict[str, float] = {}  # token -> timestamp when sold
@@ -121,8 +131,20 @@ class TradeEngine:
 
     def open_position(self, token: str, plan: Dict) -> Optional[int]:
         """Open position with comprehensive safety"""
+        # Generate correlation ID for trade lifecycle tracking
+        trade_id = str(uuid.uuid4())[:8]  # Short ID for readability
+        
         try:
-            print(f"[TRADER] open_position called for {token[:8]}...", flush=True)
+            self._log("trade_lifecycle", trade_id=trade_id, stage="signal_received", 
+                     token=token, plan=plan)
+            print(f"[TRADE:{trade_id}] Signal received for {token[:8]}...", flush=True)
+            
+            # Circuit breaker check
+            can_trade, reason = self.circuit_breaker.check_can_trade()
+            if not can_trade:
+                self._log("open_skipped_circuit_breaker", trade_id=trade_id, token=token, reason=reason)
+                print(f"[TRADE:{trade_id}] ❌ Circuit breaker triggered: {reason}", flush=True)
+                return None
             
             # Concurrency limit
             print(f"[TRADER] Checking concurrency: {len(self.live)} / {int(MAX_CONCURRENT)}", flush=True)
@@ -145,14 +167,22 @@ class TradeEngine:
                 trail_pct = float(plan["trail_pct"])
                 strategy = plan.get("strategy", "unknown")
                 
-                print(f"[TRADER] Executing market buy: ${usd:.2f} for {token[:8]}...", flush=True)
+                self._log("trade_lifecycle", trade_id=trade_id, stage="executing_buy", 
+                         token=token, usd=usd)
+                print(f"[TRADE:{trade_id}] Executing market buy: ${usd:.2f}...", flush=True)
+                
                 # Execute buy
                 fill = self.broker.market_buy(token, usd)
-                print(f"[TRADER] market_buy returned: success={fill.success}", flush=True)
                 
                 if not fill.success:
-                    self._log("open_failed_buy", token=token, error=fill.error)
+                    self._log("trade_lifecycle", trade_id=trade_id, stage="buy_failed", 
+                             token=token, error=fill.error)
+                    print(f"[TRADE:{trade_id}] ❌ Buy failed: {fill.error}", flush=True)
                     return None
+                
+                self._log("trade_lifecycle", trade_id=trade_id, stage="buy_success", 
+                         token=token, price=fill.price, qty=fill.qty, tx=fill.tx)
+                print(f"[TRADE:{trade_id}] ✅ Buy successful at ${fill.price:.8f}", flush=True)
                 
                 # CRITICAL FIX: Ensure position is ALWAYS recorded after successful buy
                 # If DB write fails, we log it prominently but the transaction already happened
@@ -179,10 +209,11 @@ class TradeEngine:
                     # This prevents the position from being added to self.live
                     return None
                 
-                # Add to live with ENTRY PRICE
+                # Add to live with ENTRY PRICE and trade_id
                 entry_time = time.time()
                 self.live[token] = {
                     "pid": pid,
+                    "trade_id": trade_id,  # Correlation ID for lifecycle tracking
                     "strategy": strategy,
                     "entry_price": fill.price,  # CRITICAL: Store entry price
                     "peak_price": fill.price,
@@ -193,13 +224,10 @@ class TradeEngine:
                 
                 # Initialize momentum tracking for intelligent exits
                 self.momentum_tracker.init_position(token, fill.price, entry_time)
-                print(f"[TRADER] 🧠 Momentum tracking initialized for {token[:8]}", flush=True)
                 
-                print(f"[TRADER] ✅ Position fully tracked and ready for monitoring", flush=True)
-                self._log("open_position", 
-                         token=token, strategy=strategy, pid=pid, 
-                         price=fill.price, qty=fill.qty, usd=usd, 
-                         trail_pct=trail_pct, tx=fill.tx)
+                self._log("trade_lifecycle", trade_id=trade_id, stage="position_opened", 
+                         token=token, pid=pid, strategy=strategy, entry_price=fill.price)
+                print(f"[TRADE:{trade_id}] ✅ Position #{pid} opened and tracked", flush=True)
                 return pid
                 
         except Exception as e:
@@ -252,6 +280,104 @@ class TradeEngine:
             return None
         return str(data.get("strategy"))
 
+    def add_to_position(self, token: str, current_price: float, stats: Dict) -> bool:
+        """
+        Pyramiding: Add to winning positions that show exceptional momentum.
+        
+        Strategy: Add 10-20% more capital to positions showing strong early gains.
+        This compounds winners and maximizes profit from moonshots.
+        
+        Args:
+            token: Token address
+            current_price: Current token price
+            stats: Current token stats (for momentum validation)
+        
+        Returns:
+            True if successfully added to position
+        """
+        from .strategy_optimized import should_scale_position
+        
+        # Check if position exists
+        if token not in self.live:
+            return False
+        
+        data = self.live[token]
+        entry_price = data.get("entry_price", 0)
+        open_at = data.get("open_at", 0)
+        
+        if entry_price <= 0 or open_at <= 0:
+            return False
+        
+        # Calculate current gain and elapsed time
+        current_gain_pct = ((current_price - entry_price) / entry_price) * 100
+        elapsed_mins = (time.time() - open_at) / 60
+        
+        # Check if already pyramided (only allow 1-2 adds)
+        pyramid_count = data.get("pyramid_count", 0)
+        if pyramid_count >= 2:
+            return False  # Max 2 pyramids per position
+        
+        # Use strategy logic to decide
+        if not should_scale_position(stats, current_gain_pct, elapsed_mins):
+            return False
+        
+        # Calculate additional size (10-20% of original)
+        original_qty = data.get("original_qty", data.get("qty", 0))
+        if original_qty <= 0:
+            return False
+        
+        # Add 15% more capital (between 10-20%)
+        add_pct = 0.15
+        additional_usd = (entry_price * original_qty * add_pct)
+        
+        # Limit additional size to prevent over-concentration
+        if additional_usd > 8.0:  # Max $8 per pyramid
+            additional_usd = 8.0
+        
+        self._log("pyramid_attempt", token=token, current_gain_pct=current_gain_pct, 
+                  elapsed_mins=elapsed_mins, additional_usd=additional_usd)
+        
+        try:
+            # Execute buy
+            fill = self.broker.market_buy(
+                token_mint=token,
+                usd_amount=additional_usd,
+                max_slippage_bps=500  # 5% slippage OK for pyramiding
+            )
+            
+            if not fill.success or fill.qty <= 0:
+                self._log("pyramid_failed", token=token, reason="buy_failed")
+                return False
+            
+            # Update position with additional quantity
+            new_qty = data["qty"] + fill.qty
+            avg_entry = ((data["qty"] * entry_price) + (fill.qty * fill.price)) / new_qty
+            
+            # Update in-memory
+            data["qty"] = new_qty
+            data["entry_price"] = avg_entry  # Average entry price
+            data["pyramid_count"] = pyramid_count + 1
+            if "original_qty" not in data:
+                data["original_qty"] = original_qty
+            
+            # Update DB
+            from .db import update_position_qty, add_fill
+            pid = data.get("id")
+            if pid:
+                update_position_qty(pid, new_qty, avg_entry)
+                add_fill(pid, "buy", fill.price, fill.qty, fill.tx)
+            
+            self._log("pyramid_success", token=token, additional_qty=fill.qty, 
+                     new_total_qty=new_qty, avg_entry=avg_entry, pyramid_num=pyramid_count + 1)
+            
+            print(f"[TRADER] 📈 {token[:8]} PYRAMID #{pyramid_count + 1}: Added ${additional_usd:.2f} at +{current_gain_pct:.1f}% | New avg entry: ${avg_entry:.8f}", flush=True)
+            
+            return True
+            
+        except Exception as e:
+            self._log("pyramid_exception", token=token, error=str(e))
+            return False
+
     def check_exits(self, token: str, price: float) -> bool:
         """
         Check and execute exits with PROPER stop loss logic.
@@ -260,6 +386,10 @@ class TradeEngine:
         This was the bug in the original system.
         """
         try:
+            # Track price for pattern classification
+            if price > 0:
+                self.classifier.track_price(token, price, volume=0)
+            
             if price <= 0:
                 # EMERGENCY FIX: Don't silently skip - try fallback and force exit if repeated failures
                 data = self.live.get(token)
@@ -409,27 +539,76 @@ class TradeEngine:
                             hold_hours = (time.time() - open_at) / 3600
                             exit_reason = f"Inactivity detected: {inactivity_reason} (held {hold_hours:.1f}h)"
                         else:
-                            # Also check hard time limit as fallback (24 hours)
+                            # CRITICAL FIX: Don't apply time limit to moonshots (>200% profit)
+                            # Problem: 24h limit kills positions during multi-day 50x-500x runs
+                            # Solution: Only apply timeout to flat/losing positions
                             hold_time = time.time() - open_at
                             if hold_time >= MAX_HOLD_TIME_SECONDS:
-                                exit_type = "timeout"
-                                hold_hours = hold_time / 3600
-                                exit_reason = f"Max hold time: {hold_hours:.1f}h (profit: +{profit_pct:.1f}%) - {inactivity_reason}"
+                                # Check if this is a moonshot (ignore time limit)
+                                if profit_pct > 200:
+                                    # MOONSHOT MODE: Ignore time limit, let trailing stop manage exit
+                                    if data.get("last_moonshot_log", 0) < time.time() - 3600:  # Log hourly
+                                        print(f"[TRADER] 🌙 {token[:8]} MOONSHOT MODE: Ignoring {hold_time/3600:.1f}h hold (profit: +{profit_pct:.1f}%)", flush=True)
+                                        data["last_moonshot_log"] = time.time()
+                                else:
+                                    # Flat/small-gain position → apply timeout
+                                    exit_type = "timeout"
+                                    hold_hours = hold_time / 3600
+                                    exit_reason = f"Max hold time: {hold_hours:.1f}h (profit: +{profit_pct:.1f}%) - {inactivity_reason}"
                 
-                # OPTIMIZED TIERED EXIT STRATEGY - Capture gains from 40% to 10x+
+                # OPTIMIZED TIERED EXIT STRATEGY - Capture gains from 40% to 1000x+
                 # Based on analysis: Your bot found an 11x that peaked at 18x
-                # Strategy: Scale out as it moons, but keep riding for mega gains
+                # Strategy: Scale out as it moons, but keep riding for MEGA gains
                 # 
                 # TIER 1 (+40%): Sell 25% - Safety exit for moderate winners
                 # TIER 2 (+100%): Sell 25% more (50% total) - 2x moonshot confirmed
                 # TIER 3 (+300%): Sell 15% more (65% total) - 4x mega moonshot
                 # TIER 4 (+900%): Sell 20% more (85% total) - 10x ultra moonshot
-                # REMAINING (15%): Trail with wide stop - Ride to 20x+
+                # TIER 5 (+4900%): Sell 7% more (92% total) - 50x MEGA moonshot
+                # TIER 6 (+9900%): Sell 5% more (97% total) - 100x ULTRA MEGA
+                # TIER 7 (+79900%): Sell 2% more (99% total) - 800x LEGENDARY
+                # REMAINING (1%): NEVER SELL - Ride to 1000x+ with 80% trail
                 # 
-                # Impact: Would've auto-sold your 11x at 2x, 4x, 10x checkpoints
+                # Impact: Won't leave 800-1000x gains on the table!
                 if not exit_type and profit_pct >= 40:
+                    # TIER 7: LEGENDARY MOONSHOT (+79900% = 800x)
+                    if profit_pct >= 79900 and not data.get("profit_take_79900", False):
+                        # At 800x!! Sell 2% more
+                        # If all tiers hit: 97% sold, remaining 3%
+                        # Sell 2% of original = 66.67% of remaining 3%
+                        data["sell_percentage"] = 66.67
+                        data["profit_take_79900"] = True
+                        exit_type = "partial_profit_take"
+                        exit_reason = f"🏆🏆🏆 LEGENDARY: Selling 2% at +{profit_pct:.1f}% (800x), 99% total sold"
+                        print(f"[TRADER] 🏆🏆🏆 {token[:8]} TIER 7 (800x): Selling 2% more at +{profit_pct:.1f}%", flush=True)
+                        print(f"[TRADER] 💎💎💎💎 Total sold: 99% | Keeping 1% for potential 1000x+ (NEVER SELL)", flush=True)
+                    
+                    # TIER 6: ULTRA MEGA MOONSHOT (+9900% = 100x)
+                    elif profit_pct >= 9900 and not data.get("profit_take_9900", False):
+                        # At 100x!! Sell 5% more
+                        # If all tiers hit: 92% sold, remaining 8%
+                        # Sell 5% of original = 62.5% of remaining 8%
+                        data["sell_percentage"] = 62.5
+                        data["profit_take_9900"] = True
+                        exit_type = "partial_profit_take"
+                        exit_reason = f"🌟🌟🌟🌟 ULTRA MEGA: Selling 5% at +{profit_pct:.1f}% (100x), 97% total sold"
+                        print(f"[TRADER] 🌟🌟🌟🌟 {token[:8]} TIER 6 (100x): Selling 5% more at +{profit_pct:.1f}%", flush=True)
+                        print(f"[TRADER] 💎💎💎💎 Total sold: 97% | Keeping 3% for potential 800x-1000x run", flush=True)
+                    
+                    # TIER 5: MEGA MOONSHOT (+4900% = 50x)
+                    elif profit_pct >= 4900 and not data.get("profit_take_4900", False):
+                        # At 50x! Sell 7% more
+                        # If all tiers hit: 85% sold, remaining 15%
+                        # Sell 7% of original = 46.67% of remaining 15%
+                        data["sell_percentage"] = 46.67
+                        data["profit_take_4900"] = True
+                        exit_type = "partial_profit_take"
+                        exit_reason = f"🚀🚀🚀🚀 MEGA MOONSHOT: Selling 7% at +{profit_pct:.1f}% (50x), 92% total sold"
+                        print(f"[TRADER] 🚀🚀🚀🚀 {token[:8]} TIER 5 (50x): Selling 7% more at +{profit_pct:.1f}%", flush=True)
+                        print(f"[TRADER] 💎💎💎 Total sold: 92% | Keeping 8% for potential 100x+ run", flush=True)
+                    
                     # TIER 4: ULTRA MOONSHOT (+900% = 10x)
-                    if profit_pct >= 900 and not data.get("profit_take_900", False):
+                    elif profit_pct >= 900 and not data.get("profit_take_900", False):
                         # At 10x! Sell another 20% (of remaining)
                         # If all previous tiers hit: 65% already sold, remaining 35%
                         # Sell 20% of original = 57% of remaining 35%
@@ -647,11 +826,19 @@ class TradeEngine:
                 if token in self.live:
                     self.live[token]["sell_failures"] = 0
                 
+                # Get trade_id for lifecycle tracking
+                trade_id = data.get("trade_id", "unknown")
+                self._log("trade_lifecycle", trade_id=trade_id, stage="exit_executed", 
+                         token=token, exit_type=exit_type, price=fill.price, qty=fill.qty)
+                
                 # Calculate PnL
                 entry_usd = entry_price * qty_open if entry_price > 0 else 0
                 exit_usd = fill.usd
                 pnl_usd = exit_usd - entry_usd
                 pnl_pct = (pnl_usd / entry_usd * 100) if entry_usd > 0 else 0
+                
+                # Record trade in circuit breaker
+                self.circuit_breaker.record_trade(pnl_usd, slippage_pct=abs(fill.effective_slippage_bps / 100.0))
                 
                 # Update database
                 add_fill(int(pid), "sell", float(fill.price), float(fill.qty), float(fill.usd))
@@ -675,18 +862,34 @@ class TradeEngine:
                     self.live.pop(token, None)
                     self.inactivity_monitor.reset_position(token)
                     self.momentum_tracker.cleanup(token)
+                    
+                    # Mark in watch list (if stop loss, keep watching for re-entry)
+                    if exit_type == "stop":
+                        try:
+                            from .watch_list_manager import get_watch_list_manager
+                            watch_manager = get_watch_list_manager()
+                            watch_manager.mark_exited(token, fill.price, "stop_loss")
+                            print(f"[WATCHLIST] 👁️  {token[:8]} exited at stop, still watching for recovery...", flush=True)
+                        except Exception as e:
+                            print(f"[WATCHLIST] ⚠️  Failed to mark exit in watch list: {e}", flush=True)
                 
                     # Add cooldown to prevent immediate rebuy (only for full exits)
                     self._add_cooldown(token)
                     self._log("cooldown_added", token=token, cooldown_seconds=self._cooldown_seconds,
                              reason=f"sold_via_{exit_type}")
                     
+                    # Final lifecycle log
+                    self._log("trade_lifecycle", trade_id=trade_id, stage="position_closed", 
+                             token=token, pid=pid, exit_type=exit_type, 
+                             pnl_usd=pnl_usd, pnl_pct=pnl_pct)
+                    print(f"[TRADE:{trade_id}] 🏁 Position closed | PnL: ${pnl_usd:+.2f} ({pnl_pct:+.1f}%)", flush=True)
+                    
                     self._log(f"exit_{exit_type}", 
                              token=token, pid=pid, strategy=strategy,
                              entry_price=entry_price, exit_price=price, peak=peak,
                              stop_pct=STOP_LOSS_PCT, trail_pct=trail, 
                              pnl_usd=pnl_usd, pnl_pct=pnl_pct,
-                             reason=exit_reason, tx=fill.tx)
+                             reason=exit_reason, tx=fill.tx, trade_id=trade_id)
                     
                     return True
                 

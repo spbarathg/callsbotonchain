@@ -18,6 +18,40 @@ apply_dns_patch()
 
 logger = logging.getLogger(__name__)
 
+# ==== GLOBAL RATE LIMIT ENFORCEMENT ====
+# Ensures ALL Jupiter API calls respect the 10 RPS limit, even across multiple client instances
+_global_request_times = []
+_global_request_lock = threading.Lock()
+
+def _enforce_global_rate_limit(rps_limit: int = 10):
+    """
+    Strict global rate limiter - blocks until safe to make request.
+    Tracks actual request times across all instances.
+    """
+    with _global_request_lock:
+        now = time.time()
+        
+        # Remove requests older than 1 second
+        cutoff = now - 1.0
+        global _global_request_times
+        _global_request_times = [t for t in _global_request_times if t > cutoff]
+        
+        # If at limit, calculate wait time
+        if len(_global_request_times) >= rps_limit:
+            # Wait until the oldest request is 1 second old
+            oldest = _global_request_times[0]
+            wait_time = 1.0 - (now - oldest)
+            if wait_time > 0:
+                logger.debug(f"Global rate limit: waiting {wait_time:.3f}s")
+                time.sleep(wait_time)
+                # Clean up again after sleep
+                now = time.time()
+                cutoff = now - 1.0
+                _global_request_times = [t for t in _global_request_times if t > cutoff]
+        
+        # Record this request
+        _global_request_times.append(time.time())
+
 class JupiterClient:
     """
     Dedicated Jupiter API client with:
@@ -159,8 +193,12 @@ class JupiterClient:
             return {"status_code": 429, "json": None, "error": f"Rate limited; cooling down {delay:.1f}s"}
         
         for attempt in range(retries):
-            # Acquire rate-limit token (token bucket) - this provides rate limiting
+            # DOUBLE PROTECTION: Token bucket + global tracker
+            # 1. Token bucket (per-instance smooth rate limiting)
             self._acquire_rate_token()
+            # 2. Global tracker (absolute guarantee across all instances)
+            rps_limit = 10 if self.is_pro else 1
+            _enforce_global_rate_limit(rps_limit)
             try:
                 # NO MORE REQUEST LOCK - allows concurrent requests (better throughput!)
                 # Token bucket prevents overloading Jupiter API

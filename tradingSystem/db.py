@@ -135,16 +135,21 @@ def update_peak_and_trail(position_id: int, price: float, entry_price: float = 0
 	from tradingSystem.config_optimized import (
 		ADAPTIVE_TRAILING_ENABLED,
 		PROFIT_TIER_1, PROFIT_TIER_2, PROFIT_TIER_3, PROFIT_TIER_4, PROFIT_TIER_5,
-		TRAIL_TIER_0, TRAIL_TIER_1, TRAIL_TIER_2, TRAIL_TIER_3, TRAIL_TIER_4, TRAIL_TIER_5
+		TRAIL_TIER_0, TRAIL_TIER_1, TRAIL_TIER_2, TRAIL_TIER_3, TRAIL_TIER_4, TRAIL_TIER_5,
+		TRAIL_TIER_6, TRAIL_TIER_7, TRAIL_TIER_8
 	)
 	
 	if ADAPTIVE_TRAILING_ENABLED and entry > 0 and peak > 0:
 		# Calculate current profit %
 		profit_pct = ((peak - entry) / entry) * 100
 		
-		# Select trail based on profit tier (EXTENDED FOR 1000%+ MOVERS!)
-		# OCT 25 2025 V3: ULTRA AGGRESSIVE (35-50%) - survive dips, catch rebounds
-		# Memecoins dip 30% then rip 10x. DON'T exit on healthy consolidations!
+		# Select trail based on profit tier (EXTENDED FOR 800-1000x MEGA MOVERS!)
+		# OCT 27 2025: MEGA MOONSHOT MODE (60-80% trails) - capture 800-1000x gains
+		# User requirement: "Don't leave 800-1000x gains on the table"
+		# Strategy: Ultra-wide trails for 100x+ to survive massive volatility
+		# 
+		# Example: Token at 100x (+9900%) dips to 60x (-40% from peak = within 60% trail)
+		# → DON'T exit! It can rebound to 800x. Only exit if drops below 40x (-60% from 100x peak)
 		if profit_pct < PROFIT_TIER_1:  # 0-50% profit
 			trail = TRAIL_TIER_0  # 35% trail (survive shakeouts!)
 		elif profit_pct < PROFIT_TIER_2:  # 50-100% profit
@@ -155,8 +160,14 @@ def update_peak_and_trail(position_id: int, price: float, entry_price: float = 0
 			trail = TRAIL_TIER_3  # 45% trail (massive consolidation room)
 		elif profit_pct < PROFIT_TIER_5:  # 500-1000% profit
 			trail = TRAIL_TIER_4  # 48% trail (moonshot volatility)
-		else:  # 1000%+ profit (10x+ moves!)
-			trail = TRAIL_TIER_5  # 50% trail (10x needs HUGE room!)
+		elif profit_pct < 5000:  # 1000-5000% profit (10x-50x)
+			trail = TRAIL_TIER_5  # 50% trail (10x-50x needs HUGE room!)
+		elif profit_pct < 10000:  # 5000-10000% profit (50x-100x)
+			trail = TRAIL_TIER_6  # 60% trail (50x-100x ULTRA volatility)
+		elif profit_pct < 80000:  # 10000-80000% profit (100x-800x)
+			trail = TRAIL_TIER_7  # 70% trail (100x-800x LEGENDARY moves)
+		else:  # 80000%+ profit (800x+ MEGA MOONSHOT!)
+			trail = TRAIL_TIER_8  # 80% trail (800x+ ride FOREVER, NEVER SELL!)
 	else:
 		# Fall back to static trail from position creation
 		trail = trail_static or 10.0
@@ -164,17 +175,24 @@ def update_peak_and_trail(position_id: int, price: float, entry_price: float = 0
 	return peak or 0.0, trail or 10.0
 
 
-def update_position_qty(position_id: int, new_qty: float) -> None:
-	"""Update position quantity after partial sell"""
+def update_position_qty(position_id: int, new_qty: float, avg_entry_price: float = None) -> None:
+	"""Update position quantity after partial sell or pyramiding"""
 	max_retries = 3
 	for attempt in range(max_retries):
 		try:
 			conn = _conn()
 			c = conn.cursor()
-			c.execute("UPDATE positions SET qty=? WHERE id=?", (new_qty, position_id))
+			if avg_entry_price is not None:
+				# Update both qty and entry price (for pyramiding)
+				c.execute("UPDATE positions SET qty=?, entry_price=? WHERE id=?", 
+						 (new_qty, avg_entry_price, position_id))
+				print(f"[DB] ✅ Updated position #{position_id} qty to {new_qty:.4f}, avg entry to {avg_entry_price:.8f}", flush=True)
+			else:
+				# Only update qty (for partial sells)
+				c.execute("UPDATE positions SET qty=? WHERE id=?", (new_qty, position_id))
+				print(f"[DB] ✅ Updated position #{position_id} qty to {new_qty:.4f}", flush=True)
 			conn.commit()
 			conn.close()
-			print(f"[DB] ✅ Updated position #{position_id} qty to {new_qty:.4f}", flush=True)
 			return
 		except Exception as e:
 			print(f"[DB] ⚠️ Attempt {attempt+1}/{max_retries} failed to update qty: {e}", flush=True)

@@ -226,3 +226,4 @@ def get_rugpull_detector() -> RugpullDetector:
         _detector = RugpullDetector()
     return _detector
 
+

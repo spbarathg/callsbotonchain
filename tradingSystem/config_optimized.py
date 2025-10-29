@@ -97,10 +97,19 @@ MAX_POSITION_SIZE_USD = BANKROLL_USD * (MAX_POSITION_SIZE_PCT / 100.0)
 
 # Stop losses (from ENTRY price, not peak) - MAXIMUM PATIENCE STRATEGY
 # OCT 25 2025 V4: WIDENED to -35% - memecoins dip before they rip!
-# Key insight: Even winners can dip -20-30% from ENTRY before going 10x
-# Example: Buy at $1 → Dips to $0.70 (-30%) → Rips to $10 (+900%)
-# Strategy: Give EVERY token maximum room to develop (35% from entry)
-STOP_LOSS_PCT = _get_float("TS_STOP_LOSS_PCT", 30.0)  # -30% from entry - tighter risk control
+# === AGGRESSIVE ENTRY, DEFENSIVE EXIT STRATEGY ===
+# New philosophy: Enter on high-conviction signals, exit FAST on weakness
+# 
+# TIERED STOP LOSS SYSTEM:
+# - First -5%: Start monitoring closely (1s intervals)
+# - At -8%: Warning level (price check every 0.5s)
+# - At -10%: HARD STOP (immediate exit, don't wait for -30%)
+#
+# Why tight stops: 
+# - We enter MORE positions (trust signals 7+)
+# - Can't afford -30% on every loser
+# - Exit fast, re-enter if wrong
+STOP_LOSS_PCT = _get_float("TS_STOP_LOSS_PCT", 10.0)  # -10% hard stop (AGGRESSIVE EXIT)
 
 # EMERGENCY HARD STOP - Absolute maximum loss before force exit
 # If normal stop fails (price feed issues), this is the last line of defense
@@ -139,7 +148,13 @@ TRAIL_TIER_1 = _get_float("TS_TRAIL_TIER_1", 38.0)  # 50-100% profit: 38% trail 
 TRAIL_TIER_2 = _get_float("TS_TRAIL_TIER_2", 42.0)  # 100-200% profit: 42% trail - dip then rip pattern
 TRAIL_TIER_3 = _get_float("TS_TRAIL_TIER_3", 45.0)  # 200-500% profit: 45% trail - massive consolidation room
 TRAIL_TIER_4 = _get_float("TS_TRAIL_TIER_4", 48.0)  # 500-1000% profit: 48% trail - moonshot volatility
-TRAIL_TIER_5 = _get_float("TS_TRAIL_TIER_5", 50.0)  # 1000%+ profit: 50% trail - 10x moves need HUGE room!
+TRAIL_TIER_5 = _get_float("TS_TRAIL_TIER_5", 50.0)  # 1000-5000% profit: 50% trail - 10x-50x moves need HUGE room!
+# CRITICAL FIX (Oct 27): Added mega moonshot tiers for 100x-1000x potential
+# User requirement: "Don't leave 800-1000x gains on the table"
+# Strategy: Ultra-wide trails (60-80%) for 100x+ positions to survive volatility
+TRAIL_TIER_6 = _get_float("TS_TRAIL_TIER_6", 60.0)  # 5000-10000% profit: 60% trail - 50x-100x ULTRA volatility
+TRAIL_TIER_7 = _get_float("TS_TRAIL_TIER_7", 70.0)  # 10000-80000% profit: 70% trail - 100x-800x LEGENDARY moves
+TRAIL_TIER_8 = _get_float("TS_TRAIL_TIER_8", 80.0)  # 80000%+ profit: 80% trail - 800x+ NEVER SELL (ride forever)
 
 # LEGACY TRAILS (for non-adaptive mode - NOT RECOMMENDED)
 TRAIL_AGGRESSIVE = _get_float("TS_TRAIL_AGGRESSIVE", 5.0)  # Deprecated
@@ -195,6 +210,19 @@ LOG_TEXT_PATH = os.getenv("TS_LOG_TEXT", "data/logs/trading.log")
 
 # ==================== MODE ====================
 DRY_RUN = _get_bool("TS_DRY_RUN", False)  # Default to LIVE for production
+
+# ==================== PYRAMIDING (Add to Winners) ====================
+PYRAMIDING_ENABLED = _get_bool("TS_PYRAMIDING_ENABLED", True)  # Default enabled
+PYRAMIDING_MAX_ADDS = int(os.getenv("TS_PYRAMIDING_MAX_ADDS", "2"))  # Max 2 adds per position
+PYRAMIDING_MIN_PROFIT_PCT = float(os.getenv("TS_PYRAMIDING_MIN_PROFIT_PCT", "40.0"))  # Add at 40%+ profit
+
+# ==================== CIRCUIT BREAKER & LOSS LIMITS ====================
+CIRCUIT_BREAKER_ENABLED = _get_bool("TS_CIRCUIT_BREAKER_ENABLED", True)  # Default enabled
+DAILY_LOSS_LIMIT_USD = float(os.getenv("TS_DAILY_LOSS_LIMIT_USD", "100.0"))  # $100 per day
+WEEKLY_LOSS_LIMIT_USD = float(os.getenv("TS_WEEKLY_LOSS_LIMIT_USD", "300.0"))  # $300 per week
+CONSECUTIVE_LOSS_LIMIT = int(os.getenv("TS_CONSECUTIVE_LOSS_LIMIT", "3"))  # Halt after 3 losses
+EXCESSIVE_SLIPPAGE_THRESHOLD = float(os.getenv("TS_EXCESSIVE_SLIPPAGE_THRESHOLD", "10.0"))  # 10% slippage
+SLIPPAGE_EVENT_LIMIT = int(os.getenv("TS_SLIPPAGE_EVENT_LIMIT", "5"))  # 5 events in 1 hour
 
 # ==================== PORTFOLIO REBALANCING ====================
 # "Circle Strategy" - Dynamic portfolio management

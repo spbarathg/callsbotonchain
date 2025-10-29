@@ -107,6 +107,17 @@ services:
       - TS_SELL_MINT=So11111111111111111111111111111111111111112
       # FIX: Match worker's liquidity filter (no filter)
       - TS_MIN_LIQUIDITY_USD=0
+      # Pyramiding (Add to Winners)
+      - TS_PYRAMIDING_ENABLED=true
+      - TS_PYRAMIDING_MAX_ADDS=2
+      - TS_PYRAMIDING_MIN_PROFIT_PCT=40.0
+      # Circuit Breaker & Loss Limits
+      - TS_CIRCUIT_BREAKER_ENABLED=true
+      - TS_DAILY_LOSS_LIMIT_USD=100.0
+      - TS_WEEKLY_LOSS_LIMIT_USD=300.0
+      - TS_CONSECUTIVE_LOSS_LIMIT=3
+      - TS_EXCESSIVE_SLIPPAGE_THRESHOLD=10.0
+      - TS_SLIPPAGE_EVENT_LIMIT=5
       # Portfolio Rebalancing (Circle Strategy) - DISABLED to match backtest
       - PORTFOLIO_REBALANCING_ENABLED=false
       - PORTFOLIO_MAX_POSITIONS=5
