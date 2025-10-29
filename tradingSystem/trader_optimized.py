@@ -852,7 +852,36 @@ class TradeEngine:
                 # Update database
                 add_fill(int(pid), "sell", float(fill.price), float(fill.qty), float(fill.usd))
                 
-                # Handle partial vs full exit
+                # CRITICAL FIX: Detect if actual qty sold differs from requested (DB mismatch)
+                # If broker sold less than requested, it means wallet had fewer tokens than DB thought
+                # Treat this as a partial sell even if sell_percentage was 100
+                actual_qty_sold = float(fill.qty)
+                qty_mismatch_threshold = 0.10  # 10% tolerance for dust/rounding
+                
+                if actual_qty_sold < qty_to_sell * (1 - qty_mismatch_threshold):
+                    # DB MISMATCH: Broker sold less than requested
+                    actual_remaining = qty_open - actual_qty_sold
+                    print(f"[TRADER] 🚨 DB MISMATCH: Requested {qty_to_sell:.4f}, sold {actual_qty_sold:.4f}", flush=True)
+                    print(f"[TRADER] 🔧 Updating DB qty from {qty_open:.4f} to {actual_remaining:.4f}", flush=True)
+                    
+                    if actual_remaining > 0.01:  # If meaningful qty remains
+                        # Update database to reflect actual remaining balance
+                        update_position_qty(int(pid), actual_remaining)
+                        data["holdings"] = actual_remaining
+                        data.pop("sell_percentage", None)  # Clear for next attempt
+                        print(f"[TRADER] ✅ DB sync SUCCESS: {actual_remaining:.4f} tokens remain", flush=True)
+                        return False  # Keep monitoring
+                    else:
+                        # Dust amount, close position
+                        print(f"[TRADER] 🧹 Dust remaining ({actual_remaining:.4f}), closing position", flush=True)
+                        close_position(pid)
+                        self.live.pop(token, None)
+                        self.inactivity_monitor.reset_position(token)
+                        self.momentum_tracker.cleanup(token)
+                        self._add_cooldown(token)
+                        return True
+                
+                # Handle intentional partial vs full exit
                 if is_partial:
                     # CRITICAL FIX: Update database qty after partial sell
                     update_position_qty(int(pid), qty_remaining)

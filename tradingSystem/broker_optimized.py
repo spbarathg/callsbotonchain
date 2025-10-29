@@ -912,7 +912,7 @@ class Broker:
                     
                     # SUCCESS!
                     print(f"[BROKER] ✅ EXTREME SELL SUCCESS at {slippage_bps/100}% slippage!", flush=True)
-                    print(f"[BROKER] Sold {float(qty):.0f} tokens for ${out_usd:.4f} at ${expected_price:.10f}/token", flush=True)
+                    print(f"[BROKER] Sold {qty_to_sell:.4f} tokens (requested {qty:.0f}) for ${out_usd:.4f} at ${expected_price:.10f}/token", flush=True)
                     
                     # CRITICAL FIX: Verify sell actually succeeded on-chain
                     out_amount_base = float(quote.get("outAmount") or 0) / (10 ** self._get_decimals(SOL_MINT))
@@ -922,7 +922,8 @@ class Broker:
                         print(f"[BROKER] 🚨 Sell verification FAILED - transaction may have reverted!", flush=True)
                         return Fill(price=0.0, qty=0.0, usd=0.0, success=False, error="Sell verification failed (ghost sell)")
                     
-                    return Fill(price=expected_price, qty=float(qty), usd=out_usd, success=True)
+                    # CRITICAL FIX: Return ACTUAL qty sold, not requested qty (same fix as regular sell)
+                    return Fill(price=expected_price, qty=float(qty_to_sell), usd=out_usd, success=True)
                 
                 except Exception as e:
                     print(f"[BROKER] ⚠️ Attempt {attempt} error: {e}", flush=True)
@@ -1144,7 +1145,7 @@ class Broker:
                         actual_price = out_usd / float(qty) if float(qty) > 0 else expected_price
                         
                         print(f"[BROKER] ✅ SELL SUCCESS at {slippage_bps/100}% slippage!", flush=True)
-                        print(f"[BROKER] Sold {qty:.0f} tokens for ${out_usd:.4f} at ${actual_price:.10f}/token", flush=True)
+                        print(f"[BROKER] Sold {qty_to_sell:.4f} tokens (requested {qty:.0f}) for ${out_usd:.4f} at ${actual_price:.10f}/token", flush=True)
                         
                         # CRITICAL FIX: Verify sell actually succeeded on-chain
                         out_amount_base = float(quote.get("outAmount") or 0) / (10 ** self._get_decimals(SOL_MINT))
@@ -1154,7 +1155,10 @@ class Broker:
                             print(f"[BROKER] 🚨 Sell verification FAILED - transaction may have reverted!", flush=True)
                             return Fill(price=0.0, qty=0.0, usd=0.0, success=False, tx=sig, error="Sell verification failed (ghost sell)")
                         
-                        return Fill(price=actual_price, qty=float(qty), usd=out_usd, 
+                        # CRITICAL FIX: Return ACTUAL qty sold, not requested qty
+                        # Bug: Returning qty instead of qty_to_sell caused phantom positions
+                        # If DB has 6980 but wallet has 0.87, selling 0.87 must return qty=0.87
+                        return Fill(price=actual_price, qty=float(qty_to_sell), usd=out_usd, 
                                    tx=sig, success=True, slippage_pct=slippage_bps/100)
                     
                     # If still error and not last attempt, try next level
