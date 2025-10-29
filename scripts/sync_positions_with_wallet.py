@@ -12,7 +12,6 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from tradingSystem.db import _conn, update_position_qty, close_position
 from tradingSystem.token_balance import get_token_balance_simple
-from tradingSystem.config_optimized import WALLET_KEY
 from solders.keypair import Keypair  # type: ignore
 from base58 import b58decode
 import time
@@ -36,8 +35,13 @@ def main():
     
     print(f"\nFound {len(positions)} open positions. Checking on-chain balances...\n")
     
-    # Get wallet address
-    kp = Keypair.from_bytes(b58decode(WALLET_KEY))
+    # Get wallet address from environment
+    wallet_key = os.getenv("WALLET_KEY")
+    if not wallet_key:
+        print("❌ ERROR: WALLET_KEY environment variable not set!")
+        return
+    
+    kp = Keypair.from_bytes(b58decode(wallet_key))
     wallet_address = str(kp.pubkey())
     
     # Use Solana mainnet RPC
