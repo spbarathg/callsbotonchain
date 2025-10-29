@@ -911,26 +911,33 @@ def run() -> None:
                     print(f"[VALIDATOR] ✅ {validation_reason}", flush=True)
                 
                 # === TIERED ENTRY SYSTEM: Watch & Strike ===
-                # Score 8+: INSTANT ENTRY (trust premium signals)
-                # Score 5-7: ADD TO WATCH LIST (wait for movement confirmation)
+                # === NEW STRATEGY: WATCH & STRIKE ===
+                # ALL SIGNALS → Watch List → Track Movement → Buy Best Movers
                 #
-                # Why: Signals are predictive (CF43Wpjn showed "dead", then +594%)
-                # Solution: High-conviction = instant, others = prove themselves
+                # Why this is better:
+                # 1. Avoids tokens that pump on signal then immediately dump
+                # 2. Identifies which tokens have REAL buying pressure
+                # 3. Only buys tokens showing sustained momentum (not just score)
+                # 4. Can track 20+ signals, enter best 1-2 with proven movement
+                # 5. Waits 2-5 minutes to see which signal actually moves
+                #
+                # Entry criteria (handled by watch_monitor):
+                # - +5%+ gain from signal price (real movement, not just score)
+                # - +2%/min velocity (sustained buying pressure)
+                # - No recent dumps (avoids pump & dump schemes)
+                # - Momentum confirmed over 2+ price checks
+                #
+                # Result: Better entries, avoid fake pumps, buy only proven winners
                 
-                if signal_score >= 8:
-                    # TIER 1: INSTANT ENTRY (Premium Signals)
-                    print(f"[ENTRY] 🚀 HIGH CONVICTION (Score {signal_score}) → INSTANT ENTRY", flush=True)
-                    print(f"[ENTRY] Strategy: Enter immediately with ${plan['usd_size']:.2f}, trust the signal", flush=True)
-                    # Continue to position opening below
-                else:
-                    # TIER 2: WATCH LIST (Medium/Low Conviction)
-                    print(f"[ENTRY] 👁️  MEDIUM CONVICTION (Score {signal_score}) → ADDING TO WATCH LIST", flush=True)
-                    print(f"[ENTRY] Will enter if shows +5% movement at 2%/min velocity", flush=True)
+                if signal_score >= 7:
+                    # ADD ALL SIGNALS TO WATCH LIST (even score 10/10!)
+                    conviction_label = "HIGH" if signal_score >= 8 else "MEDIUM"
+                    print(f"[WATCHLIST] 📊 {conviction_label} CONVICTION SIGNAL: {token_norm[:8]} (score {signal_score}/10)", flush=True)
+                    print(f"[WATCHLIST] 💡 Strategy: Track movement for 2-5min, enter if shows real momentum", flush=True)
                     
                     # Add to watch list
                     signal_timestamp = float(stats.get("timestamp") or stats.get("ts") or time.time())
-                    signal_price = float(stats.get("price", 0))
-                    conviction_type = stats.get("conviction_type", "Medium Confidence")
+                    signal_price = current_price if current_price > 0 else float(stats.get("price", 0))
                     
                     watch_manager.add_signal(
                         token=token_norm,
@@ -941,10 +948,14 @@ def run() -> None:
                     )
                     
                     signals_filtered += 1
-                    engine._log("entry_deferred_watchlist", token=token_norm, 
-                               score=signal_score, reason="waiting_for_movement_confirmation")
-                    print(f"[WATCHLIST] ✅ Added {token_norm[:8]} | Will enter if pump confirmed", flush=True)
-                    continue  # Skip immediate entry, let watch list handle it
+                    engine._log("signal_watchlisted", 
+                               token=token_norm, 
+                               score=signal_score,
+                               conviction=conviction_type,
+                               signal_price=signal_price,
+                               strategy="watch_and_strike")
+                    print(f"[WATCHLIST] ✅ Tracking {token_norm[:8]} | Will buy if +5% at 2%/min velocity", flush=True)
+                    continue  # Don't buy yet! Watch list monitor will recommend when ready
                 
                 # Execute trade
                 print(f"[DEBUG] Logging trade decision for {token_norm[:8]}...", flush=True)
