@@ -8,20 +8,19 @@
 - **Balance**: ~0.0099 SOL ($1.97) + $0.00 USDC = $1.97 total
 - **Status**: ✅ Active and funded
 
-### Strategy: Watch & Strike (Deployed 2025-10-29)
-**ALL SIGNALS → WATCH LIST → TRACK MOMENTUM → BUY BEST MOVERS**
+### Strategy: Aggressive High Conviction (Updated 2025-10-29)
+**SCORE 8-10/10 → INSTANT BUY | SCORE 7/10 → WATCH LIST**
 
-#### Entry Criteria (For Watch List Addition)
-- Minimum score: 7/10
-- Must pass Jupiter validation (tradeable)
-- Must pass rugpull detection
-- No cooldown on token
-- No existing position
+#### Instant Buy (Score 8-10/10)
+- **Why**: Catch moonshots early, don't wait and miss 20-30% gains
+- **Filters Already Applied**: Age check, rugpull detection, Jupiter validation, dump detection
+- **Frequency**: ~1-2 per hour (rare, can't afford to miss)
+- **Position Size**: ~$0.12 per trade
 
-#### Buy Criteria (From Watch List → Actual Entry)
-- **Gain**: +5% from signal price
-- **Velocity**: 2%/min sustained movement
-- **Time Window**: 2-5 minutes of tracking
+#### Watch List (Score 7/10 Only)
+- **Why**: Lower conviction needs momentum confirmation
+- **Entry Criteria**: +5% gain at 2%/min velocity over 2-5 minutes
+- **Purpose**: Filter out fake pumps that stall
 - **Re-entry**: After stop loss, can re-enter if +10% from exit price
 
 ---
@@ -196,23 +195,25 @@ ssh root@64.227.157.221 "docker logs callsbot-trader | grep 'usd_size' | tail -1
 
 ## Expected Timeline for First Buy
 
-### Immediate (0-5 minutes)
-- Worker finds quality signal (7+/10)
-- Trader validates and adds to watch list
-- Background monitor starts tracking
+### Immediate (0-2 minutes) - Score 8-10/10
+- Worker finds HIGH CONVICTION signal (8-10/10)
+- Trader validates (age, rugpull, Jupiter, dump check)
+- **BUY EXECUTES INSTANTLY** if all filters pass
+- No waiting - catch the moonshot early!
 
-### Short-term (5-15 minutes)
-- Token shows momentum (+5% gain)
-- Velocity sustained (2%/min for 2-5min)
-- **BUY EXECUTES** automatically
+### Short-term (5-15 minutes) - Score 7/10
+- Worker finds medium conviction signal (7/10)
+- Added to watch list
+- Token shows momentum (+5% gain at 2%/min)
+- **BUY EXECUTES** after momentum confirmed
 
-### If No Buy After 1 Hour
+### If No Buy After 30 Minutes
 **Check in order**:
-1. Are signals being found? (Check worker logs for 7+/10 scores)
-2. Are signals being added to watch list? (Check trader logs for `➕ Added`)
-3. Is background monitor running? (Check for `WATCH_MONITOR` logs)
-4. Are tokens showing momentum? (Market might just be slow)
-5. Is wallet funded? (Need ~$0.12 per position)
+1. Are 8-10/10 signals being found? (Check worker logs for high scores)
+2. Are 8-10/10 signals passing validation? (Check trader logs for rejections)
+3. For score 7: Are signals being added to watch list?
+4. Is wallet funded? (Need ~$0.12 per position)
+5. Market slow? (Sometimes just need to wait for quality signals)
 
 ---
 

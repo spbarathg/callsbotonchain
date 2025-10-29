@@ -911,28 +911,31 @@ def run() -> None:
                     print(f"[VALIDATOR] ✅ {validation_reason}", flush=True)
                 
                 # === TIERED ENTRY SYSTEM: Watch & Strike ===
-                # === NEW STRATEGY: WATCH & STRIKE ===
-                # ALL SIGNALS → Watch List → Track Movement → Buy Best Movers
+                # === AGGRESSIVE STRATEGY: HIGH CONVICTION INSTANT BUY ===
+                # Score 8-10/10 → INSTANT BUY (trust the signal, catch moonshots early!)
+                # Score 7/10 → Watch List (lower conviction needs momentum confirmation)
                 #
-                # Why this is better:
-                # 1. Avoids tokens that pump on signal then immediately dump
-                # 2. Identifies which tokens have REAL buying pressure
-                # 3. Only buys tokens showing sustained momentum (not just score)
-                # 4. Can track 20+ signals, enter best 1-2 with proven movement
-                # 5. Waits 2-5 minutes to see which signal actually moves
+                # Why aggressive for high scores:
+                # 1. Score 10/10 = Best possible signal (High Confidence smart money)
+                # 2. By waiting 2-5min, tokens already up 20-30% (missed the boat!)
+                # 3. These are rare - only ~1-2 per hour, can't afford to miss them
+                # 4. Safety filters already applied (age, rugpull, Jupiter, dumps)
                 #
-                # Entry criteria (handled by watch_monitor):
-                # - +5%+ gain from signal price (real movement, not just score)
-                # - +2%/min velocity (sustained buying pressure)
-                # - No recent dumps (avoids pump & dump schemes)
-                # - Momentum confirmed over 2+ price checks
-                #
-                # Result: Better entries, avoid fake pumps, buy only proven winners
+                # Why still cautious for score 7:
+                # 1. Score 7/10 = Nuanced (weaker signal, needs confirmation)
+                # 2. Watch list filters out fake pumps that stall
+                # 3. Only buys if shows real momentum
                 
-                if signal_score >= 7:
-                    # ADD ALL SIGNALS TO WATCH LIST (even score 10/10!)
-                    conviction_label = "HIGH" if signal_score >= 8 else "MEDIUM"
-                    print(f"[WATCHLIST] 📊 {conviction_label} CONVICTION SIGNAL: {token_norm[:8]} (score {signal_score}/10)", flush=True)
+                if signal_score >= 8:
+                    # TIER 1: INSTANT ENTRY (Score 8-10/10 - Premium Signals)
+                    conviction_label = "HIGH CONVICTION" if signal_score >= 10 else "VERY HIGH QUALITY"
+                    print(f"[ENTRY] 🚀 {conviction_label} (Score {signal_score}/10) → INSTANT ENTRY", flush=True)
+                    print(f"[ENTRY] Strategy: Trust the signal, catch moonshot early with ${plan['usd_size']:.2f}", flush=True)
+                    # Continue to position opening below
+                    
+                elif signal_score >= 7:
+                    # TIER 2: WATCH LIST (Score 7/10 - Needs Momentum Confirmation)
+                    print(f"[WATCHLIST] 📊 MEDIUM CONVICTION SIGNAL: {token_norm[:8]} (score {signal_score}/10)", flush=True)
                     print(f"[WATCHLIST] 💡 Strategy: Track movement for 2-5min, enter if shows real momentum", flush=True)
                     
                     # Add to watch list
