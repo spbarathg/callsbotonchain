@@ -190,54 +190,108 @@ class PreEntryValidator:
         
         This is the MOST IMPORTANT check - prevents 100% losses!
         
+        Multi-strategy approach:
+        1. Try direct routes only (fastest, most reliable)
+        2. Try multi-hop with higher slippage (slower tokens)
+        3. Try smaller test amount (micro-cap tokens)
+        
         Returns: (is_tradeable: bool, reason: str)
         """
         try:
             from app.jupiter_client import get_jupiter_client
             from .config_optimized import SOL_MINT
             
-            # Test if Jupiter can get a quote for this token
-            # We'll try to quote a small amount (0.01 SOL = ~$1.45)
-            test_amount_lamports = 10_000_000  # 0.01 SOL
-            
             jupiter = get_jupiter_client()
             
-            # Try getting a quote
+            # Strategy 1: Direct routes only with conservative slippage (fastest path)
+            # This works for most liquid tokens with SOL pairs
+            test_amount_lamports = 10_000_000  # 0.01 SOL
+            
             try:
-                quote = jupiter.get_quote(
+                print(f"[VALIDATOR] 🔍 Strategy 1: Testing direct routes (0.01 SOL, 20% slippage)...", flush=True)
+                result = jupiter.get_quote(
                     input_mint=SOL_MINT,
                     output_mint=token,
                     amount=test_amount_lamports,
-                    slippage_bps=2000  # 20% slippage
+                    slippage_bps=2000,  # 20% slippage
+                    only_direct_routes=True
                 )
                 
-                if quote and quote.get("outAmount"):
-                    # Quote succeeded - token is tradeable!
-                    out_amount = int(quote.get("outAmount", 0))
-                    print(f"[VALIDATOR] ✅ Tradeability confirmed: Jupiter quote returned {out_amount} tokens", flush=True)
-                    return True, "Jupiter quote successful (token is tradeable)"
-                else:
-                    # Quote failed - token might not be tradeable
-                    return False, "Jupiter quote returned no outAmount"
-                    
-            except Exception as quote_error:
-                error_str = str(quote_error)
+                if result["status_code"] == 200 and result.get("json"):
+                    quote_data = result["json"]
+                    out_amount = quote_data.get("outAmount")
+                    if out_amount and int(out_amount) > 0:
+                        print(f"[VALIDATOR] ✅ Direct route found! Output: {out_amount} tokens", flush=True)
+                        return True, "Direct Jupiter route available (most reliable)"
                 
-                # Check for specific errors
-                if "NO_ROUTE" in error_str or "COULD_NOT_FIND_ANY_ROUTE" in error_str:
-                    return False, "No Jupiter route found (token not tradeable)"
+                print(f"[VALIDATOR] ⚠️ Strategy 1 failed: {result.get('error', 'No direct route')}", flush=True)
                 
-                if "INVALID_TOKEN" in error_str:
-                    return False, "Invalid token address"
+            except Exception as e:
+                print(f"[VALIDATOR] ⚠️ Strategy 1 error: {e}", flush=True)
+            
+            # Strategy 2: Multi-hop routes with aggressive slippage
+            # For tokens without direct SOL pairs but routable via USDC/other
+            try:
+                print(f"[VALIDATOR] 🔍 Strategy 2: Testing multi-hop routes (0.01 SOL, 50% slippage)...", flush=True)
+                result = jupiter.get_quote(
+                    input_mint=SOL_MINT,
+                    output_mint=token,
+                    amount=test_amount_lamports,
+                    slippage_bps=5000,  # 50% slippage (aggressive)
+                    only_direct_routes=False,
+                    max_accounts=64  # Allow more complex routes
+                )
                 
-                # Generic error - might be temporary
-                print(f"[VALIDATOR] ⚠️ Jupiter quote error: {quote_error}", flush=True)
-                # CRITICAL DECISION: Should we block entry on Jupiter errors?
-                # For ghost buy prevention: YES (better safe than sorry)
-                return False, f"Jupiter error: {error_str[:100]}"
+                if result["status_code"] == 200 and result.get("json"):
+                    quote_data = result["json"]
+                    out_amount = quote_data.get("outAmount")
+                    if out_amount and int(out_amount) > 0:
+                        print(f"[VALIDATOR] ✅ Multi-hop route found! Output: {out_amount} tokens", flush=True)
+                        return True, "Multi-hop Jupiter route available (requires higher slippage)"
+                
+                print(f"[VALIDATOR] ⚠️ Strategy 2 failed: {result.get('error', 'No multi-hop route')}", flush=True)
+                
+            except Exception as e:
+                print(f"[VALIDATOR] ⚠️ Strategy 2 error: {e}", flush=True)
+            
+            # Strategy 3: Micro amount test (for very small market cap tokens)
+            # Sometimes new tokens have minimum trade sizes
+            try:
+                print(f"[VALIDATOR] 🔍 Strategy 3: Testing with micro amount (0.001 SOL, 50% slippage)...", flush=True)
+                micro_amount = 1_000_000  # 0.001 SOL (~$0.15)
+                result = jupiter.get_quote(
+                    input_mint=SOL_MINT,
+                    output_mint=token,
+                    amount=micro_amount,
+                    slippage_bps=5000,  # 50% slippage
+                    only_direct_routes=False,
+                    max_accounts=64
+                )
+                
+                if result["status_code"] == 200 and result.get("json"):
+                    quote_data = result["json"]
+                    out_amount = quote_data.get("outAmount")
+                    if out_amount and int(out_amount) > 0:
+                        print(f"[VALIDATOR] ✅ Micro-trade route found! Output: {out_amount} tokens", flush=True)
+                        return True, "Tradeable with micro amounts (very low liquidity)"
+                
+                print(f"[VALIDATOR] ⚠️ Strategy 3 failed: {result.get('error', 'Not tradeable even with micro amount')}", flush=True)
+                
+            except Exception as e:
+                print(f"[VALIDATOR] ⚠️ Strategy 3 error: {e}", flush=True)
+            
+            # All strategies failed - token is not tradeable on Jupiter
+            print(f"[VALIDATOR] ❌ All tradeability strategies failed for {token[:12]}...", flush=True)
+            print(f"[VALIDATOR] 💡 This token might be:", flush=True)
+            print(f"[VALIDATOR]    - Too new (no liquidity established yet)", flush=True)
+            print(f"[VALIDATOR]    - Raydium-only (not indexed by Jupiter)", flush=True)
+            print(f"[VALIDATOR]    - Scam token (accepts buys but can't sell)", flush=True)
+            print(f"[VALIDATOR]    - Requires direct Raydium integration", flush=True)
+            
+            return False, "Not tradeable on Jupiter (tried 3 strategies: direct, multi-hop, micro)"
         
         except Exception as e:
-            print(f"[VALIDATOR] ⚠️ Tradeability check error: {e}", flush=True)
+            print(f"[VALIDATOR] ⚠️ Tradeability check system error: {e}", flush=True)
             # CRITICAL: If check fails due to system error, BLOCK entry
             # Better to miss a trade than to risk a ghost buy
             return False, f"System error during tradeability check: {str(e)[:100]}"
