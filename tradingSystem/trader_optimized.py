@@ -397,9 +397,18 @@ class TradeEngine:
                     price_failures = data.get("price_failures", 0) + 1
                     data["price_failures"] = price_failures
                     
-                    # Try emergency price fetch from broker
+                    # Try emergency price fetch from broker (with actual holdings)
                     print(f"[TRADER] ⚠️ Price unavailable for {token[:8]}, attempt {price_failures}/5", flush=True)
-                    emergency_price = self.broker.get_token_price(token)
+                    
+                    # Get actual holdings for accurate price
+                    holdings = data.get("holdings", 0)
+                    if holdings <= 0:
+                        # Fallback: Get holdings from database
+                        pid = data.get("pid")
+                        if pid:
+                            holdings = get_open_qty(int(pid))
+                    
+                    emergency_price = self.broker.get_token_price(token, holdings) if holdings > 0 else 0.0
                     
                     if emergency_price > 0:
                         price = emergency_price
@@ -977,10 +986,22 @@ class TradeEngine:
             if not sell_data:
                 return False
             
-            # Fetch current price
-            current_price = self.broker.get_token_price(token_to_sell)
+            # Fetch current price (with actual holdings for accurate pricing)
+            data = self.live.get(token_to_sell)
+            if not data:
+                self._log("rebalance_failed", reason="position_not_found", token=token_to_sell)
+                return False
+            
+            holdings = data.get("holdings", 0)
+            if holdings <= 0:
+                # Fallback: Get holdings from database
+                pid = data.get("pid")
+                if pid:
+                    holdings = get_open_qty(int(pid))
+            
+            current_price = self.broker.get_token_price(token_to_sell, holdings) if holdings > 0 else 0.0
             if current_price <= 0:
-                self._log("rebalance_failed", reason="invalid_price", token=token_to_sell)
+                self._log("rebalance_failed", reason="invalid_price", token=token_to_sell, holdings=holdings)
                 return False
             
             # Execute sell by calling check_exits (which handles the full exit logic)

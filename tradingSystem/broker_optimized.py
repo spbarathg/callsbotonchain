@@ -1190,32 +1190,45 @@ class Broker:
         """Get recent error rate"""
         return self._error_count / max(1, time.time() - self._last_error_time + 1)
     
-    def get_token_price(self, token: str) -> float:
+    def get_token_price(self, token: str, holdings: float = 1.0) -> float:
         """
         Get current token price in USD.
-        Uses Jupiter quote API to get real-time price.
+        Uses Jupiter quote API to get real-time sellable price.
+        
+        CRITICAL FIX: Now quotes ACTUAL holdings amount, not just 1 token.
+        This gives accurate prices that account for slippage/liquidity depth.
+        
+        Args:
+            token: Token mint address
+            holdings: Amount of tokens to quote (default 1.0 for spot price)
         
         Returns:
-            Price in USD, or 0.0 if failed
+            Price per token in USD, or 0.0 if failed
         """
         try:
-            # Get a small quote to determine price
-            # Quote 1 token worth to get price
+            # Get token decimals
             dec = self._get_decimals(token)
-            in_amount = int(1 * (10 ** dec))  # 1 token
+            
+            # Quote the ACTUAL holdings amount (not just 1 token)
+            # This accounts for liquidity depth and slippage
+            in_amount = int(holdings * (10 ** dec))
+            
+            # Minimum quote of 1 token (avoid zero quotes)
+            if in_amount < (10 ** dec):
+                in_amount = int(1 * (10 ** dec))
+                holdings = 1.0
             
             # Get quote selling token for USDC
-            quote = self._quote(token, "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", in_amount, slippage_bps_override=50)
+            quote = self._quote(token, "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", in_amount, slippage_bps_override=5000)  # 50% slippage for realistic pricing
             if not quote:
                 return 0.0
             
-            # Calculate price: output_usdc / input_tokens
+            # Calculate price per token: total_usdc_out / total_tokens_in
             out_usdc = float(quote.get("outAmount", 0)) / 1e6  # USDC has 6 decimals
-            in_tokens = float(in_amount) / (10 ** dec)
             
-            if in_tokens > 0:
-                price = out_usdc / in_tokens
-                return price
+            if holdings > 0:
+                price_per_token = out_usdc / holdings
+                return price_per_token
             
             return 0.0
             
