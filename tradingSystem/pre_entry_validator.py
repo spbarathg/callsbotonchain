@@ -193,14 +193,14 @@ class PreEntryValidator:
         Returns: (is_tradeable: bool, reason: str)
         """
         try:
-            from .jupiter_client import JupiterClient
+            from app.jupiter_client import get_jupiter_client
             from .config_optimized import SOL_MINT
             
             # Test if Jupiter can get a quote for this token
             # We'll try to quote a small amount (0.01 SOL = ~$1.45)
             test_amount_lamports = 10_000_000  # 0.01 SOL
             
-            jupiter = JupiterClient()
+            jupiter = get_jupiter_client()
             
             # Try getting a quote
             try:
