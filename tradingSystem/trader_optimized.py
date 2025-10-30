@@ -778,7 +778,8 @@ class TradeEngine:
                     
                     # CRITICAL: Detect ghost positions (zero on-chain balance) and auto-close
                     # This happens when switching wallets or when tokens were sold outside the system
-                    if "Zero balance on-chain" in str(fill.error) or "no tokens exist" in str(fill.error):
+                    error_str = str(fill.error).lower()
+                    if "zero balance on-chain" in error_str:
                         print(f"[TRADER] 👻 GHOST POSITION DETECTED: {token[:8]} - auto-closing in database", flush=True)
                         print(f"[TRADER] Database shows position but wallet has ZERO tokens", flush=True)
                         # Close position in DB (can't sell - tokens don't exist in wallet)
