@@ -772,6 +772,8 @@ class TradeEngine:
                 else:
                     fill = self.broker.market_sell(token, qty_to_sell)
                 
+                print(f"[TRADER] 🔍 Sell result for {token[:8]}: success={fill.success}, error={fill.error}", flush=True)
+                
                 if not fill.success:
                     # CRITICAL: Detect ghost positions (zero on-chain balance) and auto-close
                     # This happens when switching wallets or when tokens were sold outside the system
