@@ -64,7 +64,11 @@ BANKROLL_USD = _get_float("TS_BANKROLL_USD", 20)
 # NOTE: Position sizing uses get_position_size() which will query actual balance
 # This default is only used for circuit breaker calculations
 
-MAX_CONCURRENT = _get_int("TS_MAX_CONCURRENT", 5)  # 5 positions max
+MAX_CONCURRENT = _get_int("TS_MAX_CONCURRENT", 5)  # 5 positions max (15 for Net Strategy)
+
+# NET STRATEGY MODE: Equal-weighted portfolio for compounding
+NET_STRATEGY_MODE = _get_bool("TS_NET_STRATEGY_MODE", False)
+NET_TAKE_PROFIT_PCT = _get_float("TS_NET_TAKE_PROFIT_PCT", 500.0)  # Close net at 5x (500%)
 
 # OPTIMIZED SIZING - Based on proven win rates by score
 # Score 8: 50% WR, 254% avg gain = BEST (allocate most)
@@ -95,21 +99,23 @@ MAX_POSITION_SIZE_USD = BANKROLL_USD * (MAX_POSITION_SIZE_PCT / 100.0)
 # PHILOSOPHY: Your signal bot finds 5-10x movers. The trading bot should RIDE them,
 # not cut them short! Survive the shakeouts, catch the moonshots.
 
-# Stop losses (from ENTRY price, not peak) - MAXIMUM PATIENCE STRATEGY
-# OCT 25 2025 V4: WIDENED to -35% - memecoins dip before they rip!
-# === AGGRESSIVE ENTRY, DEFENSIVE EXIT STRATEGY ===
-# New philosophy: Enter on high-conviction signals, exit FAST on weakness
+# Stop losses (from ENTRY price, not peak)
 # 
-# TIERED STOP LOSS SYSTEM:
-# - First -5%: Start monitoring closely (1s intervals)
-# - At -8%: Warning level (price check every 0.5s)
-# - At -10%: HARD STOP (immediate exit, don't wait for -30%)
-#
-# Why tight stops: 
-# - We enter MORE positions (trust signals 7+)
-# - Can't afford -30% on every loser
-# - Exit fast, re-enter if wrong
-STOP_LOSS_PCT = _get_float("TS_STOP_LOSS_PCT", 10.0)  # -10% hard stop (AGGRESSIVE EXIT)
+# NET STRATEGY: Wider stops to let net breathe during volatility
+# - Memecoins dip 20-30% then rip to 10x
+# - Net needs room to capture extreme movements
+# - Individual losses absorbed by winners
+# 
+# STANDARD MODE: Tight stops for capital preservation
+# - Quick exits on weakness
+# - Can afford tight stops with concentrated positions
+# 
+# NET MODE: -25% stop (let volatility play out)
+# STANDARD MODE: -10% stop (exit fast on weakness)
+if NET_STRATEGY_MODE:
+    STOP_LOSS_PCT = _get_float("TS_STOP_LOSS_PCT", 25.0)  # -25% for Net Strategy (wider)
+else:
+    STOP_LOSS_PCT = _get_float("TS_STOP_LOSS_PCT", 10.0)  # -10% standard (tight)
 
 # EMERGENCY HARD STOP - Absolute maximum loss before force exit
 # If normal stop fails (price feed issues), this is the last line of defense
@@ -252,9 +258,40 @@ def get_current_bankroll() -> float:
     return BANKROLL_USD
 
 
+def get_net_position_size() -> float:
+    """
+    NET STRATEGY: Equal-weight all positions for maximum diversification
+    
+    Formula:
+      Position Size = Total Balance / Max Positions / 2
+      
+    Example:
+      $100 balance / 15 positions / 2 = $3.33 per position
+      
+    Divide by 2 to keep 50% reserve for pyramiding, gas, and compounding
+    
+    Benefits:
+    - Captures cumulative returns across entire market
+    - No position too small (misses gains) or too large (concentrated risk)
+    - Automatic scaling as balance grows
+    """
+    current_balance = get_current_bankroll()
+    net_size = current_balance / MAX_CONCURRENT / 2.0
+    
+    # Minimum $0.50 (gas + slippage), Maximum $50 per position (risk cap)
+    net_size = max(0.50, min(net_size, 50.0))
+    
+    print(f"[NET] Position size: ${net_size:.2f} (balance=${current_balance:.2f}, max_pos={MAX_CONCURRENT})", flush=True)
+    
+    return net_size
+
+
 def get_position_size(score: int, conviction_type: str) -> float:
     """
     Calculate optimal position size based on proven performance AND current balance.
+    
+    NET STRATEGY MODE: Equal weighting (ignore score/conviction)
+    STANDARD MODE: Score-based sizing
     
     Based on actual data:
     - Score 8: 50% WR, 254% avg gain
@@ -263,6 +300,11 @@ def get_position_size(score: int, conviction_type: str) -> float:
     - Smart Money: 57% WR
     - Strict: 30% WR
     """
+    # NET STRATEGY: Equal-weighted positions (cast wide net)
+    if NET_STRATEGY_MODE:
+        return get_net_position_size()
+    
+    # STANDARD MODE: Score-based sizing (old logic)
     # Get ACTUAL current bankroll (not hardcoded)
     current_bankroll = get_current_bankroll()
     

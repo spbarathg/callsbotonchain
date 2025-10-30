@@ -92,6 +92,13 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - TS_BLIND_BUY=true
       - TS_MIN_SCORE=0
+      # ===== NET STRATEGY CONFIGURATION (DISABLED BY DEFAULT) =====
+      # Uncomment lines below to enable Net Strategy (Flywheel mode)
+      # - TS_NET_STRATEGY_MODE=true           # Enable equal-weighted portfolio strategy
+      # - TS_MAX_CONCURRENT=15                # Cast wide net (15 positions, up from 5)
+      # - TS_NET_TAKE_PROFIT_PCT=500.0        # Close net at 5x return (500%)
+      # - TS_STOP_LOSS_PCT=25.0               # Wider stops for net volatility (-25%, up from -10%)
+      # ===== END NET STRATEGY CONFIGURATION =====
       # Jupiter API Rate Limiting - CRITICAL FIX FOR STOP LOSS FAILURES
       # Problem: 1s price checks = 60 calls/min > 40 RPM limit
       # Solution: Conservative limits + longer cooldown = reliable sells

@@ -231,6 +231,172 @@ def _is_stale_signal(stats: Dict, current_price: Optional[float] = None, max_age
     return False
 
 
+def _check_portfolio_take_profit(engine: TradeEngine) -> bool:
+    """
+    NET STRATEGY: Close entire net when portfolio profit target hit
+    
+    Target: 5x total portfolio value (500% return)
+    Action: Sell ALL positions immediately
+    
+    Returns True if bulk exit was triggered
+    """
+    from .config_optimized import NET_STRATEGY_MODE, NET_TAKE_PROFIT_PCT
+    from .db import get_open_qty
+    
+    if not NET_STRATEGY_MODE:
+        return False  # Only in Net mode
+    
+    if not engine.live:
+        return False  # No positions
+    
+    # Calculate total portfolio P&L
+    total_entry_usd = 0.0
+    total_current_usd = 0.0
+    position_details = []
+    
+    for token, pos_data in engine.live.items():
+        pid = pos_data.get("pid")
+        entry_price = pos_data.get("entry_price", 0)
+        
+        if entry_price <= 0 or not pid:
+            continue
+        
+        # Get current price
+        try:
+            current_price = _get_last_price_usd(token, use_cache=True)
+            if current_price <= 0:
+                continue
+        except Exception:
+            continue
+        
+        # Get quantity
+        try:
+            qty = get_open_qty(pid)
+            if qty <= 0:
+                continue
+        except Exception:
+            continue
+        
+        # Calculate values
+        entry_val = entry_price * qty
+        current_val = current_price * qty
+        
+        total_entry_usd += entry_val
+        total_current_usd += current_val
+        
+        position_details.append({
+            "token": token[:8],
+            "entry_val": entry_val,
+            "current_val": current_val,
+            "pnl_pct": ((current_val - entry_val) / entry_val * 100) if entry_val > 0 else 0
+        })
+    
+    # Calculate portfolio P&L %
+    if total_entry_usd <= 0:
+        return False
+    
+    portfolio_pnl_pct = ((total_current_usd - total_entry_usd) / total_entry_usd) * 100
+    
+    # Check if target hit
+    if portfolio_pnl_pct >= NET_TAKE_PROFIT_PCT:
+        print(f"\n{'='*60}", flush=True)
+        print(f"🎯 NET TAKE PROFIT TRIGGERED!", flush=True)
+        print(f"{'='*60}", flush=True)
+        print(f"   Portfolio P&L: +{portfolio_pnl_pct:.1f}% (target: +{NET_TAKE_PROFIT_PCT:.1f}%)", flush=True)
+        print(f"   Total Entry: ${total_entry_usd:.2f}", flush=True)
+        print(f"   Total Current: ${total_current_usd:.2f}", flush=True)
+        print(f"   Profit: ${total_current_usd - total_entry_usd:.2f}", flush=True)
+        print(f"   Closing entire net: {len(engine.live)} positions", flush=True)
+        print(f"{'='*60}", flush=True)
+        
+        # Log individual position details
+        for detail in position_details:
+            print(f"   {detail['token']}... ${detail['entry_val']:.2f} → ${detail['current_val']:.2f} (+{detail['pnl_pct']:.1f}%)", flush=True)
+        
+        print(f"{'='*60}\n", flush=True)
+        
+        # Sell ALL positions (force exit, bypass normal exit logic)
+        closed_count = 0
+        failed_count = 0
+        
+        for token in list(engine.live.keys()):
+            try:
+                from .db import close_position as db_close_position, get_open_qty
+                
+                pos_data = engine.live[token]
+                pid = pos_data.get("pid")
+                entry_price = pos_data.get("entry_price", 0)
+                
+                if not pid:
+                    continue
+                
+                # Get current holdings
+                qty = get_open_qty(pid)
+                if qty <= 0:
+                    # No holdings, just close in DB and remove from live
+                    db_close_position(pid)
+                    engine.live.pop(token, None)
+                    closed_count += 1
+                    print(f"   ✅ Closed {token[:8]} (no holdings)", flush=True)
+                    continue
+                
+                # Execute market sell (FORCE SELL for portfolio take profit)
+                fill = engine.broker.market_sell(
+                    token=token,
+                    qty=qty
+                )
+                
+                if fill.success:
+                    # Calculate P&L
+                    pnl_usd = fill.usd - (entry_price * qty)
+                    pnl_pct = ((fill.price - entry_price) / entry_price * 100) if entry_price > 0 else 0
+                    
+                    # Record fill and close position
+                    from .db import add_fill
+                    add_fill(pid, "sell", fill.price, fill.qty, fill.usd)
+                    db_close_position(pid)
+                    
+                    # Remove from live
+                    engine.live.pop(token, None)
+                    
+                    # Record with circuit breaker
+                    engine.circuit_breaker.record_trade(pnl_usd, fill.slippage_pct)
+                    
+                    closed_count += 1
+                    print(f"   ✅ Sold {token[:8]}: {qty:.4f} @ ${fill.price:.8f} | P&L: ${pnl_usd:+.2f} ({pnl_pct:+.1f}%)", flush=True)
+                else:
+                    # Sell failed - log and skip
+                    failed_count += 1
+                    print(f"   ❌ Failed to sell {token[:8]}: {fill.error}", flush=True)
+                    engine._log("net_take_profit_sell_failed", token=token, pid=pid, error=fill.error)
+                
+            except Exception as e:
+                failed_count += 1
+                print(f"   ❌ Exception closing {token[:8]}...: {e}", flush=True)
+                engine._log("net_take_profit_close_error", token=token, error=str(e))
+                import traceback
+                traceback.print_exc()
+        
+        engine._log("net_take_profit_executed",
+                   portfolio_pnl_pct=portfolio_pnl_pct,
+                   total_entry_usd=total_entry_usd,
+                   total_current_usd=total_current_usd,
+                   profit_usd=total_current_usd - total_entry_usd,
+                   positions_closed=closed_count,
+                   positions_failed=failed_count)
+        
+        if failed_count > 0:
+            print(f"\n⚠️  NET PARTIALLY CLOSED: {closed_count} succeeded, {failed_count} failed", flush=True)
+            print(f"   Successfully closed positions earned +${total_current_usd - total_entry_usd:.2f}", flush=True)
+        else:
+            print(f"\n🎉 NET CLOSED: {closed_count} positions, +${total_current_usd - total_entry_usd:.2f} profit", flush=True)
+            print(f"💰 Ready to cast bigger net with ${total_current_usd:.2f} capital!\n", flush=True)
+        
+        return True
+    
+    return False
+
+
 def _exit_loop(engine: TradeEngine, stop_event: threading.Event) -> None:
     """Background thread to check exits and maintain portfolio"""
     print("[EXIT_LOOP] Starting exit monitoring thread...", flush=True)
@@ -258,6 +424,12 @@ def _exit_loop(engine: TradeEngine, stop_event: threading.Event) -> None:
             iteration += 1
             if iteration % 12 == 0:  # Log every 60 seconds (12 * 5s)
                 print(f"[EXIT_LOOP] Iteration {iteration}, checking {len(engine.live)} positions", flush=True)
+            
+            # NET STRATEGY: Check portfolio-level take profit FIRST (before individual exits)
+            if _check_portfolio_take_profit(engine):
+                print(f"[EXIT_LOOP] 🎯 Portfolio take profit executed - all positions closed", flush=True)
+                time.sleep(30)  # Wait before next cycle
+                continue
             
             # Log status every 5 minutes
             now = time.time()
