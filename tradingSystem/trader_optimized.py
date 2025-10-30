@@ -436,6 +436,22 @@ class TradeEngine:
                 if token not in self.live:
                     return False
                 
+                # DUST POSITION CHECK: Auto-close if position value < $1 (not worth monitoring)
+                holdings = data.get("holdings", 0)
+                if holdings <= 0:
+                    from .db import get_open_qty
+                    holdings = get_open_qty(int(pid))
+                
+                position_value_usd = holdings * price if (holdings > 0 and price > 0) else 0
+                if position_value_usd < 1.0 and position_value_usd > 0:
+                    print(f"[TRADER] 🗑️ DUST POSITION: {token[:8]} worth ${position_value_usd:.4f} - auto-closing", flush=True)
+                    # Close in database, remove from tracking
+                    from .db import close_position
+                    close_position(int(pid))
+                    self.live.pop(token, None)
+                    self._log("dust_position_closed", token=token, pid=pid, value_usd=position_value_usd)
+                    return True
+                
                 # CRITICAL: Get ENTRY price (no fallback - must be present)
                 entry_price = data.get("entry_price")
                 if not entry_price or entry_price <= 0:
