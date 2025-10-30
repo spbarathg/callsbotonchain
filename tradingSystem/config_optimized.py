@@ -64,7 +64,7 @@ BANKROLL_USD = _get_float("TS_BANKROLL_USD", 20)
 # NOTE: Position sizing uses get_position_size() which will query actual balance
 # This default is only used for circuit breaker calculations
 
-MAX_CONCURRENT = _get_int("TS_MAX_CONCURRENT", 5)  # 5 positions max (15 for Net Strategy)
+MAX_CONCURRENT = _get_int("TS_MAX_CONCURRENT", 3)  # 3 positions max - AGGRESSIVE MODE (fewer, bigger bets)
 
 # NET STRATEGY MODE: Equal-weighted portfolio for compounding
 NET_STRATEGY_MODE = _get_bool("TS_NET_STRATEGY_MODE", False)
@@ -88,8 +88,8 @@ SCORE_9_MULT = _get_float("TS_SCORE_9_MULT", 1.0)   # 100%
 SCORE_8_MULT = _get_float("TS_SCORE_8_MULT", 1.3)   # 130% - BEST PERFORMER!
 SCORE_7_MULT = _get_float("TS_SCORE_7_MULT", 0.9)   # 90%
 
-# Max position size (safety) - Reduced for testing with small capital
-MAX_POSITION_SIZE_PCT = _get_float("TS_MAX_POSITION_SIZE_PCT", 15.0)  # Max 15% of bankroll (was 20%)
+# Max position size (safety) - AGGRESSIVE MODE for maximum impact
+MAX_POSITION_SIZE_PCT = _get_float("TS_MAX_POSITION_SIZE_PCT", 33.0)  # Max 33% of bankroll - GO BIG!
 MAX_POSITION_SIZE_USD = BANKROLL_USD * (MAX_POSITION_SIZE_PCT / 100.0)
 
 # ==================== STOPS & TRAILS ====================
@@ -310,15 +310,15 @@ def get_position_size(score: int, conviction_type: str) -> float:
     
     # Calculate base percentage (not absolute USD)
     # This way it scales with balance automatically
-    # TESTING MODE: Reduced to 10-12% for small balance testing
-    # With $6 balance: $0.60-$0.72 per trade (safe for verification)
-    # With $100 balance: $10-$12 per trade (scales up automatically)
+    # AGGRESSIVE MODE: 20-25% base sizes for MAXIMUM IMPACT
+    # With $1000 balance: $200-325 per trade (GO BIG!)
+    # Philosophy: Fewer positions, bigger bets, extraordinary returns
     if "Smart Money" in conviction_type:
-        base_pct = 12.0  # 12% of balance (was 22.5%)
+        base_pct = 25.0  # 25% of balance - SMART MONEY PREMIUM
     elif "Strict" in conviction_type:
-        base_pct = 11.0  # 11% of balance (was 20%)
+        base_pct = 22.0  # 22% of balance - HIGH CONVICTION
     else:
-        base_pct = 10.0  # 10% of balance (was 17.5%)
+        base_pct = 20.0  # 20% of balance - SOLID BASE
     
     # Apply score multiplier
     if score >= 10:
@@ -334,19 +334,20 @@ def get_position_size(score: int, conviction_type: str) -> float:
     size_pct = base_pct * multiplier
     size = current_bankroll * (size_pct / 100.0)
     
-    # Kelly overlay as ceiling (using current bankroll)
-    try:
-        # Lazy import to avoid circulars at module import time
-        from .strategy_optimized import get_expected_win_rate, get_expected_avg_gain, get_kelly_fraction
-        win_rate = get_expected_win_rate(score, conviction_type)
-        avg_gain = get_expected_avg_gain(score, conviction_type)
-        kelly = get_kelly_fraction(win_rate, avg_gain)
-        fractional_kelly = max(0.0, min(kelly * 0.25, 0.25))
-        kelly_size = current_bankroll * fractional_kelly
-        # Use the minimum of heuristic size and Kelly ceiling for safety
-        size = min(size, kelly_size)
-    except Exception:
-        pass
+    # AGGRESSIVE MODE: Kelly overlay DISABLED - go for maximum impact!
+    # In standard mode, Kelly limits size for "safety"
+    # In aggressive mode, we TRUST the signal and size for EXTRAORDINARY returns
+    # Comment out Kelly cap to let big positions through
+    # try:
+    #     from .strategy_optimized import get_expected_win_rate, get_expected_avg_gain, get_kelly_fraction
+    #     win_rate = get_expected_win_rate(score, conviction_type)
+    #     avg_gain = get_expected_avg_gain(score, conviction_type)
+    #     kelly = get_kelly_fraction(win_rate, avg_gain)
+    #     fractional_kelly = max(0.0, min(kelly * 0.25, 0.25))
+    #     kelly_size = current_bankroll * fractional_kelly
+    #     size = min(size, kelly_size)
+    # except Exception:
+    #     pass
     
     # Cap at max percentage of current balance
     max_size = current_bankroll * (MAX_POSITION_SIZE_PCT / 100.0)
