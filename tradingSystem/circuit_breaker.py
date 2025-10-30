@@ -213,3 +213,5 @@ def get_circuit_breaker() -> CircuitBreaker:
         _circuit_breaker = CircuitBreaker()
     return _circuit_breaker
 
+
+
