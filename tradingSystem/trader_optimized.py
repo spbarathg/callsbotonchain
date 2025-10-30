@@ -764,6 +764,8 @@ class TradeEngine:
                 if token in self.live:
                     self.live[token]["last_sell_attempt"] = time.time()
                 
+                print(f"[TRADER] 🔄 About to execute sell for {token[:8]}, qty={qty_to_sell:.2f}", flush=True)
+                
                 # CRITICAL FIX: Use extreme slippage for profitable positions with many failures
                 # This ensures we capture profits even if liquidity is terrible
                 if profit_pct >= 50 and sell_failures >= 10:
