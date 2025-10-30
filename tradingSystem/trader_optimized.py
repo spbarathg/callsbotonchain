@@ -773,12 +773,11 @@ class TradeEngine:
                     fill = self.broker.market_sell(token, qty_to_sell)
                 
                 if not fill.success:
-                    self._log("exit_failed_sell", token=token, pid=pid, error=fill.error, 
-                             failures=sell_failures + 1, next_backoff=backoff_times[min(sell_failures + 1, len(backoff_times) - 1)])
-                    
                     # CRITICAL: Detect ghost positions (zero on-chain balance) and auto-close
                     # This happens when switching wallets or when tokens were sold outside the system
                     error_str = str(fill.error).lower()
+                    print(f"[TRADER] ❌ Sell failed for {token[:8]}: {fill.error[:100]}", flush=True)
+                    
                     if "zero balance on-chain" in error_str:
                         print(f"[TRADER] 👻 GHOST POSITION DETECTED: {token[:8]} - auto-closing in database", flush=True)
                         print(f"[TRADER] Database shows position but wallet has ZERO tokens", flush=True)
@@ -787,6 +786,9 @@ class TradeEngine:
                         self.live.pop(token, None)
                         self._log("ghost_position_closed", token=token, pid=pid, error=fill.error)
                         return True  # Return True so position is removed from tracking
+                    
+                    self._log("exit_failed_sell", token=token, pid=pid, error=fill.error, 
+                             failures=sell_failures + 1, next_backoff=backoff_times[min(sell_failures + 1, len(backoff_times) - 1)])
                     
                     # CRITICAL: Detect rugged/dead tokens and force-close immediately
                     # If we get "NO_ROUTE" or "RUG_DETECTED" error, the token is dead
