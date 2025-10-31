@@ -137,24 +137,24 @@ EMERGENCY_HARD_STOP_PCT = _get_float("TS_EMERGENCY_HARD_STOP_PCT", 30.0)  # -30%
 
 ADAPTIVE_TRAILING_ENABLED = _get_bool("TS_ADAPTIVE_TRAILING_ENABLED", True)
 
-# PROFIT THRESHOLDS (PnL %)
-PROFIT_TIER_1 = _get_float("TS_PROFIT_TIER_1", 50.0)   # First milestone: +50%
-PROFIT_TIER_2 = _get_float("TS_PROFIT_TIER_2", 100.0)  # Second milestone: +100%
-PROFIT_TIER_3 = _get_float("TS_PROFIT_TIER_3", 200.0)  # Third milestone: +200%
-PROFIT_TIER_4 = _get_float("TS_PROFIT_TIER_4", 500.0)  # Fourth milestone: +500% (NEW)
-PROFIT_TIER_5 = _get_float("TS_PROFIT_TIER_5", 1000.0) # Fifth milestone: +1000% (NEW - Mika-level)
+# PROFIT THRESHOLDS (PnL %) - More granular for better control
+PROFIT_TIER_1 = _get_float("TS_PROFIT_TIER_1", 30.0)   # First milestone: +30% (protect capital)
+PROFIT_TIER_2 = _get_float("TS_PROFIT_TIER_2", 80.0)   # Second milestone: +80% (start loosening)
+PROFIT_TIER_3 = _get_float("TS_PROFIT_TIER_3", 150.0)  # Third milestone: +150% (runner detected)
+PROFIT_TIER_4 = _get_float("TS_PROFIT_TIER_4", 300.0)  # Fourth milestone: +300% (strong runner)
+PROFIT_TIER_5 = _get_float("TS_PROFIT_TIER_5", 800.0)  # Fifth milestone: +800% (mega runner / 10x approaching)
 
 # TRAILING STOPS PER TIER (how much pullback from peak before exit)
-# OCT 25 2025 V3: ULTRA AGGRESSIVE - Allow 35%+ drawdowns for dip-and-rip patterns
-# Key insight: Memecoins dip 20-30% then rebound to 10x. Don't exit on healthy pullbacks!
-# Example: Token at +80% dips to +50% (-37% from peak) then rips to +500%
-# Strategy: Cut losers FAST (-12% entry stop), NEVER exit winners early (35-50% trails)
-TRAIL_TIER_0 = _get_float("TS_TRAIL_TIER_0", 35.0)  # 0-50% profit: 35% trail - survive shakeouts!
-TRAIL_TIER_1 = _get_float("TS_TRAIL_TIER_1", 38.0)  # 50-100% profit: 38% trail - let dips play out
-TRAIL_TIER_2 = _get_float("TS_TRAIL_TIER_2", 42.0)  # 100-200% profit: 42% trail - dip then rip pattern
-TRAIL_TIER_3 = _get_float("TS_TRAIL_TIER_3", 45.0)  # 200-500% profit: 45% trail - massive consolidation room
-TRAIL_TIER_4 = _get_float("TS_TRAIL_TIER_4", 48.0)  # 500-1000% profit: 48% trail - moonshot volatility
-TRAIL_TIER_5 = _get_float("TS_TRAIL_TIER_5", 50.0)  # 1000-5000% profit: 50% trail - 10x-50x moves need HUGE room!
+# OCT 31 2025 V4: SMART TIERED STOPS - Protect capital early, let runners run late
+# Key insight: Tight stops at low profits prevent -32% losses, wide stops at high profits catch 10x
+# Example: At +10% use 8% trail (protect capital), at +300% use 35% trail (let it run)
+# Strategy: Progressive loosening - start tight, widen as profit grows, maximize runners
+TRAIL_TIER_0 = _get_float("TS_TRAIL_TIER_0", 8.0)   # 0-30% profit: 8% trail - TIGHT! Protect capital
+TRAIL_TIER_1 = _get_float("TS_TRAIL_TIER_1", 15.0)  # 30-80% profit: 15% trail - moderate protection
+TRAIL_TIER_2 = _get_float("TS_TRAIL_TIER_2", 22.0)  # 80-150% profit: 22% trail - runner detected
+TRAIL_TIER_3 = _get_float("TS_TRAIL_TIER_3", 30.0)  # 150-300% profit: 30% trail - strong runner
+TRAIL_TIER_4 = _get_float("TS_TRAIL_TIER_4", 40.0)  # 300-800% profit: 40% trail - mega runner (near 10x)
+TRAIL_TIER_5 = _get_float("TS_TRAIL_TIER_5", 50.0)  # 800-5000% profit: 50% trail - moonshot (10x-50x)
 # CRITICAL FIX (Oct 27): Added mega moonshot tiers for 100x-1000x potential
 # User requirement: "Don't leave 800-1000x gains on the table"
 # Strategy: Ultra-wide trails (60-80%) for 100x+ positions to survive volatility
@@ -169,6 +169,27 @@ TRAIL_CONSERVATIVE = _get_float("TS_TRAIL_CONSERVATIVE", 10.0)  # Deprecated
 EARLY_TRAIL_PCT = _get_float("TS_EARLY_TRAIL_PCT", 25.0)  # Deprecated
 MID_TRAIL_PCT = _get_float("TS_MID_TRAIL_PCT", 15.0)      # Deprecated
 LATE_TRAIL_PCT = _get_float("TS_LATE_TRAIL_PCT", 10.0)    # Deprecated
+
+# ===== TIERED PROFIT TAKING (NEW) =====
+# Secure gains progressively while letting runners run
+# Strategy: Sell small portions at milestones to lock profits, keep majority riding
+TIERED_PROFIT_TAKING_ENABLED = _get_bool("TS_TIERED_PROFIT_TAKING", True)
+
+# Profit-taking tiers: (profit_pct, sell_pct_of_position)
+# Example: At +80%, sell 10% of position to secure 0.8x gain, keep 90% riding
+PROFIT_TAKE_TIER_1_PCT = _get_float("TS_PT_TIER_1_PCT", 80.0)    # +80% profit
+PROFIT_TAKE_TIER_1_SELL = _get_float("TS_PT_TIER_1_SELL", 12.0)  # Sell 12% (locks in ~10% of capital)
+
+PROFIT_TAKE_TIER_2_PCT = _get_float("TS_PT_TIER_2_PCT", 200.0)   # +200% profit (3x)
+PROFIT_TAKE_TIER_2_SELL = _get_float("TS_PT_TIER_2_SELL", 15.0)  # Sell 15% (locks in ~0.5x gain)
+
+PROFIT_TAKE_TIER_3_PCT = _get_float("TS_PT_TIER_3_PCT", 500.0)   # +500% profit (6x)
+PROFIT_TAKE_TIER_3_SELL = _get_float("TS_PT_TIER_3_SELL", 18.0)  # Sell 18% (locks in ~1x gain)
+
+PROFIT_TAKE_TIER_4_PCT = _get_float("TS_PT_TIER_4_PCT", 1000.0)  # +1000% profit (11x)
+PROFIT_TAKE_TIER_4_SELL = _get_float("TS_PT_TIER_4_SELL", 20.0)  # Sell 20% (locks in ~2x gain)
+
+# After all tiers, keep ~35% of position riding with wide trailing stop for potential 100x
 
 # TIME-BASED EXIT - EXTENDED FOR MULTI-DAY MOVERS
 # Key insight: Not all tokens are 4-hour pumps

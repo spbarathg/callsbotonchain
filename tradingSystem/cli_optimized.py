@@ -777,7 +777,17 @@ def run() -> None:
                             print(f"[WATCHLIST] 🚨 REJECTED: {validation_reason}", flush=True)
                             continue
                         
-                        print(f"[WATCHLIST] ✅ Passed all safety checks", flush=True)
+                        # MOMENTUM VALIDATION (NEW - OCT 31 2025)
+                        # Problem: Entering too early led to -32% loss on DyRAaLJM
+                        # Solution: Wait for momentum confirmation before entry
+                        from tradingSystem.momentum_entry_validator import get_momentum_validator
+                        momentum_val = get_momentum_validator()
+                        has_momentum, momentum_reason = momentum_val.validate_entry_momentum(entry_token, entry_stats)
+                        if not has_momentum:
+                            print(f"[WATCHLIST] ⏸️  NO MOMENTUM: {momentum_reason} - keeping on watchlist", flush=True)
+                            continue
+                        
+                        print(f"[WATCHLIST] ✅ Passed all safety checks + momentum confirmation ({momentum_reason})", flush=True)
                         
                         entry_score = entry_rec.get('score', 7)
                         entry_conviction = entry_rec.get('conviction', 'Medium Confidence')
@@ -1190,9 +1200,41 @@ def run() -> None:
                 
                 if signal_score >= 8:
                     # TIER 1: INSTANT ENTRY (Score 8-10/10 - Premium Signals)
+                    # BUT: Still need momentum confirmation to avoid -32% losses!
                     conviction_label = "HIGH CONVICTION" if signal_score >= 10 else "VERY HIGH QUALITY"
-                    print(f"[ENTRY] 🚀 {conviction_label} (Score {signal_score}/10) → INSTANT ENTRY", flush=True)
-                    print(f"[ENTRY] Strategy: Trust the signal, catch moonshot early with ${plan['usd_size']:.2f}", flush=True)
+                    print(f"[ENTRY] 🚀 {conviction_label} (Score {signal_score}/10) → Checking momentum...", flush=True)
+                    
+                    # MOMENTUM VALIDATION (NEW - OCT 31 2025)
+                    # Even high-score signals need momentum confirmation
+                    from tradingSystem.momentum_entry_validator import get_momentum_validator
+                    momentum_val = get_momentum_validator()
+                    has_momentum, momentum_reason = momentum_val.validate_entry_momentum(token_norm, stats)
+                    if not has_momentum:
+                        # High-score signal but no momentum yet - add to watchlist
+                        print(f"[ENTRY] ⏸️  NO MOMENTUM: {momentum_reason} - adding to watchlist", flush=True)
+                        
+                        signal_timestamp = float(stats.get("timestamp") or stats.get("ts") or time.time())
+                        signal_price = current_price if current_price > 0 else float(stats.get("price", 0))
+                        
+                        watch_manager.add_signal(
+                            token=token_norm,
+                            signal_time=signal_timestamp,
+                            signal_price=signal_price,
+                            signal_score=signal_score,
+                            conviction=conviction_type
+                        )
+                        
+                        signals_filtered += 1
+                        engine._log("high_score_needs_momentum", 
+                                   token=token_norm, 
+                                   score=signal_score,
+                                   momentum_reason=momentum_reason,
+                                   strategy="wait_for_momentum")
+                        print(f"[WATCHLIST] ⏰ Tracking {token_norm[:8]} (score {signal_score}/10) until momentum confirms", flush=True)
+                        continue  # Don't buy yet!
+                    
+                    print(f"[ENTRY] ✅ Momentum confirmed: {momentum_reason}", flush=True)
+                    print(f"[ENTRY] Strategy: Trust the signal + momentum, catch moonshot early with ${plan['usd_size']:.2f}", flush=True)
                     # Continue to position opening below
                     
                 elif signal_score >= 7:
