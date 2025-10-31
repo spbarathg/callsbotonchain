@@ -572,8 +572,9 @@ def _exit_loop(engine: TradeEngine, stop_event: threading.Event) -> None:
                             failures = engine.live[token].get("price_failures", 0) + 1
                             engine.live[token]["price_failures"] = failures
                             
-                            # Force close position after 60 failed price checks (5 minutes)
-                            if failures >= 60:
+                            # Force close position after 10 failed price checks (50 seconds)
+                            # REDUCED from 60 (5 min) to minimize wasted API calls on dead tokens
+                            if failures >= 10:
                                 engine._log("force_closing_dead_position", token=token, failures=failures,
                                            reason="cannot_get_price_for_5min")
                                 print(f"[EXIT_LOOP] ⚠️ Force-closing dead position {token[:8]} after {failures} price failures", flush=True)
@@ -591,9 +592,9 @@ def _exit_loop(engine: TradeEngine, stop_event: threading.Event) -> None:
                                 except Exception as e:
                                     engine._log("force_close_error", token=token, error=str(e))
                             
-                            elif failures > 10:  # Warning at 50 seconds
+                            elif failures > 5:  # Warning at 25 seconds
                                 engine._log("exit_repeated_price_failures", token=token, failures=failures)
-                                print(f"[EXIT_LOOP] ⚠️ {failures} consecutive price failures for {token[:8]}, will force-close at 60", flush=True)
+                                print(f"[EXIT_LOOP] ⚠️ {failures} consecutive price failures for {token[:8]}, will force-close at 10", flush=True)
                         
                         if iteration % 300 == 0:
                             print(f"[EXIT_LOOP] No price data for {token[:8]}...", flush=True)

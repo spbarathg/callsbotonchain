@@ -91,6 +91,11 @@ class JupiterPriceOracle:
             
             if result["status_code"] != 200 or not result.get("json"):
                 logger.warning(f"Jupiter quote failed for {token[:8]}: {result.get('error')}")
+                # CRITICAL FIX: Cache failed lookups to prevent repeated API calls for dead tokens
+                # Problem: Dead/rugged tokens retry every 5s, causing 48+ API calls/min for nothing
+                # Solution: Cache 0.0 result for 60s so we don't hammer Jupiter for dead tokens
+                with self._lock:
+                    self._cache[token] = (0.0, time.time())
                 return 0.0
             
             quote = result["json"]
