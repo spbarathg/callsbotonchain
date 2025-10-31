@@ -204,11 +204,14 @@ def update_position_qty(position_id: int, new_qty: float, avg_entry_price: float
 
 
 def close_position(position_id: int) -> None:
+	print(f"[DB] 🔒 Closing position #{position_id}", flush=True)
 	conn = _conn()
 	c = conn.cursor()
 	c.execute("UPDATE positions SET status='closed' WHERE id=?", (position_id,))
+	rows_affected = c.rowcount
 	conn.commit()
 	conn.close()
+	print(f"[DB] ✅ Position #{position_id} closed ({rows_affected} rows affected)", flush=True)
 
 
 def get_open_qty(position_id: int) -> float:
