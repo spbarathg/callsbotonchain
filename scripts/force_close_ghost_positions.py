@@ -29,28 +29,28 @@ def main():
     
     for token in ghost_tokens:
         cur = conn.execute(
-            "SELECT id, token_address, qty, entry_price, entry_usd, status FROM positions WHERE token_address = ? AND status = 'open'",
+            "SELECT id, token_address, qty, entry_price, usd_size, status FROM positions WHERE token_address = ? AND status = 'open'",
             (token,)
         )
         row = cur.fetchone()
         
         if row:
-            pos_id, token_addr, qty, entry_price, entry_usd, status = row
+            pos_id, token_addr, qty, entry_price, usd_size, status = row
             print(f"\n🚨 GHOST POSITION FOUND:")
             print(f"   Position ID: {pos_id}")
             print(f"   Token: {token_addr[:12]}...")
             print(f"   Database qty: {qty:.4f} tokens")
-            print(f"   Entry: ${entry_usd:.2f}")
+            print(f"   Entry: ${usd_size:.2f}")
             print(f"   Status: {status}")
             print(f"   ⚠️ Marking as closed (ghost/rugged)")
             
-            # Mark as closed with 0 exit (rugged/ghost position)
+            # Mark as closed (ghost/rugged position)
             conn.execute(
-                "UPDATE positions SET status = 'closed', exit_price = 0, exit_usd = 0, exit_type = 'ghost_cleanup' WHERE id = ?",
+                "UPDATE positions SET status = 'closed' WHERE id = ?",
                 (pos_id,)
             )
             conn.commit()
-            print(f"   ✅ Position #{pos_id} closed")
+            print(f"   ✅ Position #{pos_id} closed successfully")
     
     print("\n" + "=" * 80)
     print("✅ GHOST CLEANUP COMPLETE")
