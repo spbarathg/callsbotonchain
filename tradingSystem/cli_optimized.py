@@ -168,28 +168,9 @@ def _fetch_real_stats(token: str) -> Optional[Dict]:
         except Exception:
             pass
     
-    # Validation (fallback to DexScreener for missing fields)
-    if not stats.get("market_cap_usd") or not stats.get("liquidity_usd") or not stats.get("price"):
-        try:
-            ds = requests.get(f"https://api.dexscreener.com/latest/dex/tokens/{token}", timeout=4)
-            if ds.status_code == 200:
-                data = ds.json() or {}
-                pairs = data.get("pairs") or []
-                if pairs:
-                    p = pairs[0]
-                    stats.setdefault("price", float(p.get("priceUsd") or 0))
-                    # Map some useful fields if present
-                    if not stats.get("market_cap_usd"):
-                        stats["market_cap_usd"] = float(p.get("fdv") or 0)
-                    if not stats.get("liquidity_usd"):
-                        liq = p.get("liquidity") or {}
-                        stats["liquidity_usd"] = float(liq.get("usd") or 0)
-                    vol24 = float(p.get("volume", {}).get("h24") or 0)
-                    mcap = stats.get("market_cap_usd") or 1
-                    stats["ratio"] = vol24 / max(mcap, 1) if mcap > 0 else 0
-                    stats["vol24_usd"] = vol24
-        except Exception:
-            pass
+    # REMOVED: DexScreener fallback (user requirement: Jupiter API only)
+    # If signal provider doesn't include these fields, we skip the signal
+    # This ensures we only trade on high-quality signals with complete data
 
     if not stats.get("market_cap_usd") or not stats.get("liquidity_usd"):
         return None
@@ -499,7 +480,7 @@ def _exit_loop(engine: TradeEngine, stop_event: threading.Event) -> None:
                     print(f"[EXIT_LOOP] Portfolio sync error: {e}", flush=True)
             
             # CRITICAL FIX: NEVER pause exit monitoring!
-            # Price checks use DexScreener (not Jupiter), so we can always monitor positions
+            # Price checks use Jupiter with caching, so we can always monitor positions
             # The broker's sell function handles Jupiter cooldown gracefully
             # Pausing exits during cooldowns causes massive losses (-20% -> -37% bleeding)
             
