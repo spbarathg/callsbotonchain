@@ -72,7 +72,7 @@ def _get_last_price_usd(token: str, use_cache: bool = True) -> float:
     
     # Get real sellable price from Jupiter
     try:
-        oracle = get_jupiter_oracle(cache_ttl=10)  # 10s cache (aggressive config)
+        oracle = get_jupiter_oracle(cache_ttl=60)  # 60s cache (rate limit protection)
         price = oracle.get_price(token, holdings)
         
         if price > 0:
@@ -484,9 +484,14 @@ def _exit_loop(engine: TradeEngine, stop_event: threading.Event) -> None:
             # The broker's sell function handles Jupiter cooldown gracefully
             # Pausing exits during cooldowns causes massive losses (-20% -> -37% bleeding)
             
-            # Check exits for all open positions (prices are cached!)
-            for token in list(engine.live.keys()):
+            # Check exits for all open positions (STAGGERED to prevent rate limits)
+            # CRITICAL: Add 200ms delay between position checks to stay under 10 RPS
+            for idx, token in enumerate(list(engine.live.keys())):
                 try:
+                    # Stagger checks to prevent API burst (200ms = max 5 RPS per token)
+                    if idx > 0:
+                        time.sleep(0.2)  # 200ms delay between positions
+                    
                     pid = get_open_position_id_by_token(token)
                     if not pid:
                         continue

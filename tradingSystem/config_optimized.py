@@ -190,7 +190,7 @@ MAX_HOLD_TIME_SECONDS = _get_int("TS_MAX_HOLD_TIME_SEC", 86400)  # 24 hours (was
 # - Stop losses trigger correctly (-20% instead of never)
 # - Captures 98% of 67x gains (vs 0% with fake prices)
 # - Still GUARANTEED no rate limiting (17% usage vs 100% limit)
-EXIT_CHECK_INTERVAL_SEC = _get_float("TS_EXIT_CHECK_INTERVAL", 3.0 if os.getenv("JUPITER_API_KEY") else 5.0)
+EXIT_CHECK_INTERVAL_SEC = _get_float("TS_EXIT_CHECK_INTERVAL", 10.0)  # Increased to reduce rate limits
 
 # Jupiter Price Oracle Cache TTL (for exit monitoring only)
 # Aggressive 10s cache minimizes API calls while maintaining accuracy

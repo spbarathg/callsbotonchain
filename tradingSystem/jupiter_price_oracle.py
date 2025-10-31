@@ -24,12 +24,12 @@ class JupiterPriceOracle:
     All price checks use Jupiter API only (no DexScreener per user requirement)
     """
     
-    def __init__(self, cache_ttl: int = 10):
+    def __init__(self, cache_ttl: int = 60):
         """
         Initialize the oracle
         
         Args:
-            cache_ttl: Cache time-to-live in seconds (default 10s)
+            cache_ttl: Cache time-to-live in seconds (default 60s for rate limit protection)
         """
         self.cache_ttl = cache_ttl
         self._cache: Dict[str, Tuple[float, float]] = {}  # token -> (price, timestamp)
