@@ -596,18 +596,18 @@ class TradeEngine:
                                     hold_hours = hold_time / 3600
                                     exit_reason = f"Max hold time: {hold_hours:.1f}h (profit: +{profit_pct:.1f}%) - {inactivity_reason}"
                 
-                # SMART TIERED PROFIT-TAKING (OCT 31 2025 V2) - Secure gains EARLY, let runners run
-                # Strategy: Lock profits progressively to avoid -32% losses, keep enough riding for 10x
+                # SMART TIERED PROFIT-TAKING (OCT 31 2025 V3 - OPTIMIZED FOR 10x RUNNERS)
+                # CRITICAL FIX: Minimal selling before 10x - let winners make you rich!
                 # 
-                # TIER 1 (+80%): Sell 12% - early confirmation, secure first gains
-                # TIER 2 (+200%): Sell 15% more (27% total) - 3x confirmed, lock substantial profit
-                # TIER 3 (+500%): Sell 18% more (45% total) - 6x runner, half position secured
-                # TIER 4 (+1000%): Sell 20% more (65% total) - 11x mega, majority secured
-                # REMAINING (35%): Keep riding for potential 50x-100x with wide trailing stops
+                # TIER 1 (+150% / 2.5x): Sell 10% - insurance only
+                # TIER 2 (+400% / 5x): Sell 10% more (20% total) - approaching 10x
+                # TIER 3 (+900% / 10x): Sell 10% more (30% total) - TARGET HIT! Lock some gains
+                # TIER 4 (+2000% / 21x): Sell 15% more (45% total) - mega moonshot
+                # REMAINING (70-80%): Rides through the 10x move with wide trailing stops!
                 # 
-                # Philosophy: Secure real profits early to avoid -32% blowups, keep enough for mega runs
-                # Tight stop loss (8%) + early profit-taking = consistent gains + occasional home runs
-                if not exit_type and profit_pct >= 80:
+                # Philosophy: Stop loss protects downside (-12%), wide trails + minimal selling catch 10x
+                # At 10x: Still have 80% of position! $183 entry → $1830 profit achieved!
+                if not exit_type and profit_pct >= 150:
                     from .config_optimized import (
                         TIERED_PROFIT_TAKING_ENABLED,
                         PROFIT_TAKE_TIER_1_PCT, PROFIT_TAKE_TIER_1_SELL,
@@ -617,51 +617,51 @@ class TradeEngine:
                     )
                     
                     if TIERED_PROFIT_TAKING_ENABLED:
-                        # TIER 4: MEGA (+1000% = 11x)
+                        # TIER 4: MEGA MOONSHOT (+2000% = 21x)
                         if profit_pct >= PROFIT_TAKE_TIER_4_PCT and not data.get("profit_take_tier_4", False):
-                            # At 11x! Sell 20% more
-                            # If all tiers hit: 45% sold, remaining 55%
-                            # Sell 20% of original = 36.4% of remaining 55%
-                            data["sell_percentage"] = 36.4
+                            # At 21x! Sell 15% more
+                            # If all tiers hit: 30% sold, remaining 70%
+                            # Sell 15% of original = 21.4% of remaining 70%
+                            data["sell_percentage"] = 21.4
                             data["profit_take_tier_4"] = True
                             exit_type = "partial_profit_take"
-                            exit_reason = f"🏆🏆 MEGA 11x: Selling 20% at +{profit_pct:.1f}%, 65% total sold"
-                            print(f"[TRADER] 🏆🏆 {token[:8]} TIER 4 (11x): Selling 20% at +{profit_pct:.1f}%", flush=True)
-                            print(f"[TRADER] 💎💎💎 Total sold: 65% | Keeping 35% for 50x-100x potential", flush=True)
+                            exit_reason = f"🏆🏆🏆 MEGA 21x: Selling 15% at +{profit_pct:.1f}%, 45% total sold"
+                            print(f"[TRADER] 🏆🏆🏆 {token[:8]} TIER 4 (21x): Selling 15% at +{profit_pct:.1f}%", flush=True)
+                            print(f"[TRADER] 💎💎💎 Total sold: 45% | Keeping 55% for 50x-100x potential", flush=True)
                         
-                        # TIER 3: RUNNER (+500% = 6x)
+                        # TIER 3: TARGET HIT! (+900% = 10x)
                         elif profit_pct >= PROFIT_TAKE_TIER_3_PCT and not data.get("profit_take_tier_3", False):
-                            # At 6x! Sell 18% more
-                            # If tier 1-2 hit: 27% sold, remaining 73%
-                            # Sell 18% of original = 24.7% of remaining 73%
-                            data["sell_percentage"] = 24.7
+                            # At 10x!! Sell 10% more (still have 80% riding!)
+                            # If tier 1-2 hit: 20% sold, remaining 80%
+                            # Sell 10% of original = 12.5% of remaining 80%
+                            data["sell_percentage"] = 12.5
                             data["profit_take_tier_3"] = True
                             exit_type = "partial_profit_take"
-                            exit_reason = f"🌟🌟 RUNNER 6x: Selling 18% at +{profit_pct:.1f}%, 45% total sold"
-                            print(f"[TRADER] 🌟🌟 {token[:8]} TIER 3 (6x): Selling 18% at +{profit_pct:.1f}%", flush=True)
-                            print(f"[TRADER] 💎💎 Total sold: 45% | Keeping 55% for 10x+ potential", flush=True)
+                            exit_reason = f"🎯🎯 10x TARGET HIT: Selling 10% at +{profit_pct:.1f}%, 30% total sold"
+                            print(f"[TRADER] 🎯🎯 {token[:8]} TIER 3 (10x): Selling 10% at +{profit_pct:.1f}%", flush=True)
+                            print(f"[TRADER] 💎💎💎 HUGE WIN! Total sold: 30% | Keeping 70% for 20x+ potential", flush=True)
                         
-                        # TIER 2: STRONG (+200% = 3x)
+                        # TIER 2: APPROACHING 10x (+400% = 5x)
                         elif profit_pct >= PROFIT_TAKE_TIER_2_PCT and not data.get("profit_take_tier_2", False):
-                            # At 3x! Sell 15% more
-                            # If tier 1 hit: 12% sold, remaining 88%
-                            # Sell 15% of original = 17% of remaining 88%
-                            data["sell_percentage"] = 17.0
+                            # At 5x! Sell 10% more
+                            # If tier 1 hit: 10% sold, remaining 90%
+                            # Sell 10% of original = 11.1% of remaining 90%
+                            data["sell_percentage"] = 11.1
                             data["profit_take_tier_2"] = True
                             exit_type = "partial_profit_take"
-                            exit_reason = f"🌙 STRONG 3x: Selling 15% at +{profit_pct:.1f}%, 27% total sold"
-                            print(f"[TRADER] 🌙 {token[:8]} TIER 2 (3x): Selling 15% at +{profit_pct:.1f}%", flush=True)
-                            print(f"[TRADER] 💎 Total sold: 27% | Keeping 73% for 5x+ potential", flush=True)
+                            exit_reason = f"🌙 STRONG 5x: Selling 10% at +{profit_pct:.1f}%, 20% total sold"
+                            print(f"[TRADER] 🌙 {token[:8]} TIER 2 (5x): Selling 10% at +{profit_pct:.1f}%", flush=True)
+                            print(f"[TRADER] 💎💎 Total sold: 20% | Keeping 80% for 10x potential!", flush=True)
                         
-                        # TIER 1: FIRST PROFIT-TAKE (+80% = 1.8x)
+                        # TIER 1: INSURANCE ONLY (+150% = 2.5x)
                         elif profit_pct >= PROFIT_TAKE_TIER_1_PCT and not data.get("profit_take_tier_1", False):
-                            # At 1.8x! Sell 12% to secure early gains
-                            data["sell_percentage"] = 12.0
+                            # At 2.5x! Sell 10% as insurance only
+                            data["sell_percentage"] = 10.0
                             data["profit_take_tier_1"] = True
                             exit_type = "partial_profit_take"
-                            exit_reason = f"🚀 EARLY PROFIT: Selling 12% at +{profit_pct:.1f}%, 88% riding"
-                            print(f"[TRADER] 🚀 {token[:8]} TIER 1 (+80%): Selling 12% at +{profit_pct:.1f}%", flush=True)
-                            print(f"[TRADER] 💎 Keeping 88% for 3x-10x+ potential", flush=True)
+                            exit_reason = f"🚀 INSURANCE: Selling 10% at +{profit_pct:.1f}%, 90% riding"
+                            print(f"[TRADER] 🚀 {token[:8]} TIER 1 (+150%): Selling 10% (insurance)", flush=True)
+                            print(f"[TRADER] 💎💎💎💎 Keeping 90% for 5x-10x+ potential!", flush=True)
                 
                 # Check hard stop loss (from entry)
                 if not exit_type and price <= stop_price:

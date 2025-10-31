@@ -30,10 +30,10 @@ class MomentumEntryValidator:
     """
     
     def __init__(self):
-        # Momentum thresholds
-        self.MIN_VOLUME_SURGE = 2.5  # 2.5x surge required (was: instant entry)
-        self.MIN_GREEN_CANDLES = 2   # Need 2 consecutive green candles
-        self.MAX_RECENT_DUMP_PCT = -15.0  # Reject if -15%+ dump in last 15min
+        # Momentum thresholds - RELAXED to avoid missing early entries
+        self.MIN_VOLUME_SURGE = 1.5  # 1.5x surge (was: 2.5x - too strict!)
+        self.MIN_GREEN_CANDLES = 1   # Need 1 green candle (was: 2 - too strict!)
+        self.MAX_RECENT_DUMP_PCT = -20.0  # Reject if -20%+ dump (was: -15%)
         
         # Time windows
         self.VOLUME_WINDOW_MIN = 5  # Compare to 5min average
