@@ -5,7 +5,8 @@ Diagnose and fix ghost positions issue
 import sqlite3
 import os
 
-db_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'var', 'trading.db')
+# CRITICAL FIX: Bot uses deployment/var/, not root var/
+db_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'deployment', 'var', 'trading.db')
 
 print(f"Connecting to: {db_path}")
 conn = sqlite3.connect(db_path)
