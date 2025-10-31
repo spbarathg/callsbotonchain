@@ -1208,44 +1208,10 @@ def run() -> None:
                     # TIER 1: INSTANT ENTRY (Score 8-10/10 - Premium Signals)
                     conviction_label = "HIGH CONVICTION" if signal_score >= 10 else "VERY HIGH QUALITY"
                     
-                    # MOMENTUM VALIDATION (OCT 31 2025 - RELAXED)
-                    # Score 9-10: Skip momentum check (trust the signal 100%)
-                    # Score 8: Light momentum check (catch falling knives only)
-                    if signal_score >= 9:
-                        # ULTRA HIGH CONVICTION - Instant entry, no questions
-                        print(f"[ENTRY] 🚀🚀 {conviction_label} (Score {signal_score}/10) → INSTANT ENTRY", flush=True)
-                        print(f"[ENTRY] Strategy: Trust premium signal, catch moonshot early with ${plan['usd_size']:.2f}", flush=True)
-                    else:
-                        # Score 8 - Quick safety check only (no recent -20% dump)
-                        print(f"[ENTRY] 🚀 {conviction_label} (Score {signal_score}/10) → Quick safety check...", flush=True)
-                        
-                        from tradingSystem.momentum_entry_validator import get_momentum_validator
-                        momentum_val = get_momentum_validator()
-                        has_momentum, momentum_reason = momentum_val.validate_entry_momentum(token_norm, stats)
-                        if not has_momentum and "dump" in momentum_reason.lower():
-                            # Only reject if recent dump (not for low volume/momentum)
-                            print(f"[ENTRY] ⏸️  SAFETY FAIL: {momentum_reason} - adding to watchlist", flush=True)
-                            
-                            signal_timestamp = float(stats.get("timestamp") or stats.get("ts") or time.time())
-                            signal_price = current_price if current_price > 0 else float(stats.get("price", 0))
-                            
-                            watch_manager.add_signal(
-                                token=token_norm,
-                                signal_time=signal_timestamp,
-                                signal_price=signal_price,
-                                signal_score=signal_score,
-                                conviction=conviction_type
-                            )
-                            
-                            signals_filtered += 1
-                            engine._log("high_score_safety_fail", 
-                                       token=token_norm, 
-                                       score=signal_score,
-                                       reason=momentum_reason,
-                                       strategy="wait_for_recovery")
-                            continue  # Don't buy a falling knife!
-                        
-                        print(f"[ENTRY] ✅ Safety check passed, entering with ${plan['usd_size']:.2f}", flush=True)
+                    # MOMENTUM VALIDATION (OCT 31 2025 - ULTRA AGGRESSIVE FOR MOONSHOTS)
+                    # Score 8-10: Instant entry, NO safety check (catch 2x, 5x, 10x runners EARLY!)
+                    print(f"[ENTRY] 🚀🚀 {conviction_label} (Score {signal_score}/10) → INSTANT ENTRY", flush=True)
+                    print(f"[ENTRY] Strategy: Trust premium signal, catch moonshot early with ${plan['usd_size']:.2f}", flush=True)
                     # Continue to position opening below
                     
                 elif signal_score >= 7:

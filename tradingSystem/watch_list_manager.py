@@ -67,20 +67,20 @@ class WatchListManager:
     def __init__(self):
         self.watch_list: Dict[str, WatchedSignal] = {}
         
-        # Tracking intervals (in seconds) - OPTIMIZED FOR JUPITER 10 RPS
+        # Tracking intervals (in seconds) - AGGRESSIVE for fast memecoin pumps
         # Strategy: Jupiter only with smart rate limiting for RELIABLE prices
-        self.INTERVAL_NEW = 30  # New signals (<5 min old) - catch early pumps
-        self.INTERVAL_ACTIVE = 45  # Active movement detected - monitor closely
-        self.INTERVAL_STABLE = 90  # Stable/slow moving - conserve API
+        self.INTERVAL_NEW = 15  # New signals (<5 min old) - FAST reaction (lowered from 30s)
+        self.INTERVAL_ACTIVE = 20  # Active movement detected - monitor very closely
+        self.INTERVAL_STABLE = 60  # Stable/slow moving - conserve API
         self.INTERVAL_EXITED = 180  # Exited positions (check for re-entry) - low priority
         
         # Rate limiting
         self.last_api_call = 0
         self.min_call_interval = 0.15  # 150ms between calls = ~6.7 RPS max (safe margin under 10)
         
-        # Entry thresholds
-        self.ENTRY_MIN_GAIN = 5.0  # Min +5% from signal to consider entry
-        self.ENTRY_MIN_VELOCITY = 2.0  # Min +2%/min velocity
+        # Entry thresholds - AGGRESSIVE for fast memecoins
+        self.ENTRY_MIN_GAIN = 3.0  # Min +3% from signal to consider entry (lowered from 5%)
+        self.ENTRY_MIN_VELOCITY = 1.5  # Min +1.5%/min velocity (lowered from 2%)
         self.ENTRY_MIN_SCORE = 6  # Min signal score
         
         # Re-entry thresholds
@@ -163,8 +163,8 @@ class WatchListManager:
                 price_change = ((signal.prices[-1] - signal.prices[0]) / signal.prices[0]) * 100
                 signal.velocity = (price_change / (time_elapsed / 60))  # % per minute
         
-        # Classify movement
-        recent_samples = 3
+        # Classify movement - FAST REACTION (only need 2 samples, not 3)
+        recent_samples = 2  # Changed from 3 to 2 for faster detection
         if len(signal.prices) >= recent_samples:
             recent_prices = signal.prices[-recent_samples:]
             signal.is_pumping = all(recent_prices[i] <= recent_prices[i+1] for i in range(len(recent_prices)-1))
@@ -224,13 +224,23 @@ class WatchListManager:
             # Calculate metrics
             self._calculate_metrics(signal, price)
             
+            # DEBUG: Log price tracking
+            print(f"[WATCHLIST_DEBUG] {token[:8]} | Price: ${price:.8f} | Samples: {len(signal.prices)} | "
+                  f"Gain: {signal.current_gain:+.1f}% | Vel: {signal.velocity:+.1f}%/min | "
+                  f"Pumping: {signal.is_pumping} | Score: {signal.signal_score}", flush=True)
+            
             # === ENTRY LOGIC ===
             if not signal.entered and not signal.exited:
                 # Should we enter this signal?
-                if (signal.signal_score >= self.ENTRY_MIN_SCORE and
-                    signal.current_gain >= self.ENTRY_MIN_GAIN and
-                    signal.velocity >= self.ENTRY_MIN_VELOCITY and
-                    signal.is_pumping):
+                # Check all conditions
+                score_ok = signal.signal_score >= self.ENTRY_MIN_SCORE
+                gain_ok = signal.current_gain >= self.ENTRY_MIN_GAIN
+                velocity_ok = signal.velocity >= self.ENTRY_MIN_VELOCITY
+                pumping_ok = signal.is_pumping
+                
+                if score_ok and gain_ok and velocity_ok and pumping_ok:
+                    print(f"[WATCHLIST_DEBUG] ✅ ENTRY TRIGGERED for {token[:8]} | "
+                          f"+{signal.current_gain:.1f}% at {signal.velocity:.1f}%/min", flush=True)
                     
                     recommendations["enter"].append({
                         "token": token,
@@ -240,6 +250,15 @@ class WatchListManager:
                         "score": signal.signal_score,
                         "reason": f"Pumping +{signal.current_gain:.1f}% at {signal.velocity:.1f}%/min"
                     })
+                else:
+                    # DEBUG: Log why entry was not triggered
+                    failed_checks = []
+                    if not score_ok: failed_checks.append(f"score={signal.signal_score}<{self.ENTRY_MIN_SCORE}")
+                    if not gain_ok: failed_checks.append(f"gain={signal.current_gain:.1f}%<{self.ENTRY_MIN_GAIN}%")
+                    if not velocity_ok: failed_checks.append(f"vel={signal.velocity:.1f}<{self.ENTRY_MIN_VELOCITY}")
+                    if not pumping_ok: failed_checks.append("not_pumping")
+                    
+                    print(f"[WATCHLIST_DEBUG] ❌ {token[:8]} not ready: {', '.join(failed_checks)}", flush=True)
             
             # === RE-ENTRY LOGIC ===
             elif signal.exited and signal.exit_reason == "stop_loss":
