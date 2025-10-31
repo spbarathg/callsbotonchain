@@ -567,7 +567,13 @@ def _exit_loop(engine: TradeEngine, stop_event: threading.Event) -> None:
                         if should_check:
                             if iteration % 300 == 0 or "Tier" in reason:
                                 print(f"[EXIT_LOOP] ✓ Checking {token[:8]}... ${price:.8f} ({reason})", flush=True)
-                            engine.check_exits(token, price)
+                            
+                            # CRITICAL: check_exits returns True when position is closed (ghost/rugged/sold)
+                            # If True, skip remaining processing for this token
+                            position_closed = engine.check_exits(token, price)
+                            if position_closed:
+                                print(f"[EXIT_LOOP] 🔒 Position {token[:8]} was closed, removing from tracking", flush=True)
+                                continue  # Skip to next position
                             
                             # PYRAMIDING: Check if we should add to this winning position
                             from .config_optimized import PYRAMIDING_ENABLED
