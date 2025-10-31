@@ -43,6 +43,7 @@ class WatchListMonitor:
     
     def _monitor_loop(self):
         """Main monitoring loop"""
+        print("[WATCH_MONITOR_DEBUG] 🎬 Monitor loop thread STARTED!", flush=True)
         iteration = 0
         while self.running:
             try:
