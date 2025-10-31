@@ -536,7 +536,7 @@ def _exit_loop(engine: TradeEngine, stop_event: threading.Event) -> None:
                     try:
                         from .broker_optimized import Broker
                         from solders.keypair import Keypair
-                        import os
+                        # os is already imported at module level
                         kp = Keypair.from_base58_string(os.getenv("TS_WALLET_SECRET"))
                         broker = Broker(kp, dry_run=False)
                         actual_balance = broker._query_token_balance(token)
