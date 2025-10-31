@@ -554,13 +554,27 @@ def _exit_loop(engine: TradeEngine, stop_event: threading.Event) -> None:
                             engine.live[token]["price_failures"] = 0
                     else:
                         # Track consecutive price failures
+                        # CRITICAL: Do NOT count failures during Jupiter cooldown (API rate limiting)
+                        # Only count when token is actually dead/rugged
                         if token in engine.live:
-                            failures = engine.live[token].get("price_failures", 0) + 1
-                            engine.live[token]["price_failures"] = failures
+                            # Check if Jupiter is in cooldown
+                            from app.jupiter_client import get_jupiter_client
+                            jupiter = get_jupiter_client()
+                            is_cooling, cooldown_remaining = jupiter.is_in_cooldown()
                             
-                            # Force close position after 10 failed price checks (50 seconds)
-                            # REDUCED from 60 (5 min) to minimize wasted API calls on dead tokens
-                            if failures >= 10:
+                            # Only count failures if NOT in cooldown
+                            if not is_cooling:
+                                failures = engine.live[token].get("price_failures", 0) + 1
+                                engine.live[token]["price_failures"] = failures
+                            else:
+                                # Don't increment during cooldown, but keep existing count
+                                failures = engine.live[token].get("price_failures", 0)
+                                if iteration % 100 == 0:
+                                    print(f"[EXIT_LOOP] Skipping failure count for {token[:8]} (Jupiter cooldown: {cooldown_remaining:.1f}s)", flush=True)
+                            
+                            # Force close position after 10 failed price checks (ONLY when not rate-limited)
+                            # This prevents force-closing profitable positions during API issues
+                            if failures >= 10 and not is_cooling:
                                 engine._log("force_closing_dead_position", token=token, failures=failures,
                                            reason="cannot_get_price_for_5min")
                                 print(f"[EXIT_LOOP] ⚠️ Force-closing dead position {token[:8]} after {failures} price failures", flush=True)
