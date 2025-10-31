@@ -62,21 +62,25 @@ class MomentumValidator:
         self.SAMPLE_INTERVAL = 1.0  # Sample every second
         self.MIN_SAMPLES = 4  # Need at least 4 data points
     
-    def _get_price_from_dex(self, token_address: str) -> Optional[float]:
-        """Get current price from DexScreener"""
+    def _get_price_from_jupiter(self, token_address: str) -> Optional[float]:
+        """
+        Get current price from Jupiter (ONLY API ALLOWED)
+        User requirement: No DexScreener usage
+        """
         try:
-            url = f"https://api.dexscreener.com/latest/dex/tokens/{token_address}"
-            response = requests.get(url, timeout=2)
-            if response.status_code == 200:
-                data = response.json()
-                pairs = data.get("pairs", [])
-                if pairs and len(pairs) > 0:
-                    price = float(pairs[0].get("priceUsd", 0))
-                    volume_5m = float(pairs[0].get("volume", {}).get("m5", 0))
-                    return price if price > 0 else None, volume_5m
-        except:
-            pass
-        return None, 0
+            # Use Jupiter price oracle for consistent pricing
+            from .jupiter_price_oracle import get_jupiter_oracle
+            from .db import get_open_qty_by_token
+            
+            # Get a small amount for price check (0.01 tokens equivalent)
+            test_amount = 0.01
+            oracle = get_jupiter_oracle(cache_ttl=5)
+            price = oracle.get_price(token_address, test_amount)
+            
+            return price if price > 0 else None, 0  # Return price and volume=0 (not tracked)
+        except Exception as e:
+            print(f"[MOMENTUM] ⚠️ Jupiter price check failed: {e}", flush=True)
+            return None, 0
     
     def _analyze_pattern(self, prices: List[float], timestamps: List[float]) -> Dict:
         """Analyze price pattern for entry decision"""
@@ -206,9 +210,9 @@ class MomentumValidator:
         if signal_score == 6:
             print(f"[MOMENTUM] 📊 Medium conviction → Quick 5s check", flush=True)
             # Just verify token exists and has ANY activity
-            price, vol = self._get_price_from_dex(token_address)
+            price, vol = self._get_price_from_jupiter(token_address)
             time.sleep(5)
-            price2, vol2 = self._get_price_from_dex(token_address)
+            price2, vol2 = self._get_price_from_jupiter(token_address)
             
             if price and price2:
                 # Token exists and tradeable = good enough
@@ -235,7 +239,7 @@ class MomentumValidator:
         
         # ADAPTIVE OBSERVATION LOOP
         while (time.time() - start_time) < observation_limit and not decision_made:
-            price, vol = self._get_price_from_dex(token_address)
+            price, vol = self._get_price_from_jupiter(token_address)
             
             if price and price > 0:
                 prices.append(price)

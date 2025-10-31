@@ -35,7 +35,7 @@ def _get_last_price_usd(token: str, use_cache: bool = True) -> float:
     """Fetch REAL sellable price using Jupiter quotes for EXIT MONITORING ONLY.
     
     CRITICAL: This function is ONLY called for exit monitoring of OPEN positions.
-              Signal detection still uses Cielo+DexScreener (proven 33% WR, 7.9x avg).
+              All price checks use Jupiter API (no DexScreener per user requirement).
     
     Args:
         token: Token address

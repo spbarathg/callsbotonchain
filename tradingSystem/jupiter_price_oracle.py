@@ -21,7 +21,7 @@ class JupiterPriceOracle:
     - Matches what Axiom/real wallets show
     
     This is ONLY used for exit monitoring (not signal detection)
-    Signal detection still uses Cielo+DexScreener (proven 33% WR, 7.9x avg)
+    All price checks use Jupiter API only (no DexScreener per user requirement)
     """
     
     def __init__(self, cache_ttl: int = 10):

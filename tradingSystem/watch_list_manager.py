@@ -10,10 +10,10 @@ STRATEGY:
 5. Re-enter if exited token starts pumping
 
 API EFFICIENCY:
-- Use DexScreener for price tracking (FREE, no rate limits)
-- Only use Jupiter for actual trades (respects 10 RPS)
-- Batch price checks (1 API call per 20 tokens)
-- Smart intervals: New signals = 10s, stable = 60s
+- Use Jupiter for all price tracking (user requirement: Jupiter only)
+- Respects 10 RPS limit with smart caching
+- Rate limiting: 150ms between calls = ~6.7 RPS (safe margin)
+- Smart intervals: New signals = 30s, stable = 90s
 
 CAPITAL MANAGEMENT:
 - $600 balance → Max 6 positions @ $100 each
@@ -68,7 +68,7 @@ class WatchListManager:
         self.watch_list: Dict[str, WatchedSignal] = {}
         
         # Tracking intervals (in seconds) - OPTIMIZED FOR JUPITER 10 RPS
-        # Strategy: Less frequent checks than DexScreener, but RELIABLE prices
+        # Strategy: Jupiter only with smart rate limiting for RELIABLE prices
         self.INTERVAL_NEW = 30  # New signals (<5 min old) - catch early pumps
         self.INTERVAL_ACTIVE = 45  # Active movement detected - monitor closely
         self.INTERVAL_STABLE = 90  # Stable/slow moving - conserve API
@@ -109,12 +109,12 @@ class WatchListManager:
     
     def _get_price_from_jupiter(self, token: str) -> Optional[float]:
         """
-        Get RELIABLE price from Jupiter
+        Get RELIABLE price from Jupiter (ONLY API ALLOWED)
         
-        Why Jupiter not DexScreener:
-        - DexScreener has stale/cached prices (CF43Wpjn showed as dead, then +594%)
-        - Jupiter has real-time prices from actual DEX aggregation
-        - We can stay under 10 RPS with smart intervals
+        User requirement: No DexScreener usage
+        - Jupiter provides real-time prices from actual DEX aggregation
+        - Rate limited to stay under 10 RPS with smart intervals
+        - Aggressive caching prevents API abuse
         """
         try:
             # Use broker's get_token_price (already implemented and efficient)

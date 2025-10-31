@@ -33,7 +33,7 @@ class PreEntryValidator:
         self.RECENT_DUMP_WINDOW_MIN = 10  # Check last 10 minutes
         
         # API endpoints
-        self.DEXSCREENER_API = "https://api.dexscreener.com/latest/dex/tokens"
+        # REMOVED: DexScreener API (user requirement: Jupiter API only)
         self.SOLSCAN_API = "https://api.solscan.io/v2/token/meta"
         
     def validate_token(self, token: str, stats: Dict) -> Tuple[bool, str]:
@@ -98,26 +98,8 @@ class PreEntryValidator:
                 
                 return True, f"Token age OK ({age_hours:.1f}h old)"
             
-            # If no age data, query DexScreener for pool creation time
-            # This is a fallback and adds ~2s latency
-            try:
-                response = requests.get(f"{self.DEXSCREENER_API}/{token}", timeout=5)
-                if response.status_code == 200:
-                    data = response.json()
-                    pairs = data.get("pairs", [])
-                    if pairs:
-                        # Use first pair's creation time
-                        pool_created_at = pairs[0].get("pairCreatedAt")
-                        if pool_created_at:
-                            age_ms = int(time.time() * 1000) - int(pool_created_at)
-                            age_hours = age_ms / (1000 * 3600)
-                            
-                            if age_hours < self.MIN_TOKEN_AGE_HOURS:
-                                return False, f"Only {age_hours:.1f}h old (min: {self.MIN_TOKEN_AGE_HOURS}h)"
-                            
-                            return True, f"Token age OK ({age_hours:.1f}h old)"
-            except Exception as e:
-                print(f"[VALIDATOR] ⚠️ DexScreener age check failed: {e}", flush=True)
+            # REMOVED: DexScreener fallback (user requirement: Jupiter API only)
+            # If age data not available from signal, skip validation rather than using DexScreener
             
             # If all checks fail, SKIP this validation (don't block entry)
             # Better to trade than to block all tokens due to API issues
@@ -151,28 +133,8 @@ class PreEntryValidator:
                 if change_10m <= self.MAX_RECENT_DUMP_PCT:
                     return False, f"{change_10m:.1f}% drop in last 10 min"
             
-            # If no recent dump detected in stats, query DexScreener for chart data
-            # This is more accurate but adds ~2s latency
-            try:
-                response = requests.get(f"{self.DEXSCREENER_API}/{token}", timeout=5)
-                if response.status_code == 200:
-                    data = response.json()
-                    pairs = data.get("pairs", [])
-                    if pairs:
-                        pair = pairs[0]  # Use first pair
-                        price_change = pair.get("priceChange", {})
-                        
-                        # Check 5m and 10m changes
-                        m5 = price_change.get("m5")
-                        m10 = price_change.get("m10")
-                        
-                        if m5 is not None and float(m5) <= self.MAX_RECENT_DUMP_PCT:
-                            return False, f"{m5}% drop in last 5 min (DexScreener)"
-                        
-                        if m10 is not None and float(m10) <= self.MAX_RECENT_DUMP_PCT:
-                            return False, f"{m10}% drop in last 10 min (DexScreener)"
-            except Exception as e:
-                print(f"[VALIDATOR] ⚠️ DexScreener dump check failed: {e}", flush=True)
+            # REMOVED: DexScreener fallback (user requirement: Jupiter API only)
+            # If dump data not available from signal, rely on signal provider's data only
             
             # No recent dumps detected
             return True, "No recent dumps detected"
