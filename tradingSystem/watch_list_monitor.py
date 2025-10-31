@@ -43,8 +43,16 @@ class WatchListMonitor:
     
     def _monitor_loop(self):
         """Main monitoring loop"""
+        iteration = 0
         while self.running:
             try:
+                iteration += 1
+                # DEBUG: Log every iteration to prove the loop is running
+                if iteration % 6 == 0:  # Every 30s (6 iterations * 5s)
+                    watchlist_size = len(self.watch_manager.watch_list)
+                    print(f"[WATCH_MONITOR_DEBUG] Iteration {iteration} | Watchlist size: {watchlist_size} | "
+                          f"Total checks: {self.watch_manager.price_checks}", flush=True)
+                
                 # Update all prices and get recommendations
                 recommendations = self.watch_manager.update_prices()
                 
@@ -59,7 +67,7 @@ class WatchListMonitor:
                           f"{len(recommendations['reenter'])} re-entries", flush=True)
                 
                 # Cleanup old signals every 100 iterations
-                if self.watch_manager.price_checks % 100 == 0:
+                if self.watch_manager.price_checks % 100 == 0 and self.watch_manager.price_checks > 0:
                     self.watch_manager.cleanup_old_signals()
                 
                 # Sleep briefly (actual interval is per-token in watch_manager)
@@ -67,6 +75,8 @@ class WatchListMonitor:
                 
             except Exception as e:
                 print(f"[WATCH_MONITOR] ⚠️ Error in monitor loop: {e}", flush=True)
+                import traceback
+                traceback.print_exc()
                 time.sleep(10)
     
     def get_pending_recommendations(self):
