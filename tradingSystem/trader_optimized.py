@@ -774,8 +774,16 @@ class TradeEngine:
                         print(f"[TRADER] 👻 GHOST POSITION DETECTED: {token[:8]} - auto-closing in database", flush=True)
                         print(f"[TRADER] Database shows position but wallet has ZERO tokens", flush=True)
                         # Close position in DB (can't sell - tokens don't exist in wallet)
+                        print(f"[TRADER] 🔍 DEBUG: pid={pid}, type={type(pid)}", flush=True)
+                        print(f"[TRADER] 🔍 DEBUG: close_position={close_position}", flush=True)
                         print(f"[TRADER] 🔍 DEBUG: About to call close_position(pid={pid})", flush=True)
-                        close_position(pid)
+                        try:
+                            close_position(pid)
+                            print(f"[TRADER] 🔍 DEBUG: close_position call completed", flush=True)
+                        except Exception as e:
+                            print(f"[TRADER] 🚨 DEBUG: close_position raised exception: {e}", flush=True)
+                            import traceback
+                            traceback.print_exc()
                         print(f"[TRADER] 🔍 DEBUG: close_position returned, now removing from live", flush=True)
                         self.live.pop(token, None)
                         print(f"[TRADER] 🔍 DEBUG: removed from live, logging event", flush=True)
