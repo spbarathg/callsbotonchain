@@ -515,20 +515,43 @@ def _exit_loop(engine: TradeEngine, stop_event: threading.Event) -> None:
                     # Get current price (will use cache if available)
                     price = _get_last_price_usd(token, use_cache=True)
                     
-                    # DUST CLEANUP: Auto-close positions worth <$1
-                    # Problem: 95% sell buffer leaves $8+ dust per position
-                    # Solution: Force-close positions with negligible value
+                    # DUST CLEANUP: Auto-close positions worth <$1 OR with negligible on-chain balance
+                    # Problem: 95% sell buffer leaves dust per position
+                    # Solution: Force-close positions with negligible value or quantity
+                    
+                    # Check 1: Value-based cleanup (requires price)
                     if price > 0 and qty > 0:
                         position_value_usd = price * qty
                         if position_value_usd < 1.0:
-                            print(f"[EXIT_LOOP] 🧹 DUST DETECTED: {token[:8]}... worth ${position_value_usd:.4f} (<$1)", flush=True)
+                            print(f"[EXIT_LOOP] 🧹 DUST DETECTED (value): {token[:8]}... worth ${position_value_usd:.4f} (<$1)", flush=True)
                             print(f"[EXIT_LOOP] Force-closing dust position in database", flush=True)
                             from .db import close_position
                             close_position(pid)
-                            # Remove from live tracking
                             if token in engine.live:
                                 del engine.live[token]
                             continue
+                    
+                    # Check 2: Quantity-based cleanup (for rugged/dead tokens with no price)
+                    # If database shows large qty but wallet is nearly empty, it's dust from failed sell
+                    try:
+                        from .broker_optimized import Broker
+                        from solders.keypair import Keypair
+                        import os
+                        kp = Keypair.from_base58_string(os.getenv("TS_WALLET_SECRET"))
+                        broker = Broker(kp, dry_run=False)
+                        actual_balance = broker._query_token_balance(token)
+                        
+                        if actual_balance is not None and actual_balance < 0.01:  # Less than 0.01 tokens
+                            print(f"[EXIT_LOOP] 🧹 DUST DETECTED (quantity): {token[:8]}... only {actual_balance:.6f} tokens on-chain", flush=True)
+                            print(f"[EXIT_LOOP] Force-closing dust position (worthless amount)", flush=True)
+                            from .db import close_position
+                            close_position(pid)
+                            if token in engine.live:
+                                del engine.live[token]
+                            continue
+                    except Exception as e:
+                        # Don't crash exit loop on balance query errors
+                        pass
                     
                     if price > 0:
                         # Calculate current profit
