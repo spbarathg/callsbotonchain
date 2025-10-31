@@ -27,11 +27,15 @@ class WatchListMonitor:
     def start(self):
         """Start background monitoring"""
         if self.running:
+            print("[WATCH_MONITOR_DEBUG] ⚠️ Already running, skipping start", flush=True)
             return
         
+        print("[WATCH_MONITOR_DEBUG] Creating monitor thread...", flush=True)
         self.running = True
         self.thread = threading.Thread(target=self._monitor_loop, daemon=True)
+        print(f"[WATCH_MONITOR_DEBUG] Thread created: {self.thread}, calling start()...", flush=True)
         self.thread.start()
+        print(f"[WATCH_MONITOR_DEBUG] Thread.start() returned, thread.is_alive()={self.thread.is_alive()}", flush=True)
         print("[WATCH_MONITOR] 🚀 Started background price monitoring", flush=True)
     
     def stop(self):
