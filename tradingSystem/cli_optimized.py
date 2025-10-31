@@ -515,6 +515,21 @@ def _exit_loop(engine: TradeEngine, stop_event: threading.Event) -> None:
                     # Get current price (will use cache if available)
                     price = _get_last_price_usd(token, use_cache=True)
                     
+                    # DUST CLEANUP: Auto-close positions worth <$1
+                    # Problem: 95% sell buffer leaves $8+ dust per position
+                    # Solution: Force-close positions with negligible value
+                    if price > 0 and qty > 0:
+                        position_value_usd = price * qty
+                        if position_value_usd < 1.0:
+                            print(f"[EXIT_LOOP] 🧹 DUST DETECTED: {token[:8]}... worth ${position_value_usd:.4f} (<$1)", flush=True)
+                            print(f"[EXIT_LOOP] Force-closing dust position in database", flush=True)
+                            from .db import close_position
+                            close_position(pid)
+                            # Remove from live tracking
+                            if token in engine.live:
+                                del engine.live[token]
+                            continue
+                    
                     if price > 0:
                         # Calculate current profit
                         current_profit_pct = ((price - entry_price) / entry_price * 100) if entry_price > 0 else 0

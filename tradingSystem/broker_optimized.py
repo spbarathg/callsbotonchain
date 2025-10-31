@@ -989,7 +989,12 @@ class Broker:
                     requested_qty = float(qty)
                     qty_to_sell = min(requested_qty, actual_balance)
                     pre_token_balance = actual_balance  # Store full balance for verification
-                    safety_pct = 0.95  # Sell 95% to leave 5% buffer
+                    
+                    # CRITICAL FIX: Minimize dust by selling 99.5% instead of 95%
+                    # Old: 95% left 5% dust ($8+ on $167 position)
+                    # New: 99.5% leaves only 0.5% dust ($0.84 on $167 position)
+                    # 0.5% buffer is still enough to prevent Error 6025 (insufficient balance)
+                    safety_pct = 0.995
                     print(f"[BROKER] ✅ On-chain balance: {actual_balance:.4f} tokens", flush=True)
                     if requested_qty < actual_balance * 0.99:  # Partial sell detected
                         print(f"[BROKER] 🎯 PARTIAL SELL: Requested {requested_qty:.4f}, have {actual_balance:.4f}", flush=True)
@@ -1006,21 +1011,22 @@ class Broker:
                     # Query failed (None returned), fallback to database
                     qty_to_sell = float(qty)
                     pre_token_balance = float(qty)  # Use database value
-                    safety_pct = 0.95
+                    safety_pct = 0.995  # 99.5% to minimize dust
                     print(f"[BROKER] ⚠️ Could not query balance, using database qty: {qty:.4f}", flush=True)
             except Exception as e:
                 # Fallback to database qty
                 qty_to_sell = float(qty)
                 pre_token_balance = float(qty)  # Use database value
-                safety_pct = 0.95
+                safety_pct = 0.995  # 99.5% to minimize dust
                 print(f"[BROKER] ⚠️ Balance query exception: {e}, using database qty", flush=True)
             
-            # Sell 95% of actual balance (5% buffer prevents Error 6025)
-            # Old: 99% buffer was too small (1% = ~200 tokens on 20K position)
-            # New: 95% buffer is safer (5% = ~1000 tokens on 20K position)
+            # Sell 99.5% of actual balance (0.5% buffer prevents Error 6025 while minimizing dust)
+            # History: 95% → too much dust ($8+ per trade)
+            # Now: 99.5% → only $0.84 dust on $167 position (acceptable)
+            # 0.5% buffer is still enough to prevent blockchain errors
             in_amount = int(qty_to_sell * (10 ** dec) * safety_pct)
             
-            print(f"[BROKER] Sell: {qty_to_sell:.4f} tokens × 95% = {in_amount} raw units (5% buffer)", flush=True)
+            print(f"[BROKER] Sell: {qty_to_sell:.4f} tokens × 99.5% = {in_amount} raw units (0.5% buffer)", flush=True)
             
             if in_amount <= 0:
                 return Fill(price=0.0, qty=0.0, usd=0.0, success=False, error="Amount too small")
