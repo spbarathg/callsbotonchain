@@ -717,6 +717,30 @@ def run() -> None:
                             print(f"[WATCHLIST] ❌ Failed to fetch stats for {entry_token[:8]}", flush=True)
                             continue
                         
+                        # CRITICAL: Re-validate before entry (especially for young tokens)
+                        # Problem: Token may have matured but could still be a scam
+                        # Solution: Run full validation again
+                        from tradingSystem.pre_entry_validator import get_pre_entry_validator
+                        from tradingSystem.rugpull_detector import get_rugpull_detector
+                        
+                        pre_validator = get_pre_entry_validator()
+                        detector = get_rugpull_detector()
+                        liquidity_usd = float(entry_stats.get("liquidity_usd", 0))
+                        
+                        # Rugpull check
+                        is_rugpull, rugpull_reason = detector.is_likely_rugpull(entry_token, liquidity_usd)
+                        if is_rugpull:
+                            print(f"[WATCHLIST] 🚨 REJECTED: {rugpull_reason} (liquidity=${liquidity_usd:.0f})", flush=True)
+                            continue
+                        
+                        # Full validation (age, dumps, tradeability)
+                        is_valid, validation_reason = pre_validator.validate_token(entry_token, entry_stats)
+                        if not is_valid:
+                            print(f"[WATCHLIST] 🚨 REJECTED: {validation_reason}", flush=True)
+                            continue
+                        
+                        print(f"[WATCHLIST] ✅ Passed all safety checks", flush=True)
+                        
                         entry_score = entry_rec.get('score', 7)
                         entry_conviction = entry_rec.get('conviction', 'Medium Confidence')
                         entry_plan = decide_trade(entry_stats, entry_score, entry_conviction)
@@ -1078,7 +1102,34 @@ def run() -> None:
                     signals_filtered += 1
                     engine._log("entry_rejected_validation", token=token_norm, reason=validation_reason)
                     print(f"[VALIDATOR] {validation_reason}", flush=True)
-                    print(f"[VALIDATOR] Skipping {token_norm[:8]} to prevent potential scam/ghost buy", flush=True)
+                    
+                    # CRITICAL FIX: Track young tokens for re-evaluation after they mature
+                    # Problem: Missing pumps that happen 1-2 hours after signal
+                    # Solution: Add to watch list if ONLY rejected for age (not scams)
+                    if "too young" in validation_reason.lower() or "Only" in validation_reason and "h old" in validation_reason:
+                        # This is a legitimate token, just too young - track it!
+                        print(f"[VALIDATOR] 👶 Token immature, adding to watch list for re-evaluation", flush=True)
+                        
+                        signal_timestamp = float(stats.get("timestamp") or stats.get("ts") or time.time())
+                        signal_price = current_price if current_price > 0 else float(stats.get("price", 0))
+                        
+                        watch_manager.add_signal(
+                            token=token_norm,
+                            signal_time=signal_timestamp,
+                            signal_price=signal_price,
+                            signal_score=signal_score,
+                            conviction=conviction_type
+                        )
+                        
+                        engine._log("young_token_watchlisted", 
+                                   token=token_norm, 
+                                   score=signal_score,
+                                   validation_reason=validation_reason,
+                                   strategy="mature_and_enter")
+                        print(f"[WATCHLIST] ⏰ Will re-check {token_norm[:8]} after it matures (1+ hour)", flush=True)
+                    else:
+                        print(f"[VALIDATOR] Skipping {token_norm[:8]} to prevent potential scam/ghost buy", flush=True)
+                    
                     continue
                 else:
                     print(f"[VALIDATOR] ✅ {validation_reason}", flush=True)

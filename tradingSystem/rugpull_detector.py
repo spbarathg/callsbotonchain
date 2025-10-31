@@ -69,12 +69,13 @@ class RugpullDetector:
                 return cached_result, f"{cached_reason} (cached)"
         
         # 1. MINIMUM LIQUIDITY CHECK (fastest, check first)
-        # Tokens with <$10k liquidity are high risk
-        if liquidity_usd > 0 and liquidity_usd < 10000:
+        # Tokens with <$15k liquidity are high risk
+        # TIGHTENED: Raised from $10k to $15k after -30.7% loss (GHTsyY8d)
+        if liquidity_usd > 0 and liquidity_usd < 15000:
             self.reasons["low_liquidity"] += 1
             self.rugpulls_prevented += 1
-            result = (True, "low_liquidity")
-            self.analysis_cache[token_address] = (True, "low_liquidity", time.time())
+            result = (True, f"low_liquidity_${liquidity_usd:.0f}")
+            self.analysis_cache[token_address] = (True, result[1], time.time())
             return result
         
         # 2. TOKEN AGE CHECK (prevent brand new scams)
