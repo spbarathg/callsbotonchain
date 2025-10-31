@@ -143,7 +143,7 @@ services:
       - TS_MAX_DAILY_LOSS_PCT=1000.0
       - TS_MAX_CONSECUTIVE_LOSSES=1000
       # PROFIT OPTIMIZATION - SLOWER checks (API limit fix)
-      - TS_EXIT_CHECK_INTERVAL=5.0 # CRITICAL: 5s = 12 calls/min (was 1s = 60 calls/min)
+      - TS_EXIT_CHECK_INTERVAL=15.0 # CRITICAL: 15s = 4 calls/min + 60s cache = <1 API call/min/position
     volumes:
       - ./var:/app/var
       - ./data/logs:/app/data/logs
