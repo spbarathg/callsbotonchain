@@ -21,6 +21,7 @@ def main():
         "GHTsyY8doW5vziZXgpmkDdfAypMeFjeaVZ9HYpU7sYK9",  # RUG - no liquidity  
         "6bD71gqiAkdh4SVCVqy6X2F7o96n1RXL5JaWYU9xpump",  # Already sold - $95 profit
         "zgQnq6GEUWuEEa2QvqT69amJtKaj7oU4nKDP4cTpump",  # Mostly sold - $180 recovered, dust remaining
+        "2k9LnRAWJJBmmEzgXARwSEzoU1DorBYQHTXZtxusbonk",  # New ghost position
     ]
     
     conn = _conn()
