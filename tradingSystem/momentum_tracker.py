@@ -115,6 +115,9 @@ class MomentumTracker:
         """
         Get the profit exit threshold based on momentum
         Returns profit percentage where bot should exit
+        
+        DISABLED: Let tiered profit-taking and trailing stops handle exits
+        Early momentum classification is unreliable - tokens can pump later
         """
         if token not in self._momentum_data:
             return None
@@ -125,20 +128,16 @@ class MomentumTracker:
         if momentum is None:
             return None
         
-        # Momentum-based exit strategy:
-        # - Strong tokens: Hold for 100%+ moonshot potential
-        # - Moderate tokens: Exit at +40% to capture profit before reversal
-        # - Weak tokens: Exit at +30% or use tight trailing stop
-        if momentum == 'strong':
-            return None  # No early exit, hold for moonshot
-        elif momentum == 'moderate':
-            return 40.0  # Exit at +40%
-        else:  # weak
-            return 30.0  # Exit at +30%
+        # DISABLED: No momentum-based forced exits
+        # Let the tiered profit system and trailing stops do their job
+        # Many "weak" tokens pump 5-10x after slow starts
+        return None  # Always return None - no forced exits
     
     def get_adaptive_trailing_stop(self, token: str) -> Optional[float]:
         """
         Get adaptive trailing stop percentage based on momentum
+        
+        OPTIMIZED: Wider trails to let all winners run
         """
         if token not in self._momentum_data:
             return None
@@ -149,16 +148,17 @@ class MomentumTracker:
         if momentum is None:
             return None  # Use default trail
         
-        # Adaptive trailing stops:
-        # - Strong tokens: 40% trail (let it breathe)
-        # - Moderate tokens: 35% trail (standard)
-        # - Weak tokens: 25% trail (tight, quick exit)
+        # OPTIMIZED: Wide trailing stops for all tokens
+        # Give every position room to breathe and catch big moves
+        # - Strong tokens: 50% trail (maximum breathing room)
+        # - Moderate tokens: 45% trail (generous)
+        # - Weak tokens: 40% trail (still generous - many pump later)
         if momentum == 'strong':
-            return 40.0
+            return 50.0
         elif momentum == 'moderate':
-            return 35.0
+            return 45.0
         else:  # weak
-            return 25.0
+            return 40.0
     
     def cleanup(self, token: str):
         """Remove tracking data for closed position"""

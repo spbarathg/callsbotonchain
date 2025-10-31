@@ -596,115 +596,76 @@ class TradeEngine:
                                     hold_hours = hold_time / 3600
                                     exit_reason = f"Max hold time: {hold_hours:.1f}h (profit: +{profit_pct:.1f}%) - {inactivity_reason}"
                 
-                # OPTIMIZED TIERED EXIT STRATEGY - Capture gains from 40% to 1000x+
-                # Based on analysis: Your bot found an 11x that peaked at 18x
-                # Strategy: Scale out as it moons, but keep riding for MEGA gains
+                # OPTIMIZED TIERED EXIT STRATEGY - Let winners RUN!
+                # Strategy: Minimal selling, maximum upside capture
                 # 
-                # TIER 1 (+40%): Sell 25% - Safety exit for moderate winners
-                # TIER 2 (+100%): Sell 25% more (50% total) - 2x moonshot confirmed
-                # TIER 3 (+300%): Sell 15% more (65% total) - 4x mega moonshot
-                # TIER 4 (+900%): Sell 20% more (85% total) - 10x ultra moonshot
-                # TIER 5 (+4900%): Sell 7% more (92% total) - 50x MEGA moonshot
-                # TIER 6 (+9900%): Sell 5% more (97% total) - 100x ULTRA MEGA
-                # TIER 7 (+79900%): Sell 2% more (99% total) - 800x LEGENDARY
-                # REMAINING (1%): NEVER SELL - Ride to 1000x+ with 80% trail
+                # TIER 1 (+100%): Sell 20% - 2x confirmation, lock initial capital
+                # TIER 2 (+300%): Sell 20% more (40% total) - 4x mega moonshot
+                # TIER 3 (+900%): Sell 20% more (60% total) - 10x ultra moonshot
+                # TIER 4 (+2900%): Sell 15% more (75% total) - 30x MEGA
+                # TIER 5 (+9900%): Sell 10% more (85% total) - 100x LEGENDARY
+                # REMAINING (15%): NEVER SELL - Ride to 1000x+ with wide trail
                 # 
-                # Impact: Won't leave 800-1000x gains on the table!
-                if not exit_type and profit_pct >= 40:
-                    # TIER 7: LEGENDARY MOONSHOT (+79900% = 800x)
-                    if profit_pct >= 79900 and not data.get("profit_take_79900", False):
-                        # At 800x!! Sell 2% more
-                        # If all tiers hit: 97% sold, remaining 3%
-                        # Sell 2% of original = 66.67% of remaining 3%
-                        data["sell_percentage"] = 66.67
-                        data["profit_take_79900"] = True
-                        exit_type = "partial_profit_take"
-                        exit_reason = f"🏆🏆🏆 LEGENDARY: Selling 2% at +{profit_pct:.1f}% (800x), 99% total sold"
-                        print(f"[TRADER] 🏆🏆🏆 {token[:8]} TIER 7 (800x): Selling 2% more at +{profit_pct:.1f}%", flush=True)
-                        print(f"[TRADER] 💎💎💎💎 Total sold: 99% | Keeping 1% for potential 1000x+ (NEVER SELL)", flush=True)
-                    
-                    # TIER 6: ULTRA MEGA MOONSHOT (+9900% = 100x)
-                    elif profit_pct >= 9900 and not data.get("profit_take_9900", False):
-                        # At 100x!! Sell 5% more
-                        # If all tiers hit: 92% sold, remaining 8%
-                        # Sell 5% of original = 62.5% of remaining 8%
-                        data["sell_percentage"] = 62.5
+                # Philosophy: Let the big winners make you rich!
+                # Stop loss protects downside, trailing stops protect profits
+                if not exit_type and profit_pct >= 100:
+                    # TIER 5: LEGENDARY (+9900% = 100x)
+                    if profit_pct >= 9900 and not data.get("profit_take_9900", False):
+                        # At 100x!! Sell 10% more
+                        # If all tiers hit: 75% sold, remaining 25%
+                        # Sell 10% of original = 40% of remaining 25%
+                        data["sell_percentage"] = 40
                         data["profit_take_9900"] = True
                         exit_type = "partial_profit_take"
-                        exit_reason = f"🌟🌟🌟🌟 ULTRA MEGA: Selling 5% at +{profit_pct:.1f}% (100x), 97% total sold"
-                        print(f"[TRADER] 🌟🌟🌟🌟 {token[:8]} TIER 6 (100x): Selling 5% more at +{profit_pct:.1f}%", flush=True)
-                        print(f"[TRADER] 💎💎💎💎 Total sold: 97% | Keeping 3% for potential 800x-1000x run", flush=True)
+                        exit_reason = f"🏆🏆🏆 LEGENDARY 100x: Selling 10% at +{profit_pct:.1f}%, 85% total sold"
+                        print(f"[TRADER] 🏆🏆🏆 {token[:8]} TIER 5 (100x): Selling 10% more at +{profit_pct:.1f}%", flush=True)
+                        print(f"[TRADER] 💎💎💎💎 Total sold: 85% | Keeping 15% for potential 1000x+ (NEVER SELL)", flush=True)
                     
-                    # TIER 5: MEGA MOONSHOT (+4900% = 50x)
-                    elif profit_pct >= 4900 and not data.get("profit_take_4900", False):
-                        # At 50x! Sell 7% more
-                        # If all tiers hit: 85% sold, remaining 15%
-                        # Sell 7% of original = 46.67% of remaining 15%
-                        data["sell_percentage"] = 46.67
-                        data["profit_take_4900"] = True
+                    # TIER 4: MEGA (+2900% = 30x)
+                    elif profit_pct >= 2900 and not data.get("profit_take_2900", False):
+                        # At 30x! Sell 15% more
+                        # If all tiers hit: 60% sold, remaining 40%
+                        # Sell 15% of original = 37.5% of remaining 40%
+                        data["sell_percentage"] = 37.5
+                        data["profit_take_2900"] = True
                         exit_type = "partial_profit_take"
-                        exit_reason = f"🚀🚀🚀🚀 MEGA MOONSHOT: Selling 7% at +{profit_pct:.1f}% (50x), 92% total sold"
-                        print(f"[TRADER] 🚀🚀🚀🚀 {token[:8]} TIER 5 (50x): Selling 7% more at +{profit_pct:.1f}%", flush=True)
-                        print(f"[TRADER] 💎💎💎 Total sold: 92% | Keeping 8% for potential 100x+ run", flush=True)
+                        exit_reason = f"🚀🚀🚀 MEGA 30x: Selling 15% at +{profit_pct:.1f}%, 75% total sold"
+                        print(f"[TRADER] 🚀🚀🚀 {token[:8]} TIER 4 (30x): Selling 15% more at +{profit_pct:.1f}%", flush=True)
+                        print(f"[TRADER] 💎💎💎 Total sold: 75% | Keeping 25% for potential 100x+ run", flush=True)
                     
-                    # TIER 4: ULTRA MOONSHOT (+900% = 10x)
+                    # TIER 3: ULTRA (+900% = 10x)
                     elif profit_pct >= 900 and not data.get("profit_take_900", False):
-                        # At 10x! Sell another 20% (of remaining)
-                        # If all previous tiers hit: 65% already sold, remaining 35%
-                        # Sell 20% of original = 57% of remaining 35%
-                        data["sell_percentage"] = 57  # 20% of original from 35% remaining
+                        # At 10x! Sell 20% more
+                        # If all tiers hit: 40% sold, remaining 60%
+                        # Sell 20% of original = 33.33% of remaining 60%
+                        data["sell_percentage"] = 33.33
                         data["profit_take_900"] = True
                         exit_type = "partial_profit_take"
-                        exit_reason = f"🌟 ULTRA MOONSHOT: Selling 20% at +{profit_pct:.1f}% (10x), 85% total sold"
-                        print(f"[TRADER] 🌟🌟🌟 {token[:8]} TIER 4 (10x): Selling 20% more at +{profit_pct:.1f}%", flush=True)
-                        print(f"[TRADER] 💎💎💎 Total sold: 85% | Keeping 15% for potential 20x+ with wide trail", flush=True)
+                        exit_reason = f"🌟🌟 ULTRA 10x: Selling 20% at +{profit_pct:.1f}%, 60% total sold"
+                        print(f"[TRADER] 🌟🌟 {token[:8]} TIER 3 (10x): Selling 20% more at +{profit_pct:.1f}%", flush=True)
+                        print(f"[TRADER] 💎💎 Total sold: 60% | Keeping 40% for potential 30x+ run", flush=True)
                     
-                    # TIER 3: MEGA MOONSHOT (+300% = 4x)
+                    # TIER 2: MOONSHOT (+300% = 4x)
                     elif profit_pct >= 300 and not data.get("profit_take_300", False):
-                        # At 4x! Sell another 15% (of remaining)
-                        # If tiers 1&2 hit: 50% already sold, remaining 50%
-                        # Sell 15% of original = 30% of remaining 50%
-                        data["sell_percentage"] = 30  # 15% of original from 50% remaining
+                        # At 4x! Sell 20% more
+                        # If tier 1 hit: 20% sold, remaining 80%
+                        # Sell 20% of original = 25% of remaining 80%
+                        data["sell_percentage"] = 25
                         data["profit_take_300"] = True
                         exit_type = "partial_profit_take"
-                        exit_reason = f"🌙 MEGA MOONSHOT: Selling 15% at +{profit_pct:.1f}% (4x), 65% total sold"
-                        print(f"[TRADER] 🌙🌙 {token[:8]} TIER 3 (4x): Selling 15% more at +{profit_pct:.1f}%", flush=True)
-                        print(f"[TRADER] 💎💎 Total sold: 65% | Keeping 35% for potential 10x run", flush=True)
+                        exit_reason = f"🌙 MOONSHOT 4x: Selling 20% at +{profit_pct:.1f}%, 40% total sold"
+                        print(f"[TRADER] 🌙 {token[:8]} TIER 2 (4x): Selling 20% more at +{profit_pct:.1f}%", flush=True)
+                        print(f"[TRADER] 💎 Total sold: 40% | Keeping 60% for potential 10x run", flush=True)
                     
-                    # TIER 2: MOONSHOT (+100% = 2x)
+                    # TIER 1: FIRST PROFIT-TAKE (+100% = 2x)
                     elif profit_pct >= 100 and not data.get("profit_take_100", False):
-                        # MOONSHOT DETECTED: At 100%+ profit
-                        # Strategy: Sell 25% more (for total 50% if tier1 done, or 50% if tier1 skipped)
-                        
-                        if data.get("profit_take_40", False):
-                            # Already sold 25% at +40%, now sell 25% more = 50% total sold
-                            # Remaining: 75% → Sell 33.33% of it = 25% of original
-                            data["sell_percentage"] = 33.33
-                            data["profit_take_100"] = True
-                            exit_type = "partial_profit_take"
-                            exit_reason = f"Moonshot! Selling 25% more at +{profit_pct:.1f}% (2x), 50% total sold"
-                            print(f"[TRADER] 🚀 {token[:8]} TIER 2 (2x): Selling 25% more at +{profit_pct:.1f}%", flush=True)
-                            print(f"[TRADER] 💎 Total sold: 50% | Keeping 50% for mega moonshot", flush=True)
-                        else:
-                            # Skipped +40% tier (fast moonshot), sell 50% now
-                            data["sell_percentage"] = 50
-                            data["profit_take_100"] = True
-                            data["moonshot_mode"] = True
-                            exit_type = "partial_profit_take"
-                            exit_reason = f"Fast moonshot! Selling 50% at +{profit_pct:.1f}% (2x)"
-                            print(f"[TRADER] 🚀🚀 {token[:8]} FAST 2x: Selling 50% at +{profit_pct:.1f}%", flush=True)
-                            print(f"[TRADER] 🌙 Keeping 50% for potential 5-10x run", flush=True)
-                    
-                    # TIER 1: SAFETY EXIT (+40%)
-                    elif profit_pct >= 40 and not data.get("profit_take_40", False):
-                        # TIER 1: Safety exit for moderate performers
-                        # Sell 25% at +40% profit
-                        data["sell_percentage"] = 25
-                        data["profit_take_40"] = True
+                        # At 2x! Sell 20% to lock initial capital
+                        data["sell_percentage"] = 20
+                        data["profit_take_100"] = True
                         exit_type = "partial_profit_take"
-                        exit_reason = f"Safety tier: Selling 25% at +{profit_pct:.1f}%, 75% remaining"
-                        print(f"[TRADER] 💰 {token[:8]} TIER 1: Selling 25% at +{profit_pct:.1f}%", flush=True)
-                        print(f"[TRADER] 🎯 Locking in 10% gain, keeping 75% for potential moonshot", flush=True)
+                        exit_reason = f"🚀 2x CONFIRMED: Selling 20% at +{profit_pct:.1f}%, 80% riding"
+                        print(f"[TRADER] 🚀 {token[:8]} TIER 1 (2x): Selling 20% at +{profit_pct:.1f}%", flush=True)
+                        print(f"[TRADER] 💎 Keeping 80% for 5-10x+ potential", flush=True)
                 
                 # Check hard stop loss (from entry)
                 if not exit_type and price <= stop_price:
