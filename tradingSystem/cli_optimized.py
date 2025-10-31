@@ -571,6 +571,7 @@ def _exit_loop(engine: TradeEngine, stop_event: threading.Event) -> None:
                             # CRITICAL: check_exits returns True when position is closed (ghost/rugged/sold)
                             # If True, skip remaining processing for this token
                             position_closed = engine.check_exits(token, price)
+                            print(f"[EXIT_LOOP] 🔍 DEBUG: check_exits returned {position_closed} for {token[:8]}", flush=True)
                             if position_closed:
                                 print(f"[EXIT_LOOP] 🔒 Position {token[:8]} was closed, removing from tracking", flush=True)
                                 continue  # Skip to next position
