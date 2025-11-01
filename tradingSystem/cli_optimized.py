@@ -580,10 +580,12 @@ def _exit_loop(engine: TradeEngine, stop_event: threading.Event) -> None:
                     # Check 2: Quantity-based cleanup (for rugged/dead tokens with no price)
                     # If database shows large qty but wallet is nearly empty, it's dust from failed sell
                     try:
+                        from .token_balance import get_token_balance_simple
                         from .broker_optimized import Broker
                         # Broker() takes no args - reads config from env
                         broker = Broker()
-                        actual_balance = broker._query_token_balance(token)
+                        wallet_address = str(broker._kp.pubkey()) if broker._kp else None
+                        actual_balance = get_token_balance_simple(broker._rpc, wallet_address, token) if wallet_address else None
                         
                         if actual_balance is not None and actual_balance < 0.01:  # Less than 0.01 tokens
                             print(f"[EXIT_LOOP] 🧹 DUST DETECTED (quantity): {token[:8]}... only {actual_balance:.6f} tokens on-chain", flush=True)
