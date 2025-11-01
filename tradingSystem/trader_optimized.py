@@ -785,13 +785,18 @@ class TradeEngine:
                     
                     # CRITICAL: Detect rugged/dead tokens and force-close immediately
                     # If we get "NO_ROUTE" or "RUG_DETECTED" error, the token is dead
-                    if "RUG_DETECTED" in str(fill.error) or "No liquidity" in str(fill.error):
-                        print(f"[TRADER] 🚨 RUGGED TOKEN DETECTED: {token[:8]} - force closing", flush=True)
+                    # IMPROVED: Also check for "DO NOT RETRY" flag and low on-chain balance
+                    if ("RUG_DETECTED" in str(fill.error) or 
+                        "No liquidity" in str(fill.error) or
+                        "DO NOT RETRY" in str(fill.error) or
+                        "COULD_NOT_FIND_ANY_ROUTE" in str(fill.error)):
+                        print(f"[TRADER] 🚨 RUGGED/DEAD TOKEN DETECTED: {token[:8]} - force closing", flush=True)
+                        print(f"[TRADER] Error: {fill.error}", flush=True)
                         # Close position in DB (can't sell, but remove from tracking)
                         close_position(pid)
                         self.live.pop(token, None)
                         self._log("rugged_token_closed", token=token, pid=pid, error=fill.error)
-                        return True  # Return True so position is removed
+                        return True  # Return True so position is removed from tracking
                     
                     # Track consecutive sell failures with adaptive backoff
                     if token in self.live:

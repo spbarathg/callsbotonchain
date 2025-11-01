@@ -355,6 +355,10 @@ class WatchListManager:
             if self.price_checks % 10 == 0:
                 self._save_to_redis()
             
+            # IMPROVED: Prune dead signals every 50 price checks
+            if self.price_checks % 50 == 0:
+                self._prune_dead_signals()
+            
             # DEBUG: Log price tracking
             print(f"[WATCHLIST_DEBUG] {token[:8]} | Price: ${price:.8f} | Samples: {len(signal.prices)} | "
                   f"Gain: {signal.current_gain:+.1f}% | Vel: {signal.velocity:+.1f}%/min | "
@@ -474,6 +478,51 @@ class WatchListManager:
             "price_checks": self.price_checks,
             "watch_list_size": len(self.watch_list),
         }
+    
+    def _prune_dead_signals(self):
+        """
+        IMPROVED: Remove dead/failed signals to save API resources
+        A signal is "dead" if:
+        - Down >50% and not moving (velocity <0.5%/min) after 1 hour
+        - Down >70% after 30 minutes (clearly rugged)
+        - Not entered after 6 hours
+        - Exited >30 minutes ago
+        """
+        now = time.time()
+        to_remove = []
+        
+        for token, signal in self.watch_list.items():
+            signal_age = now - signal.signal_time
+            
+            # Remove exited signals >30 minutes old
+            if signal.exited and signal_age > 1800:  # 30 minutes
+                to_remove.append(token)
+                continue
+            
+            # Remove deeply rugged signals (>70% down after 30 min)
+            if signal_age > 1800 and signal.current_gain < -70.0:
+                print(f"[WATCHLIST] 💀 Removing rugged signal {token[:8]}: {signal.current_gain:.1f}% after {signal_age/60:.0f}min", flush=True)
+                to_remove.append(token)
+                continue
+            
+            # Remove stale losers (>50% down, not moving, >1 hour old)
+            if signal_age > 3600:  # 1 hour
+                if signal.current_gain < -50.0 and abs(signal.velocity) < 0.5:
+                    print(f"[WATCHLIST] 💀 Removing dead signal {token[:8]}: {signal.current_gain:.1f}% after {signal_age/60:.0f}min", flush=True)
+                    to_remove.append(token)
+                    continue
+            
+            # Remove never-entered signals after 6 hours
+            if not signal.entered and signal_age > 21600:  # 6 hours
+                print(f"[WATCHLIST] ⏰ Removing stale signal {token[:8]}: {signal_age/3600:.1f}h old, never entered", flush=True)
+                to_remove.append(token)
+        
+        # Remove and persist
+        if to_remove:
+            for token in to_remove:
+                del self.watch_list[token]
+            print(f"[WATCHLIST] 🗑️ Pruned {len(to_remove)} dead/stale signals", flush=True)
+            self._save_to_redis()  # Persist after pruning
     
     def cleanup_old_signals(self, max_age_hours: int = 24):
         """Remove old signals from watch list"""
