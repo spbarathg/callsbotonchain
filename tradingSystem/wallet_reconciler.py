@@ -86,12 +86,30 @@ class WalletReconciler:
                         token_amount = balance_response.value
                         
                         # Get mint address (the token address)
-                        # We need to parse the account data to get the mint
+                        # Parse the account data to get the mint (first 32 bytes of token account)
                         account_info = self.client.get_account_info(account_pubkey)
                         if hasattr(account_info, 'value') and account_info.value:
+                            # CRITICAL FIX: Handle both bytes and base64-encoded data
                             data = account_info.value.data
+                            
+                            # If data is base64-encoded string, decode it
+                            if isinstance(data, str):
+                                import base64
+                                data = base64.b64decode(data)
+                            # If data is a list/tuple (RPC returns [data, encoding] sometimes)
+                            elif isinstance(data, (list, tuple)) and len(data) >= 1:
+                                data_part = data[0]
+                                if isinstance(data_part, str):
+                                    import base64
+                                    data = base64.b64decode(data_part)
+                                else:
+                                    data = bytes(data_part)
+                            # If data is already bytes, use it
+                            elif not isinstance(data, bytes):
+                                data = bytes(data)
+                            
                             if len(data) >= 32:
-                                # Token mint is at bytes 0-32
+                                # Token mint is at bytes 0-32 in SPL token account layout
                                 mint_bytes = data[0:32]
                                 mint_address = str(Pubkey(mint_bytes))
                                 
@@ -111,7 +129,9 @@ class WalletReconciler:
                                     print(f"[RECONCILER]   ✓ {mint_address[:12]}... = {balance:.4f} tokens", flush=True)
                 
                 except Exception as e:
-                    print(f"[RECONCILER] ⚠️ Error processing token account: {e}", flush=True)
+                    print(f"[RECONCILER] ⚠️ Error processing token account {account_pubkey}: {e}", flush=True)
+                    import traceback
+                    traceback.print_exc()
                     continue
             
             print(f"[RECONCILER] ✅ Found {len(holdings)} tokens with non-zero balance", flush=True)
