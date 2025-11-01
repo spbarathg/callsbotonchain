@@ -188,6 +188,10 @@ class WatchListManager:
             "reenter": [],  # Re-entries for exited positions
         }
         
+        # CRITICAL DEBUG (Nov 1): Log why prices aren't being checked
+        if not hasattr(self, '_debug_logged'):
+            self._debug_logged = False
+        
         for token, signal in list(self.watch_list.items()):
             # Determine check interval
             signal_age = now - signal.signal_time
@@ -201,6 +205,14 @@ class WatchListManager:
             else:
                 interval = self.INTERVAL_STABLE
             
+            # CRITICAL DEBUG: Log first iteration details
+            if not self._debug_logged and len(self.watch_list) > 0:
+                print(f"[WATCHLIST_DEBUG] Token: {token[:8]}, signal_age: {signal_age:.1f}s, "
+                      f"last_check: {signal.last_check}, interval: {interval}s, "
+                      f"time_since_check: {now - signal.last_check:.1f}s, "
+                      f"entered: {signal.entered}, exited: {signal.exited}", flush=True)
+                self._debug_logged = True
+            
             # Skip if checked too recently
             if now - signal.last_check < interval:
                 continue
@@ -209,6 +221,9 @@ class WatchListManager:
             time_since_last_call = now - self.last_api_call
             if time_since_last_call < self.min_call_interval:
                 time.sleep(self.min_call_interval - time_since_last_call)
+            
+            # Log that we're actually checking
+            print(f"[WATCHLIST_DEBUG] Checking price for {token[:8]}...", flush=True)
             
             # Get current price from Jupiter (RELIABLE)
             price = self._get_price_from_jupiter(token)
