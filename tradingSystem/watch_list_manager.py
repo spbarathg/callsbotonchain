@@ -117,31 +117,38 @@ class WatchListManager:
         - Aggressive caching prevents API abuse
         """
         try:
-            # Use broker's get_token_price (already implemented and efficient)
-            from .broker_optimized import Broker
-            from solders.keypair import Keypair
-            import os
-            import json
-            import base58
+            # CRITICAL FIX (Nov 1): Use jupiter_price_oracle for consistency
+            # Problem: Creating new Broker instances was failing silently
+            # Solution: Reuse the same oracle as exit monitoring
+            from .jupiter_price_oracle import get_jupiter_price_oracle
+            oracle = get_jupiter_price_oracle()
             
-            # Get keypair (needed for broker init)
-            pk_env = os.getenv("TS_WALLET_SECRET", "")
-            if pk_env.strip().startswith("["):
-                arr = json.loads(pk_env)
-                kp = Keypair.from_bytes(bytes(arr))
+            # Get sellable price from Jupiter (same as exit monitoring uses)
+            price = oracle.get_sellable_price(token, cache_ttl=5)  # 5s cache for watch list
+            
+            if price and price > 0:
+                return price
             else:
-                pk_bytes = base58.b58decode(pk_env)
-                kp = Keypair.from_bytes(pk_bytes)
+                # Price fetch failed - log every 10 failures per token
+                if not hasattr(self, '_price_failures'):
+                    self._price_failures = {}
+                self._price_failures[token] = self._price_failures.get(token, 0) + 1
+                
+                if self._price_failures[token] % 10 == 1:  # Log 1st, 11th, 21st...
+                    print(f"[WATCHLIST] ⚠️ Price unavailable for {token[:8]} (failure #{self._price_failures[token]})", flush=True)
+                
+                return None
             
-            # Get price via broker (uses Jupiter)
-            from solana.rpc.api import Client
-            rpc = Client(os.getenv("TS_RPC_URL", "https://api.mainnet-beta.solana.com"))
-            broker = Broker(rpc, kp)
-            price = broker.get_token_price(token)
-            
-            return price if price > 0 else None
         except Exception as e:
-            # Fallback: Return None, will skip this update cycle
+            # Log critical errors
+            if not hasattr(self, '_logged_errors'):
+                self._logged_errors = set()
+            
+            error_key = f"{token[:8]}:{type(e).__name__}"
+            if error_key not in self._logged_errors:
+                print(f"[WATCHLIST] ❌ Price fetch error for {token[:8]}: {e}", flush=True)
+                self._logged_errors.add(error_key)
+            
             return None
     
     def _calculate_metrics(self, signal: WatchedSignal, current_price: float):
