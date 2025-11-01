@@ -225,10 +225,11 @@ class WatchListManager:
             # Problem: Creating new Broker instances was failing silently
             # Solution: Reuse the same oracle as exit monitoring
             from .jupiter_price_oracle import get_jupiter_oracle
-            oracle = get_jupiter_oracle()
+            oracle = get_jupiter_oracle(cache_ttl=5)  # 5s cache for watch list
             
-            # Get sellable price from Jupiter (same as exit monitoring uses)
-            price = oracle.get_sellable_price(token, cache_ttl=5)  # 5s cache for watch list
+            # Get price for 100 tokens (enough for realistic quote)
+            # oracle.get_price(token, holdings) returns price per token
+            price = oracle.get_price(token, holdings=100.0)
             
             if price and price > 0:
                 return price
