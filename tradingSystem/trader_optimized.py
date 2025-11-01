@@ -862,7 +862,9 @@ class TradeEngine:
                 pnl_pct = (pnl_usd / entry_usd * 100) if entry_usd > 0 else 0
                 
                 # Record trade in circuit breaker
-                self.circuit_breaker.record_trade(pnl_usd, slippage_pct=abs(fill.effective_slippage_bps / 100.0))
+                # CRITICAL FIX: effective_slippage_bps may not exist for all fills
+                slippage_pct = abs(fill.effective_slippage_bps / 100.0) if hasattr(fill, 'effective_slippage_bps') else 0.0
+                self.circuit_breaker.record_trade(pnl_usd, slippage_pct=slippage_pct)
                 
                 # Update database
                 add_fill(int(pid), "sell", float(fill.price), float(fill.qty), float(fill.usd))

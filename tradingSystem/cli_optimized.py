@@ -581,10 +581,8 @@ def _exit_loop(engine: TradeEngine, stop_event: threading.Event) -> None:
                     # If database shows large qty but wallet is nearly empty, it's dust from failed sell
                     try:
                         from .broker_optimized import Broker
-                        from solders.keypair import Keypair
-                        # os is already imported at module level
-                        kp = Keypair.from_base58_string(os.getenv("TS_WALLET_SECRET"))
-                        broker = Broker(kp, dry_run=False)
+                        # Broker() takes no args - reads config from env
+                        broker = Broker()
                         actual_balance = broker._query_token_balance(token)
                         
                         if actual_balance is not None and actual_balance < 0.01:  # Less than 0.01 tokens
