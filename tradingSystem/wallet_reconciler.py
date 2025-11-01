@@ -78,17 +78,26 @@ class WalletReconciler:
                 try:
                     # Get account pubkey
                     account_pubkey = account.pubkey
+                    print(f"[RECONCILER_DEBUG] Processing account: {account_pubkey}", flush=True)
                     
                     # Get token account balance
                     balance_response = self.client.get_token_account_balance(account_pubkey)
+                    print(f"[RECONCILER_DEBUG] Got balance response", flush=True)
                     
                     if hasattr(balance_response, 'value') and balance_response.value:
                         token_amount = balance_response.value
+                        print(f"[RECONCILER_DEBUG] Balance: {token_amount}", flush=True)
                         
                         # Get mint address (the token address)
                         # Parse the account data to get the mint (first 32 bytes of token account)
+                        print(f"[RECONCILER_DEBUG] Fetching account info...", flush=True)
                         account_info = self.client.get_account_info(account_pubkey)
+                        print(f"[RECONCILER_DEBUG] Account info type: {type(account_info)}", flush=True)
+                        print(f"[RECONCILER_DEBUG] Has value: {hasattr(account_info, 'value')}", flush=True)
+                        
                         if hasattr(account_info, 'value') and account_info.value:
+                            print(f"[RECONCILER_DEBUG] Account value type: {type(account_info.value)}", flush=True)
+                            print(f"[RECONCILER_DEBUG] Has data: {hasattr(account_info.value, 'data')}", flush=True)
                             # CRITICAL FIX: Handle both bytes and base64-encoded data
                             data = account_info.value.data
                             
