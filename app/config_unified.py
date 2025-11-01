@@ -314,11 +314,12 @@ STABLE_MINTS = [
     "So11111111111111111111111111111111111111112",   # Wrapped SOL
 ]
 
-# Market cap limits - SWEET SPOT: $50k-$200k for best 2x+ rate
+# Market cap limits - STRICT $180k CAP to avoid scams
 # DATA-DRIVEN: $50k-$100k has 28.8% 2x+ rate (best), <$50k has 63.9% rug rate (avoid!)
+# USER REQUIREMENT: Hard cap at $180k to filter out high mcap scams
 MIN_MARKET_CAP_USD = _get_float("MIN_MARKET_CAP_USD", 50000.0)  # $50k minimum (avoid death zone)
-MAX_MARKET_CAP_USD = _get_float("MAX_MARKET_CAP_USD", 130000.0)  # $130k max (extended to capture moonshots - avg winner entry: $129k)
-MAX_MARKET_CAP_FOR_DEFAULT_ALERT = _get_float("MAX_MARKET_CAP_FOR_DEFAULT_ALERT", 130000.0)  # $130k max for alerts (aligned with MAX_MARKET_CAP_USD)
+MAX_MARKET_CAP_USD = _get_float("MAX_MARKET_CAP_USD", 180000.0)  # $180k STRICT CAP (avoid high mcap scams)
+MAX_MARKET_CAP_FOR_DEFAULT_ALERT = _get_float("MAX_MARKET_CAP_FOR_DEFAULT_ALERT", 180000.0)  # $180k max for alerts
 LARGE_CAP_MOMENTUM_GATE_1H = _get_float("LARGE_CAP_MOMENTUM_GATE_1H", 5.0)
 LARGE_CAP_HOLDER_STATS_MCAP_USD = _get_float("LARGE_CAP_HOLDER_STATS_MCAP_USD", 200000.0)  # Updated to $200k
 
@@ -388,11 +389,10 @@ SMART_MONEY_SCORE_BONUS = _get_int("SMART_MONEY_SCORE_BONUS", 0)  # REMOVED
 REQUIRE_VELOCITY_MIN_SCORE_FOR_ALERT = _get_int("REQUIRE_VELOCITY_MIN_SCORE_FOR_ALERT", 0)
 
 # Cycle Balance - OPTIMIZED FOR NET STRATEGY
-# NET STRATEGY: Lower threshold to 6 to cast wider net
-# Goal: Capture cumulative returns across more signals
-# Quality signals (6-10) get through, junk (<6) stays filtered
-SMART_CYCLE_MIN_SCORE = _get_int("SMART_CYCLE_MIN_SCORE", 6)  # NET: Cast wider net
-GENERAL_CYCLE_MIN_SCORE = _get_int("GENERAL_CYCLE_MIN_SCORE", 6)  # NET: Accept 6+ for diversification
+# NET STRATEGY: Quality over quantity - only 7+/10 signals
+# Reasoning: 7+ signals are proven quality, avoid noise from 6/10
+SMART_CYCLE_MIN_SCORE = _get_int("SMART_CYCLE_MIN_SCORE", 7)  # NET: Quality signals only
+GENERAL_CYCLE_MIN_SCORE = _get_int("GENERAL_CYCLE_MIN_SCORE", 7)  # NET: 7+ for quality net
 
 # Multi-signal Confirmation
 REQUIRE_MULTI_SIGNAL = _get_bool("REQUIRE_MULTI_SIGNAL", False)
