@@ -712,6 +712,21 @@ def run() -> None:
     engine = TradeEngine()
     mode = "dry_run" if engine.broker._dry else "LIVE"
     
+    # CRITICAL: Reconcile wallet with database BEFORE starting trades
+    # Ensures database reflects wallet reality (fixes ghost positions, manual sales, etc.)
+    print("="*60)
+    print("🔄 WALLET RECONCILIATION")
+    print("="*60)
+    try:
+        from tradingSystem.wallet_reconciler import reconcile_on_startup
+        from tradingSystem.config_optimized import RPC_URL, WALLET_SECRET
+        reconcile_on_startup(RPC_URL, WALLET_SECRET)
+    except Exception as e:
+        print(f"⚠️  Reconciliation failed (non-critical): {e}")
+        print("   Continuing with database-only mode...")
+    print("="*60)
+    print()
+    
     # Initialize Watch & Strike system
     print("="*60)
     print("🎯 INITIALIZING WATCH & STRIKE SYSTEM")
