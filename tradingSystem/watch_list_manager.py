@@ -362,16 +362,23 @@ class WatchListManager:
             
             # === ENTRY LOGIC ===
             if not signal.entered and not signal.exited:
-                # Should we enter this signal?
-                # Check all conditions
+                # NET STRATEGY: More lenient entry (no velocity requirement for 7+ scores)
+                # Philosophy: Cast wide net, let winners emerge
                 score_ok = signal.signal_score >= self.ENTRY_MIN_SCORE
                 gain_ok = signal.current_gain >= self.ENTRY_MIN_GAIN
-                velocity_ok = signal.velocity >= self.ENTRY_MIN_VELOCITY
-                pumping_ok = signal.is_pumping
+                
+                # For score 7+, skip velocity check (trust the signal quality)
+                # For score 6, require momentum confirmation
+                if signal.signal_score >= 7:
+                    velocity_ok = True  # Skip velocity check for high scores
+                    pumping_ok = True   # Skip pumping check for high scores
+                else:
+                    velocity_ok = signal.velocity >= self.ENTRY_MIN_VELOCITY
+                    pumping_ok = signal.is_pumping
                 
                 if score_ok and gain_ok and velocity_ok and pumping_ok:
                     print(f"[WATCHLIST_DEBUG] ✅ ENTRY TRIGGERED for {token[:8]} | "
-                          f"+{signal.current_gain:.1f}% at {signal.velocity:.1f}%/min", flush=True)
+                          f"+{signal.current_gain:.1f}% at {signal.velocity:.1f}%/min (score {signal.signal_score})", flush=True)
                     
                     recommendations["enter"].append({
                         "token": token,
@@ -379,7 +386,7 @@ class WatchListManager:
                         "gain": signal.current_gain,
                         "velocity": signal.velocity,
                         "score": signal.signal_score,
-                        "reason": f"Pumping +{signal.current_gain:.1f}% at {signal.velocity:.1f}%/min"
+                        "reason": f"Score {signal.signal_score}: +{signal.current_gain:.1f}% gain"
                     })
                 else:
                     # DEBUG: Log why entry was not triggered

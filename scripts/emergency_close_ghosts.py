@@ -5,7 +5,8 @@ import sqlite3
 import os
 
 # Use correct database path for Docker container
-db_path = '/app/deployment/var/trading.db'
+# CRITICAL: Bot uses var/trading.db (relative to /app), NOT deployment/var/
+db_path = '/app/var/trading.db'
 
 print(f"🔍 Checking database: {db_path}")
 conn = sqlite3.connect(db_path)

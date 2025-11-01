@@ -64,10 +64,11 @@ BANKROLL_USD = _get_float("TS_BANKROLL_USD", 20)
 # NOTE: Position sizing uses get_position_size() which will query actual balance
 # This default is only used for circuit breaker calculations
 
-MAX_CONCURRENT = _get_int("TS_MAX_CONCURRENT", 3)  # 3 positions max - AGGRESSIVE MODE (fewer, bigger bets)
+MAX_CONCURRENT = _get_int("TS_MAX_CONCURRENT", 12)  # 12 positions for NET STRATEGY (wide net)
 
 # NET STRATEGY MODE: Equal-weighted portfolio for compounding
-NET_STRATEGY_MODE = _get_bool("TS_NET_STRATEGY_MODE", False)
+# ENABLED: Cast wide net, equal-weight all signals, close net at 5x portfolio gain
+NET_STRATEGY_MODE = _get_bool("TS_NET_STRATEGY_MODE", True)
 NET_TAKE_PROFIT_PCT = _get_float("TS_NET_TAKE_PROFIT_PCT", 500.0)  # Close net at 5x (500%)
 
 # OPTIMIZED SIZING - Based on proven win rates by score

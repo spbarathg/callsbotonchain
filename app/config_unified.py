@@ -387,12 +387,12 @@ SMART_MONEY_SCORE_BONUS = _get_int("SMART_MONEY_SCORE_BONUS", 0)  # REMOVED
 # Velocity
 REQUIRE_VELOCITY_MIN_SCORE_FOR_ALERT = _get_int("REQUIRE_VELOCITY_MIN_SCORE_FOR_ALERT", 0)
 
-# Cycle Balance - OPTIMIZED FOR 2X+ WIN RATE
-# RAISED to 7+ for quality signals - reduce noise from marginal tokens
-# Quality over quantity - only alert on HIGH-CONFIDENCE signals
-# Current issue: ALL signals are score 10 (no discrimination)
-SMART_CYCLE_MIN_SCORE = _get_int("SMART_CYCLE_MIN_SCORE", 7)  # DATA-DRIVEN: Score 7 had 20% win rate
-GENERAL_CYCLE_MIN_SCORE = _get_int("GENERAL_CYCLE_MIN_SCORE", 7)  # DATA-DRIVEN: Lower scores (4-7) caught moonshots (8.57x avg for score 4)
+# Cycle Balance - OPTIMIZED FOR NET STRATEGY
+# NET STRATEGY: Lower threshold to 6 to cast wider net
+# Goal: Capture cumulative returns across more signals
+# Quality signals (6-10) get through, junk (<6) stays filtered
+SMART_CYCLE_MIN_SCORE = _get_int("SMART_CYCLE_MIN_SCORE", 6)  # NET: Cast wider net
+GENERAL_CYCLE_MIN_SCORE = _get_int("GENERAL_CYCLE_MIN_SCORE", 6)  # NET: Accept 6+ for diversification
 
 # Multi-signal Confirmation
 REQUIRE_MULTI_SIGNAL = _get_bool("REQUIRE_MULTI_SIGNAL", False)
