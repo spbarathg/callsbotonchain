@@ -946,6 +946,11 @@ class TradeEngine:
                     return True
                 
         except Exception as e:
+            # CRITICAL: Log exception to console AND file
+            # Silent failures here caused infinite loops with rugged positions
+            print(f"[TRADER] 🚨 EXCEPTION in check_exits for {token[:8]}: {e}", flush=True)
+            import traceback
+            traceback.print_exc()
             self._log("exit_exception", token=token, error=str(e))
             return False
     
@@ -990,8 +995,11 @@ class TradeEngine:
                 print(f"[TRADER] ⚠️ EMERGENCY EXIT FAILED: {token[:8]} - {fill.error}", flush=True)
                 return False
         except Exception as e:
+            # CRITICAL: Log exception with full traceback
+            print(f"[TRADER] 🚨 EXCEPTION in emergency_exit for {token[:8]}: {e}", flush=True)
+            import traceback
+            traceback.print_exc()
             self._log("emergency_exit_exception", token=token, error=str(e))
-            print(f"[TRADER] ❌ EMERGENCY EXIT EXCEPTION: {token[:8]} - {e}", flush=True)
             return False
 
     def rebalance_position(self, token_to_sell: str, new_token: str, new_plan: Dict) -> bool:

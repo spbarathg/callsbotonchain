@@ -596,8 +596,9 @@ def _exit_loop(engine: TradeEngine, stop_event: threading.Event) -> None:
                                 del engine.live[token]
                             continue
                     except Exception as e:
-                        # Don't crash exit loop on balance query errors
-                        pass
+                        # Don't crash exit loop on balance query errors, but LOG them!
+                        print(f"[EXIT_LOOP] ⚠️ Dust cleanup error for {token[:8]}: {e}", flush=True)
+                        engine._log("dust_cleanup_error", token=token, error=str(e))
                     
                     if price > 0:
                         # Calculate current profit
@@ -690,7 +691,9 @@ def _exit_loop(engine: TradeEngine, stop_event: threading.Event) -> None:
                             print(f"[EXIT_LOOP] No price data for {token[:8]}...", flush=True)
                 except Exception as e:
                     engine._log("exit_check_error", token=token, error=str(e))
-                    print(f"[EXIT_LOOP] Exit check error for {token[:8]}...: {e}", flush=True)
+                    print(f"[EXIT_LOOP] 🚨 Exit check error for {token[:8]}...: {e}", flush=True)
+                    import traceback
+                    traceback.print_exc()
             
             time.sleep(check_interval)
             
