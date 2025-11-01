@@ -390,14 +390,14 @@ def _exit_loop(engine: TradeEngine, stop_event: threading.Event) -> None:
     # Problem: qty=0 positions accumulate over time, spam Jupiter API
     # Solution: Close all positions with qty=0 on startup
     try:
-        from tradingSystem.db import init, conn
+        from tradingSystem.db import init, _conn, close_position
         init()
+        conn = _conn()
         cursor = conn.cursor()
         cursor.execute("SELECT id, token_address FROM positions WHERE status='open' AND qty <= 0")
         ghost_positions = cursor.fetchall()
         if ghost_positions:
             print(f"[EXIT_LOOP] 🧹 Found {len(ghost_positions)} ghost positions (qty=0) on startup, cleaning up...", flush=True)
-            from tradingSystem.db import close_position
             for pid, token in ghost_positions:
                 close_position(pid)
                 print(f"[EXIT_LOOP] Closed ghost position #{pid} ({token[:8]}...)", flush=True)
