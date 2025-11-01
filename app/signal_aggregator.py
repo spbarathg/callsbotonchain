@@ -117,7 +117,7 @@ def extract_token_address(text: str) -> Optional[str]:
 
 async def validate_token_quality(token_address: str) -> bool:
     """
-    Validate token meets minimum quality standards.
+    Validate token meets minimum quality standards AND is tradeable on Jupiter.
     Returns True if token is worth considering, False otherwise.
     """
     # Check cache first
@@ -153,19 +153,67 @@ async def validate_token_quality(token_address: str) -> bool:
         MIN_LIQUIDITY = 10000  # $10k minimum (filters most scams)
         MIN_VOLUME = 5000      # $5k minimum (filters dead tokens)
         
-        is_valid = liquidity >= MIN_LIQUIDITY and volume_24h >= MIN_VOLUME
-        
-        # Cache result
-        _validated_tokens[token_address] = is_valid
-        
-        if not is_valid:
+        if liquidity < MIN_LIQUIDITY or volume_24h < MIN_VOLUME:
+            _validated_tokens[token_address] = False
             print(f"⚠️  Signal Aggregator: Rejected {token_address[:8]}... "
                   f"(liq: ${liquidity:,.0f}, vol: ${volume_24h:,.0f})", flush=True)
+            return False
         
-        return is_valid
+        # CRITICAL FIX (Nov 1): Verify Jupiter can route this token
+        # Problem: DexScreener shows liquidity but Jupiter can't always route to those pools
+        # Solution: Only signal tokens that are actually tradeable on Jupiter
+        try:
+            from app.jupiter_client import get_jupiter_client
+            jupiter = get_jupiter_client()
+            
+            SOL_MINT = "So11111111111111111111111111111111111111112"
+            test_amount = 1_000_000  # 0.001 SOL
+            
+            # Quick Jupiter routing test (synchronous call, but fast timeout)
+            import asyncio
+            loop = asyncio.get_event_loop()
+            quote_result = await loop.run_in_executor(
+                None,
+                lambda: jupiter.get_quote(
+                    input_mint=SOL_MINT,
+                    output_mint=token_address,
+                    amount=test_amount,
+                    slippage_bps=5000,  # 50% slippage
+                    only_direct_routes=False,
+                    timeout=5.0
+                )
+            )
+            
+            if quote_result["status_code"] != 200 or not quote_result.get("json"):
+                _validated_tokens[token_address] = False
+                print(f"⚠️  Signal Aggregator: Rejected {token_address[:8]}... "
+                      f"(Jupiter can't route: {quote_result.get('error', 'No route')})", flush=True)
+                return False
+            
+            out_amount = quote_result["json"].get("outAmount")
+            if not out_amount or int(out_amount) <= 0:
+                _validated_tokens[token_address] = False
+                print(f"⚠️  Signal Aggregator: Rejected {token_address[:8]}... "
+                      f"(Invalid Jupiter quote)", flush=True)
+                return False
+            
+            print(f"✅ Signal Aggregator: Validated {token_address[:8]}... "
+                  f"(liq: ${liquidity:,.0f}, vol: ${volume_24h:,.0f}, Jupiter: OK)", flush=True)
+            
+        except Exception as e:
+            # If Jupiter check fails, be conservative and reject
+            _validated_tokens[token_address] = False
+            print(f"⚠️  Signal Aggregator: Rejected {token_address[:8]}... "
+                  f"(Jupiter check error: {e})", flush=True)
+            return False
+        
+        # All checks passed
+        _validated_tokens[token_address] = True
+        return True
         
     except Exception as e:
         print(f"❌ Signal Aggregator: Validation error for {token_address[:8]}...: {e}", flush=True)
+        _validated_tokens[token_address] = False
         return False
 
 

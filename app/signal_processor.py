@@ -753,8 +753,58 @@ class SignalProcessor:
             })
     
     def _push_to_redis(self, token: str, stats: TokenStats, score: int, prelim: int, conviction: str, smart: bool):
-        """Push signal to Redis for real-time trader consumption"""
+        """Push signal to Redis for real-time trader consumption (with Jupiter routing validation)"""
         print(f"[REDIS] Attempting to push signal for {token[:8]}... score={score}", flush=True)
+        
+        # CRITICAL FIX (Nov 1): Validate Jupiter routing BEFORE pushing to Redis
+        # Problem: Signals with good DexScreener data fail because Jupiter can't route
+        # Solution: Only push tokens that are actually tradeable on Jupiter
+        try:
+            from app.jupiter_client import get_jupiter_client
+            jupiter = get_jupiter_client()
+            
+            # Quick routing test with minimal amount (0.001 SOL ~$0.15)
+            # Use aggressive slippage and multi-hop to maximize compatibility
+            SOL_MINT = "So11111111111111111111111111111111111111112"
+            test_amount = 1_000_000  # 0.001 SOL
+            
+            print(f"[JUPITER] Testing route for {token[:8]}... (0.001 SOL, 50% slippage, multi-hop)", flush=True)
+            
+            result = jupiter.get_quote(
+                input_mint=SOL_MINT,
+                output_mint=token,
+                amount=test_amount,
+                slippage_bps=5000,  # 50% slippage (very aggressive for compatibility)
+                only_direct_routes=False,  # Allow multi-hop
+                timeout=8.0  # Quick timeout to avoid blocking
+            )
+            
+            if result["status_code"] != 200 or not result.get("json"):
+                error_msg = result.get("error", "No route found")
+                print(f"[JUPITER] ❌ Cannot route {token[:8]}... via Jupiter: {error_msg}", flush=True)
+                print(f"[JUPITER] 🚫 Rejecting signal - token not tradeable on Jupiter", flush=True)
+                self._log(f"⚠️ Signal rejected: Jupiter routing failed for {token[:8]}... ({error_msg})")
+                return  # Don't push untradeable tokens to trader
+            
+            quote_data = result["json"]
+            out_amount = quote_data.get("outAmount")
+            
+            if not out_amount or int(out_amount) <= 0:
+                print(f"[JUPITER] ❌ Invalid quote for {token[:8]}... (outAmount={out_amount})", flush=True)
+                print(f"[JUPITER] 🚫 Rejecting signal - invalid Jupiter quote", flush=True)
+                self._log(f"⚠️ Signal rejected: Invalid Jupiter quote for {token[:8]}...")
+                return
+            
+            print(f"[JUPITER] ✅ Route confirmed for {token[:8]}... (outAmount={out_amount})", flush=True)
+            
+        except Exception as e:
+            # If Jupiter check fails due to system error, log but don't block
+            # This prevents legitimate signals from being lost due to temporary API issues
+            print(f"[JUPITER] ⚠️ Routing check error for {token[:8]}...: {e}", flush=True)
+            print(f"[JUPITER] ⚠️ Allowing signal through despite check failure (may fail at trader)", flush=True)
+            self._log(f"⚠️ Jupiter routing check error: {e}")
+        
+        # Jupiter routing validated - proceed with Redis push
         try:
             signal_payload = {
                 "ca": token,
