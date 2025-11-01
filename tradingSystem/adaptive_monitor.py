@@ -30,13 +30,14 @@ class AdaptiveMonitor:
         # Analysis of 77 trades showed: 32 positions lost -40% (should've stopped at -30%)
         # Priority system catches dumps 3x faster where it matters!
         # 
-        # CRITICAL FIX (Oct 27): Added ULTRA_FAST (0.5s) for first 10 minutes
-        # Problem: 3s interval allowed -30% to -40% dumps before catching stop loss
-        # Solution: 0.5s checks catch stops at -12% max (3-4x improvement)
-        self.ULTRA_FAST_INTERVAL = 0.5   # 🔴🔴 NEW: First 10 min - Scam/dump protection
-        self.CRITICAL_INTERVAL = 1.0     # 🔴 Near stop loss / flash dump risk
-        self.IMPORTANT_INTERVAL = 2.0    # 🟡 Near profit targets (95-105%)
-        self.FAST_INTERVAL = 3.0         # 🟢 New/volatile positions (10-60 min)
+        # CRITICAL FIX (Nov 1): Reduced check frequency to prevent Jupiter rate limits
+        # Problem: 0.5s checks = 120 calls/min per position, 6 positions = 12 RPS (exceeds 10 RPS limit)
+        # Solution: 5s checks with price caching = 12 calls/min per position = 1.2 RPS total (safe)
+        # Price cache (60s TTL) ensures fresh-enough data while respecting rate limits
+        self.ULTRA_FAST_INTERVAL = 5.0   # 🔴🔴 First 10 min - Scam protection (was 0.5s)
+        self.CRITICAL_INTERVAL = 3.0     # 🔴 Near stop loss / flash dump risk (was 1.0s)
+        self.IMPORTANT_INTERVAL = 5.0    # 🟡 Near profit targets (95-105%) (was 2.0s)
+        self.FAST_INTERVAL = 10.0        # 🟢 New/volatile positions (10-60 min) (was 3.0s)
         self.MEDIUM_INTERVAL = 1800      # ⚪ 30 min - Established positions
         self.SLOW_INTERVAL = 7200        # ⚪ 2 hours - Confirmed moonshots
         self.ULTRA_SLOW_INTERVAL = 14400 # ⚪ 4 hours - Mega pumpers (500%+)

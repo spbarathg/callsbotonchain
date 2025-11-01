@@ -386,6 +386,24 @@ def _exit_loop(engine: TradeEngine, stop_event: threading.Event) -> None:
     last_health_check = 0  # CRITICAL FIX: Position health monitoring
     iteration = 0
     
+    # CRITICAL FIX (Nov 1): Clean up ghost positions on startup
+    # Problem: qty=0 positions accumulate over time, spam Jupiter API
+    # Solution: Close all positions with qty=0 on startup
+    try:
+        from tradingSystem.db import init, conn
+        init()
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, token_address FROM positions WHERE status='open' AND qty <= 0")
+        ghost_positions = cursor.fetchall()
+        if ghost_positions:
+            print(f"[EXIT_LOOP] 🧹 Found {len(ghost_positions)} ghost positions (qty=0) on startup, cleaning up...", flush=True)
+            from tradingSystem.db import close_position
+            for pid, token in ghost_positions:
+                close_position(pid)
+                print(f"[EXIT_LOOP] Closed ghost position #{pid} ({token[:8]}...)", flush=True)
+    except Exception as e:
+        print(f"[EXIT_LOOP] ⚠️ Error cleaning ghost positions on startup: {e}", flush=True)
+    
     # Initialize adaptive monitoring (smart intervals based on position maturity)
     from tradingSystem.adaptive_monitor import AdaptiveMonitor
     monitor = AdaptiveMonitor()
@@ -485,12 +503,15 @@ def _exit_loop(engine: TradeEngine, stop_event: threading.Event) -> None:
             # Pausing exits during cooldowns causes massive losses (-20% -> -37% bleeding)
             
             # Check exits for all open positions (STAGGERED to prevent rate limits)
-            # CRITICAL: Add 200ms delay between position checks to stay under 10 RPS
+            # CRITICAL FIX (Nov 1): Increased stagger delay to prevent Jupiter 429s
+            # Problem: 200ms delay = 5 RPS per position, 6 positions in burst = rate limit
+            # Solution: 1.0s delay between positions = 1 RPS max, well under 10 RPS limit
+            # With price caching (60s TTL), this is safe and prevents API abuse
             for idx, token in enumerate(list(engine.live.keys())):
                 try:
-                    # Stagger checks to prevent API burst (200ms = max 5 RPS per token)
+                    # Stagger checks to prevent API burst (1.0s = safe under 10 RPS limit)
                     if idx > 0:
-                        time.sleep(0.2)  # 200ms delay between positions
+                        time.sleep(1.0)  # 1 second delay between positions (was 200ms)
                     
                     pid = get_open_position_id_by_token(token)
                     if not pid:
@@ -514,6 +535,31 @@ def _exit_loop(engine: TradeEngine, stop_event: threading.Event) -> None:
                     
                     # Get current price (will use cache if available)
                     price = _get_last_price_usd(token, use_cache=True)
+                    
+                    # GHOST POSITION CLEANUP: Auto-close positions with repeated price failures
+                    # Problem: Dead/rugged tokens keep calling Jupiter API every iteration
+                    # Solution: Track consecutive failures, auto-close after 3 failures
+                    if price <= 0:
+                        price_failures = pos_data.get("price_failures", 0) + 1
+                        pos_data["price_failures"] = price_failures
+                        
+                        if price_failures >= 3:
+                            print(f"[EXIT_LOOP] 👻 GHOST POSITION: {token[:8]}... - {price_failures} consecutive price failures, auto-closing", flush=True)
+                            from .db import close_position
+                            close_position(pid)
+                            if token in engine.live:
+                                del engine.live[token]
+                            engine._log("ghost_position_auto_closed", token=token, pid=pid, price_failures=price_failures)
+                            continue
+                        else:
+                            # Skip this iteration, will retry next time
+                            if iteration % 60 == 0:  # Log every 5 minutes
+                                print(f"[EXIT_LOOP] ⚠️ Price unavailable for {token[:8]}... (failure {price_failures}/3)", flush=True)
+                            continue
+                    else:
+                        # Reset failure counter on successful price fetch
+                        if "price_failures" in pos_data:
+                            pos_data["price_failures"] = 0
                     
                     # DUST CLEANUP: Auto-close positions worth <$1 OR with negligible on-chain balance
                     # Problem: 95% sell buffer leaves dust per position

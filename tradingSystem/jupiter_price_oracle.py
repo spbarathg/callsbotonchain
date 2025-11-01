@@ -50,6 +50,15 @@ class JupiterPriceOracle:
         if holdings <= 0:
             return 0.0
         
+        # Check if token is marked as dead (prevents repeated API calls for rugged tokens)
+        with self._lock:
+            dead_marker = f"{token}_dead"
+            if dead_marker in self._cache:
+                dead_time, _ = self._cache[dead_marker]
+                age = time.time() - dead_time
+                if age < 300:  # 5 minute dead token cache
+                    return 0.0
+        
         # Check cache first
         with self._lock:
             if token in self._cache:
@@ -93,9 +102,13 @@ class JupiterPriceOracle:
                 logger.warning(f"Jupiter quote failed for {token[:8]}: {result.get('error')}")
                 # CRITICAL FIX: Cache failed lookups to prevent repeated API calls for dead tokens
                 # Problem: Dead/rugged tokens retry every 5s, causing 48+ API calls/min for nothing
-                # Solution: Cache 0.0 result for 60s so we don't hammer Jupiter for dead tokens
+                # Solution: Cache 0.0 result for 300s (5 min) so we don't hammer Jupiter for dead tokens
+                # This is safe because if a token is dead/rugged, it won't recover in 5 minutes
                 with self._lock:
                     self._cache[token] = (0.0, time.time())
+                
+                # Store longer TTL for dead tokens separately to prevent re-checking
+                self._cache[f"{token}_dead"] = (time.time(), time.time())
                 return 0.0
             
             quote = result["json"]
