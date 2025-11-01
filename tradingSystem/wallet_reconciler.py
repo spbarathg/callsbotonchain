@@ -61,10 +61,15 @@ class WalletReconciler:
         holdings = {}
         
         try:
-            # Query ALL token accounts owned by this wallet
-            response = self.client.get_token_accounts_by_owner(
+            # SIMPLIFIED APPROACH: Use get_token_accounts_by_owner_json_parsed
+            # This returns parsed JSON data instead of raw bytes, avoiding encoding issues
+            from solana.rpc.types import TokenAccountOpts
+            
+            # Get all SPL token accounts (filter by SPL Token program)
+            spl_program = Pubkey.from_string("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA")
+            response = self.client.get_token_accounts_by_owner_json_parsed(
                 self.pubkey,
-                {"programId": Pubkey.from_string("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA")}  # SPL Token Program
+                TokenAccountOpts(program_id=spl_program)
             )
             
             if not hasattr(response, 'value') or not response.value:
@@ -76,71 +81,30 @@ class WalletReconciler:
             
             for account in token_accounts:
                 try:
-                    # Get account pubkey
-                    account_pubkey = account.pubkey
-                    print(f"[RECONCILER_DEBUG] Processing account: {account_pubkey}", flush=True)
+                    # With json_parsed, we get structured data directly
+                    if not hasattr(account, 'account') or not account.account:
+                        continue
                     
-                    # Get token account balance
-                    balance_response = self.client.get_token_account_balance(account_pubkey)
-                    print(f"[RECONCILER_DEBUG] Got balance response", flush=True)
+                    account_data = account.account
                     
-                    if hasattr(balance_response, 'value') and balance_response.value:
-                        token_amount = balance_response.value
-                        print(f"[RECONCILER_DEBUG] Balance: {token_amount}", flush=True)
-                        
-                        # Get mint address (the token address)
-                        # Parse the account data to get the mint (first 32 bytes of token account)
-                        print(f"[RECONCILER_DEBUG] Fetching account info...", flush=True)
-                        account_info = self.client.get_account_info(account_pubkey)
-                        print(f"[RECONCILER_DEBUG] Account info type: {type(account_info)}", flush=True)
-                        print(f"[RECONCILER_DEBUG] Has value: {hasattr(account_info, 'value')}", flush=True)
-                        
-                        if hasattr(account_info, 'value') and account_info.value:
-                            print(f"[RECONCILER_DEBUG] Account value type: {type(account_info.value)}", flush=True)
-                            print(f"[RECONCILER_DEBUG] Has data: {hasattr(account_info.value, 'data')}", flush=True)
-                            # CRITICAL FIX: Handle both bytes and base64-encoded data
-                            data = account_info.value.data
+                    # Get parsed token info
+                    if hasattr(account_data, 'data') and hasattr(account_data.data, 'parsed'):
+                        parsed = account_data.data.parsed
+                        if isinstance(parsed, dict):
+                            info = parsed.get('info', {})
+                            mint_address = info.get('mint', '')
+                            token_amount = info.get('tokenAmount', {})
                             
-                            # If data is base64-encoded string, decode it
-                            if isinstance(data, str):
-                                import base64
-                                data = base64.b64decode(data)
-                            # If data is a list/tuple (RPC returns [data, encoding] sometimes)
-                            elif isinstance(data, (list, tuple)) and len(data) >= 1:
-                                data_part = data[0]
-                                if isinstance(data_part, str):
-                                    import base64
-                                    data = base64.b64decode(data_part)
-                                else:
-                                    data = bytes(data_part)
-                            # If data is already bytes, use it
-                            elif not isinstance(data, bytes):
-                                data = bytes(data)
-                            
-                            if len(data) >= 32:
-                                # Token mint is at bytes 0-32 in SPL token account layout
-                                mint_bytes = data[0:32]
-                                mint_address = str(Pubkey(mint_bytes))
-                                
-                                # Get balance
-                                if hasattr(token_amount, 'ui_amount') and token_amount.ui_amount is not None:
-                                    balance = float(token_amount.ui_amount)
-                                elif hasattr(token_amount, 'amount') and hasattr(token_amount, 'decimals'):
-                                    raw = int(token_amount.amount)
-                                    decimals = int(token_amount.decimals)
-                                    balance = float(raw) / (10 ** decimals)
-                                else:
-                                    continue
-                                
-                                # Filter out zero balances
-                                if balance > 0:
+                            # Get balance
+                            if isinstance(token_amount, dict):
+                                ui_amount = token_amount.get('uiAmount')
+                                if ui_amount is not None and ui_amount > 0:
+                                    balance = float(ui_amount)
                                     holdings[mint_address] = balance
                                     print(f"[RECONCILER]   ✓ {mint_address[:12]}... = {balance:.4f} tokens", flush=True)
                 
                 except Exception as e:
-                    print(f"[RECONCILER] ⚠️ Error processing token account {account_pubkey}: {e}", flush=True)
-                    import traceback
-                    traceback.print_exc()
+                    print(f"[RECONCILER] ⚠️ Error processing token account: {e}", flush=True)
                     continue
             
             print(f"[RECONCILER] ✅ Found {len(holdings)} tokens with non-zero balance", flush=True)

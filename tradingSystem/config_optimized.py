@@ -302,8 +302,9 @@ def get_net_position_size() -> float:
     current_balance = get_current_bankroll()
     net_size = current_balance / MAX_CONCURRENT / 2.0
     
-    # Minimum $0.50 (gas + slippage), Maximum $50 per position (risk cap)
-    net_size = max(0.50, min(net_size, 50.0))
+    # Minimum $0.50 (gas + slippage), Maximum $200 per position (increased for user request)
+    # User wants $100+ per signal, so increased cap from $50 to $200
+    net_size = max(0.50, min(net_size, 200.0))
     
     print(f"[NET] Position size: ${net_size:.2f} (balance=${current_balance:.2f}, max_pos={MAX_CONCURRENT})", flush=True)
     
