@@ -792,6 +792,8 @@ class TradeEngine:
                         "COULD_NOT_FIND_ANY_ROUTE" in str(fill.error)):
                         print(f"[TRADER] 🚨 RUGGED/DEAD TOKEN DETECTED: {token[:8]} - force closing", flush=True)
                         print(f"[TRADER] Error: {fill.error}", flush=True)
+                        # CRITICAL FIX: Local import required (same as ghost position handling above)
+                        from .db import close_position
                         # Close position in DB (can't sell, but remove from tracking)
                         close_position(pid)
                         self.live.pop(token, None)
