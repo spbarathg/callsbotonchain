@@ -19,10 +19,17 @@ CAPITAL MANAGEMENT:
 - $600 balance → Max 6 positions @ $100 each
 - Only enter signals showing REAL movement
 - Exit bad trades quickly, reallocate capital
+
+PERSISTENCE:
+- Watch list persisted to Redis (survives restarts)
+- Auto-saves on every state change
+- Auto-loads on startup
 """
 import time
+import json
+import os
 from typing import Dict, List, Optional, Tuple
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, asdict
 import requests
 from datetime import datetime
 
@@ -64,6 +71,8 @@ class WatchListManager:
     Identifies best entry opportunities
     """
     
+    REDIS_KEY = "watchlist:signals"  # Redis key for persistent storage
+    
     def __init__(self):
         self.watch_list: Dict[str, WatchedSignal] = {}
         
@@ -92,6 +101,94 @@ class WatchListManager:
         self.entries_made = 0
         self.reentries_made = 0
         self.price_checks = 0
+        
+        # Redis client for persistence
+        self._redis = None
+        self._init_redis()
+        
+        # CRITICAL: Load watch list from Redis on startup
+        self._load_from_redis()
+    
+    def _init_redis(self):
+        """Initialize Redis connection for persistence"""
+        try:
+            import redis
+            redis_url = os.getenv("REDIS_URL") or os.getenv("CALLSBOT_REDIS_URL") or "redis://localhost:6379/0"
+            self._redis = redis.from_url(redis_url, decode_responses=True, socket_timeout=5)
+            self._redis.ping()
+            print("[WATCHLIST] ✅ Redis persistence enabled", flush=True)
+        except Exception as e:
+            print(f"[WATCHLIST] ⚠️ Redis unavailable, watch list won't persist: {e}", flush=True)
+            self._redis = None
+    
+    def _save_to_redis(self):
+        """Save watch list to Redis (async, non-blocking)"""
+        if not self._redis:
+            return
+        
+        try:
+            # Serialize all signals to JSON
+            data = {}
+            for token, signal in self.watch_list.items():
+                data[token] = asdict(signal)
+            
+            # Save to Redis with 24h TTL
+            self._redis.setex(
+                self.REDIS_KEY,
+                86400,  # 24 hours
+                json.dumps(data)
+            )
+        except Exception as e:
+            # Don't crash if Redis fails, just log
+            if not hasattr(self, '_save_errors'):
+                self._save_errors = 0
+            self._save_errors += 1
+            if self._save_errors % 10 == 1:  # Log every 10 failures
+                print(f"[WATCHLIST] ⚠️ Redis save error (#{self._save_errors}): {e}", flush=True)
+    
+    def _load_from_redis(self):
+        """Load watch list from Redis on startup"""
+        if not self._redis:
+            return
+        
+        try:
+            data_str = self._redis.get(self.REDIS_KEY)
+            if not data_str:
+                print("[WATCHLIST] No persisted watch list found (clean start)", flush=True)
+                return
+            
+            data = json.loads(data_str)
+            count = 0
+            for token, signal_dict in data.items():
+                # Reconstruct WatchedSignal from dict
+                signal = WatchedSignal(
+                    token=signal_dict['token'],
+                    signal_time=signal_dict['signal_time'],
+                    signal_price=signal_dict['signal_price'],
+                    signal_score=signal_dict['signal_score'],
+                    conviction=signal_dict['conviction'],
+                    prices=signal_dict.get('prices', []),
+                    timestamps=signal_dict.get('timestamps', []),
+                    last_check=signal_dict.get('last_check', 0),
+                    entered=signal_dict.get('entered', False),
+                    exited=signal_dict.get('exited', False),
+                    position_id=signal_dict.get('position_id'),
+                    entry_price=signal_dict.get('entry_price'),
+                    exit_price=signal_dict.get('exit_price'),
+                    exit_reason=signal_dict.get('exit_reason'),
+                    max_gain=signal_dict.get('max_gain', 0),
+                    current_gain=signal_dict.get('current_gain', 0),
+                    velocity=signal_dict.get('velocity', 0),
+                    is_pumping=signal_dict.get('is_pumping', False),
+                    is_dumping=signal_dict.get('is_dumping', False)
+                )
+                self.watch_list[token] = signal
+                count += 1
+            
+            print(f"[WATCHLIST] ✅ Loaded {count} signals from Redis (survived restart!)", flush=True)
+            
+        except Exception as e:
+            print(f"[WATCHLIST] ⚠️ Failed to load from Redis: {e}", flush=True)
     
     def add_signal(self, token: str, signal_time: float, signal_price: float, 
                    signal_score: int, conviction: str):
@@ -106,6 +203,9 @@ class WatchListManager:
             )
             self.signals_added += 1
             print(f"[WATCHLIST] ➕ Added {token[:8]} (score {signal_score}) to watch list", flush=True)
+            
+            # CRITICAL: Save to Redis immediately
+            self._save_to_redis()
     
     def _get_price_from_jupiter(self, token: str) -> Optional[float]:
         """
@@ -246,6 +346,10 @@ class WatchListManager:
             # Calculate metrics
             self._calculate_metrics(signal, price)
             
+            # Save to Redis every 10 price checks to avoid excessive writes
+            if self.price_checks % 10 == 0:
+                self._save_to_redis()
+            
             # DEBUG: Log price tracking
             print(f"[WATCHLIST_DEBUG] {token[:8]} | Price: ${price:.8f} | Samples: {len(signal.prices)} | "
                   f"Gain: {signal.current_gain:+.1f}% | Vel: {signal.velocity:+.1f}%/min | "
@@ -309,6 +413,9 @@ class WatchListManager:
             signal.entry_price = entry_price
             self.entries_made += 1
             print(f"[WATCHLIST] ✅ Entered {token[:8]} at ${entry_price:.8f}", flush=True)
+            
+            # Save state change to Redis
+            self._save_to_redis()
     
     def mark_exited(self, token: str, exit_price: float, reason: str):
         """Mark a signal as exited (but keep watching!)"""
@@ -319,6 +426,9 @@ class WatchListManager:
             signal.exit_reason = reason
             print(f"[WATCHLIST] 🚪 Exited {token[:8]} at ${exit_price:.8f} ({reason})", flush=True)
             print(f"[WATCHLIST] 👀 Still watching for re-entry opportunity...", flush=True)
+            
+            # Save state change to Redis
+            self._save_to_redis()
     
     def mark_reentered(self, token: str, position_id: int, entry_price: float):
         """Mark a signal as re-entered"""
