@@ -74,6 +74,7 @@ class WatchListManager:
     REDIS_KEY = "watchlist:signals"  # Redis key for persistent storage
     
     def __init__(self):
+        print("[WATCHLIST] Initializing WatchListManager...", flush=True)
         self.watch_list: Dict[str, WatchedSignal] = {}
         
         # Tracking intervals (in seconds) - AGGRESSIVE for fast memecoin pumps
@@ -104,10 +105,13 @@ class WatchListManager:
         
         # Redis client for persistence
         self._redis = None
+        print("[WATCHLIST] Connecting to Redis for persistence...", flush=True)
         self._init_redis()
         
         # CRITICAL: Load watch list from Redis on startup
+        print("[WATCHLIST] Loading persisted signals from Redis...", flush=True)
         self._load_from_redis()
+        print("[WATCHLIST] Initialization complete!", flush=True)
     
     def _init_redis(self):
         """Initialize Redis connection for persistence"""
