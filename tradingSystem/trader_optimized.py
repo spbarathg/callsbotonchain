@@ -780,12 +780,9 @@ class TradeEngine:
                         self._log("ghost_position_closed", token=token, pid=pid, error=fill.error)
                         return True  # Return True so position is removed from tracking
                     
-                    self._log("exit_failed_sell", token=token, pid=pid, error=fill.error, 
-                             failures=sell_failures + 1, next_backoff=backoff_times[min(sell_failures + 1, len(backoff_times) - 1)])
-                    
-                    # CRITICAL: Detect rugged/dead tokens and force-close immediately
+                    # CRITICAL: Detect rugged/dead tokens and force-close immediately BEFORE logging
                     # If we get "NO_ROUTE" or "RUG_DETECTED" error, the token is dead
-                    # IMPROVED: Also check for "DO NOT RETRY" flag and low on-chain balance
+                    # This check happens BEFORE the backoff_times logging to avoid UnboundLocalError
                     if ("RUG_DETECTED" in str(fill.error) or 
                         "No liquidity" in str(fill.error) or
                         "DO NOT RETRY" in str(fill.error) or
@@ -799,6 +796,10 @@ class TradeEngine:
                         self.live.pop(token, None)
                         self._log("rugged_token_closed", token=token, pid=pid, error=fill.error)
                         return True  # Return True so position is removed from tracking
+                    
+                    # Only log failed sell for non-rugged tokens (using backoff_seconds which is always defined)
+                    self._log("exit_failed_sell", token=token, pid=pid, error=fill.error, 
+                             failures=sell_failures + 1, next_backoff_seconds=backoff_seconds)
                     
                     # Track consecutive sell failures with adaptive backoff
                     if token in self.live:
