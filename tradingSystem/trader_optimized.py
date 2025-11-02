@@ -774,7 +774,7 @@ class TradeEngine:
                         print(f"[TRADER] 👻 GHOST POSITION DETECTED: {token[:8]} - auto-closing in database", flush=True)
                         print(f"[TRADER] Database shows position but wallet has ZERO tokens", flush=True)
                         # Close position in DB (can't sell - tokens don't exist in wallet)
-                        from .db import close_position  # CRITICAL: Local import required for nested scope!
+                        # Use module-level import (line 19)
                         close_position(pid)
                         self.live.pop(token, None)
                         self._log("ghost_position_closed", token=token, pid=pid, error=fill.error)
@@ -789,8 +789,7 @@ class TradeEngine:
                         "COULD_NOT_FIND_ANY_ROUTE" in str(fill.error)):
                         print(f"[TRADER] 🚨 RUGGED/DEAD TOKEN DETECTED: {token[:8]} - force closing", flush=True)
                         print(f"[TRADER] Error: {fill.error}", flush=True)
-                        # CRITICAL FIX: Local import required (same as ghost position handling above)
-                        from .db import close_position
+                        # Use module-level import (line 19)
                         # Close position in DB (can't sell, but remove from tracking)
                         close_position(pid)
                         self.live.pop(token, None)
