@@ -80,7 +80,7 @@ class MomentumValidator:
             return price if price > 0 else None, 0  # Return price and volume=0 (not tracked)
         except Exception as e:
             print(f"[MOMENTUM] ⚠️ Jupiter price check failed: {e}", flush=True)
-            return None, 0
+        return None, 0
     
     def _analyze_pattern(self, prices: List[float], timestamps: List[float]) -> Dict:
         """Analyze price pattern for entry decision"""

@@ -56,26 +56,11 @@ class CircuitBreaker:
         
         Returns:
             (can_trade, reason_if_blocked)
+        
+        NOTE: CIRCUIT BREAKER PERMANENTLY DISABLED PER USER REQUEST
         """
-        with self.lock:
-            if self.manual_override:
-                return False, "Manual emergency stop activated"
-            
-            if self.is_tripped:
-                # Check if cooldown period has passed
-                if self.trip_time:
-                    elapsed = time.time() - self.trip_time
-                    cooldown = 3600  # 1 hour cooldown after circuit breaker trips
-                    
-                    if elapsed < cooldown:
-                        remaining = cooldown - elapsed
-                        return False, f"Circuit breaker tripped: {self.trip_reason} (cooldown: {remaining/60:.1f}m remaining)"
-                    else:
-                        # Reset circuit breaker after cooldown
-                        self.reset()
-                        return True, None
-            
-            return True, None
+        # CIRCUIT BREAKER DISABLED - Always allow trading
+        return True, None
     
     def record_trade(self, pnl_usd: float, slippage_pct: float = 0.0):
         """
@@ -149,13 +134,9 @@ class CircuitBreaker:
             return
     
     def _trip(self, reason: str):
-        """Internal: Trip the circuit breaker"""
-        self.is_tripped = True
-        self.trip_reason = reason
-        self.trip_time = time.time()
-        
-        print(f"[CIRCUIT_BREAKER] 🚨 TRADING HALTED: {reason}", flush=True)
-        print(f"[CIRCUIT_BREAKER] System will resume in 1 hour or after manual reset", flush=True)
+        """Internal: Trip the circuit breaker - DISABLED"""
+        # CIRCUIT BREAKER DISABLED - No-op
+        pass
     
     def reset(self):
         """Reset the circuit breaker (admin action)"""
@@ -212,6 +193,10 @@ def get_circuit_breaker() -> CircuitBreaker:
     if _circuit_breaker is None:
         _circuit_breaker = CircuitBreaker()
     return _circuit_breaker
+
+
+
+
 
 
 
