@@ -33,16 +33,6 @@ HOST_HEADERS: Dict[str, Dict[str, str]] = {
         "sec-fetch-mode": "cors",
         "sec-fetch-site": "same-site",
     },
-    "cielo.finance": {
-        # Cielo API - use clean headers
-        "accept": "application/json",
-    },
-    "api.cielo.finance": {
-        "accept": "application/json",
-    },
-    "feed-api.cielo.finance": {
-        "accept": "application/json",
-    },
     "jup.ag": {
         "accept": "application/json",
         "origin": "https://jup.ag",
@@ -57,6 +47,11 @@ HOST_HEADERS: Dict[str, Dict[str, str]] = {
         "accept": "application/json",
         "origin": "https://jup.ag",
         "referer": "https://jup.ag/",
+    },
+    "public-api.birdeye.so": {
+        "accept": "application/json",
+        "origin": "https://birdeye.so",
+        "referer": "https://birdeye.so/",
     },
 }
 

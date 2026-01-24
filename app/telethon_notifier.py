@@ -44,14 +44,14 @@ async def _create_and_connect_client():
         await client.connect()
         
         if not await client.is_user_authorized():
-            print("❌ Telethon: Session not authorized. Run setup_telethon_session.py first.")
+            print("[ERROR] Telethon: Session not authorized. Run setup_telethon_session.py first.")
             await client.disconnect()
             return None
         
         return client
             
     except Exception as e:
-        print(f"❌ Telethon client initialization failed: {e}")
+        print(f"[ERROR] Telethon client initialization failed: {e}")
         return None
 
 
@@ -67,11 +67,11 @@ async def send_group_message_async(message: str) -> bool:
     """
     if not TELETHON_ENABLED:
         if not IS_TESTING:
-            print("⚠️  Telethon not enabled (missing credentials)")
+            print("[WARN] Telethon not enabled (missing credentials)")
         return False
     
     if not message or not message.strip():
-        print("❌ Telethon: Empty message provided")
+        print("[ERROR] Telethon: Empty message provided")
         return False
     
     # Lazy import Telethon errors only when actually needed
@@ -92,17 +92,17 @@ async def send_group_message_async(message: str) -> bool:
             link_preview=False  # Disable link previews for cleaner messages
         )
         
-        print(f"✅ Telethon: Message sent to group {TARGET_CHAT_ID}")
+        print(f"[OK] Telethon: Message sent to group {TARGET_CHAT_ID}")
         return True
         
     except FloodWaitError as e:
-        print(f"⚠️  Telethon: Rate limited, need to wait {e.seconds} seconds")
+        print(f"[WARN] Telethon: Rate limited, need to wait {e.seconds} seconds")
         return False
     except ChatWriteForbiddenError:
-        print(f"❌ Telethon: No permission to send messages to {TARGET_CHAT_ID}")
+        print(f"[ERROR] Telethon: No permission to send messages to {TARGET_CHAT_ID}")
         return False
     except Exception as e:
-        print(f"❌ Telethon: Failed to send message: {e}")
+        print(f"[ERROR] Telethon: Failed to send message: {e}")
         return False
     finally:
         # CRITICAL: Disconnect client after use to clean up event loop tasks
@@ -110,7 +110,7 @@ async def send_group_message_async(message: str) -> bool:
             try:
                 await client.disconnect()
             except Exception as e:
-                print(f"⚠️  Telethon: Error disconnecting client: {e}")
+                print(f"[WARN] Telethon: Error disconnecting client: {e}")
 
 
 def send_group_message(message: str) -> bool:
@@ -166,10 +166,10 @@ def send_group_message(message: str) -> bool:
             error_str = str(e)
             # Retry on event loop errors
             if "event loop" in error_str.lower() and attempt < max_retries - 1:
-                print(f"⚠️  Telethon: Event loop error (attempt {attempt + 1}/{max_retries}), retrying...")
+                print(f"[WARN] Telethon: Event loop error (attempt {attempt + 1}/{max_retries}), retrying...")
                 continue
             else:
-                print(f"❌ Telethon: Sync wrapper error: {e}")
+                print(f"[ERROR] Telethon: Sync wrapper error: {e}")
                 return False
     
     return False
@@ -178,7 +178,7 @@ def send_group_message(message: str) -> bool:
 # Module initialization check (skip during tests to avoid noise)
 if not IS_TESTING:
     if TELETHON_ENABLED:
-        print(f"📱 Telethon notifier enabled for group {TARGET_CHAT_ID}")
+        print(f"[OK] Telethon notifier enabled for group {TARGET_CHAT_ID}")
     else:
-        print("⚠️  Telethon notifier disabled (check environment variables)")
+        print("[WARN] Telethon notifier disabled (check environment variables)")
 

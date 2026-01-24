@@ -89,7 +89,6 @@ def _histogram(name: str, doc: str, labelnames: Optional[list[str]] = None, buck
 # ============ EXPANDED METRICS ============
 
 # API Calls (existing)
-_counter_api = _counter("cielo_api_calls_total", "Cielo API calls total", ["status", "endpoint"])
 _counter_ds = _counter("dexscreener_api_calls_total", "DexScreener API calls total", ["status"])
 _counter_gecko = _counter("geckoterminal_api_calls_total", "GeckoTerminal API calls total", ["status"])
 
@@ -138,9 +137,7 @@ def inc_api_call(provider: str, status: Optional[int], endpoint: str = "unknown"
         return
     s = str(status if status is not None else "none")
     
-    if provider == "cielo" and _counter_api is not None:
-        _counter_api.labels(status=s, endpoint=endpoint).inc()  # type: ignore
-    elif provider == "dexscreener" and _counter_ds is not None:
+    if provider == "dexscreener" and _counter_ds is not None:
         _counter_ds.labels(status=s).inc()  # type: ignore
     elif provider == "geckoterminal" and _counter_gecko is not None:
         _counter_gecko.labels(status=s).inc()  # type: ignore

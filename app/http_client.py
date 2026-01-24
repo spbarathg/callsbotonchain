@@ -193,7 +193,11 @@ def request_json(method: str, url: str, *, params: Optional[Dict[str, Any]] = No
             circuit_breaker.on_success()
         
         try:
-            provider = "dexscreener" if "dexscreener" in url else ("cielo" if "cielo" in url else None)
+            provider = (
+                "dexscreener" if "dexscreener" in url
+                else ("geckoterminal" if "geckoterminal" in url
+                else ("birdeye" if "birdeye" in url else None))
+            )
             if provider:
                 inc_api_call(provider, resp.status_code)
         except Exception:
@@ -205,7 +209,11 @@ def request_json(method: str, url: str, *, params: Optional[Dict[str, Any]] = No
             circuit_breaker.on_failure()
         
         try:
-            provider = "dexscreener" if "dexscreener" in url else ("cielo" if "cielo" in url else None)
+            provider = (
+                "dexscreener" if "dexscreener" in url
+                else ("geckoterminal" if "geckoterminal" in url
+                else ("birdeye" if "birdeye" in url else None))
+            )
             if provider:
                 inc_api_call(provider, None)
         except Exception:

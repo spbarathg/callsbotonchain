@@ -137,7 +137,9 @@ class MomentumTracker:
         """
         Get adaptive trailing stop percentage based on momentum
         
-        OPTIMIZED: Wider trails to let all winners run
+        FIXED NOV 2 2025: Reversed inverted logic (was widening for strong, tightening for weak)
+        CORRECT STRATEGY: Strong momentum → TIGHT trail (protect gains)
+                         Weak momentum → WIDE trail (give room to develop)
         """
         if token not in self._momentum_data:
             return None
@@ -148,17 +150,17 @@ class MomentumTracker:
         if momentum is None:
             return None  # Use default trail
         
-        # OPTIMIZED: Wide trailing stops for all tokens
-        # Give every position room to breathe and catch big moves
-        # - Strong tokens: 50% trail (maximum breathing room)
-        # - Moderate tokens: 45% trail (generous)
-        # - Weak tokens: 40% trail (still generous - many pump later)
+        # CORRECTED: Trailing stops INVERSELY tied to momentum strength
+        # Logic: Tokens pumping NOW need protection, tokens developing need room
+        # - Strong tokens: 15% trail (TIGHT - protect profits from active pump)
+        # - Moderate tokens: 25% trail (MEDIUM - balanced protection)
+        # - Weak tokens: 40% trail (WIDE - give room to develop, may pump later)
         if momentum == 'strong':
-            return 50.0
+            return 15.0  # TIGHT trail for strong momentum
         elif momentum == 'moderate':
-            return 45.0
+            return 25.0  # MEDIUM trail for moderate momentum
         else:  # weak
-            return 40.0
+            return 40.0  # WIDE trail for weak momentum
     
     def cleanup(self, token: str):
         """Remove tracking data for closed position"""

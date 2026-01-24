@@ -4,7 +4,7 @@ import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from tradingSystem.db import _conn
+from src.tradingSystem.db import _conn
 
 TOKEN = "2k9LnRAWJJBmmEzgXARwSEzoU1DorBYQHTXZtxusbonk"
 

@@ -60,6 +60,19 @@ def _get_bool(key: str, default: bool) -> bool:
     val = os.getenv(key, str(default)).strip().lower()
     return val in ("true", "1", "yes", "on")
 
+def _get_list_of_ints(key: str) -> list:
+    raw = os.getenv(key, "") or ""
+    out = []
+    for part in raw.split(","):
+        p = part.strip()
+        if not p:
+            continue
+        try:
+            out.append(int(p))
+        except ValueError:
+            continue
+    return out
+
 
 # ============================================================================
 # SECURITY & NETWORK
@@ -69,9 +82,8 @@ def _get_bool(key: str, default: bool) -> bool:
 _allow_hosts_env = os.getenv("CALLSBOT_HTTP_ALLOW_HOSTS", ",".join([
     "api.dexscreener.com",
     "dexscreener.com",
-    "feed-api.cielo.finance",
-    "api.cielo.finance",
     "api.geckoterminal.com",
+    "public-api.birdeye.so",
     "quote-api.jup.ag",
     "token.jup.ag",
     "price.jup.ag",
@@ -96,47 +108,46 @@ HTTP_BACKOFF_FACTOR = _get_float("HTTP_BACKOFF_FACTOR", 0.5)
 # API KEYS & SECRETS
 # ============================================================================
 
-# Cielo API (Primary data source)
-CIELO_API_KEY = _load_secret("CIELO_API_KEY", min_len=10)
-CIELO_BASE_URL = os.getenv("CIELO_BASE_URL", "https://api.cielo.finance").rstrip("/")
-CIELO_DISABLE_STATS = _get_bool("CIELO_DISABLE_STATS", False)
-CIELO_NEW_TRADE_ONLY = _get_bool("CIELO_NEW_TRADE_ONLY", False)
-CIELO_LIST_ID = _get_int("CIELO_LIST_ID", 0) if os.getenv("CIELO_LIST_ID") else None
-try:
-    _list_ids_raw = os.getenv("CIELO_LIST_IDS", "")
-    CIELO_LIST_IDS = []
-    if _list_ids_raw:
-        parts = [p.strip() for p in _list_ids_raw.split(",") if p.strip()]
-        for p in parts:
-            try:
-                CIELO_LIST_IDS.append(int(p))
-            except ValueError:
-                pass
-except Exception:
-    CIELO_LIST_IDS = []
-
-# Cielo Smart Money Filters
-CIELO_MIN_WALLET_PNL = _get_int("CIELO_MIN_WALLET_PNL", 1000)
-CIELO_MIN_TRADES = _get_int("CIELO_MIN_TRADES", 0)
-CIELO_MIN_WIN_RATE = _get_int("CIELO_MIN_WIN_RATE", 0)
-
 # Telegram Bot (Alerts)
 TELEGRAM_BOT_TOKEN = _load_secret("TELEGRAM_BOT_TOKEN", min_len=20)
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").strip()
 TELEGRAM_ENABLED = bool(TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID)
 
-# Telethon (User client for groups)
+# Birdeye API (price tracking)
+BIRDEYE_API_KEY = _load_secret("BIRDEYE_API_KEY", min_len=10)
+BIRDEYE_RPS = _get_int("BIRDEYE_RPS", 12)  # Lite plan limit: 15 RPS, keep headroom
+
 try:
     TELEGRAM_USER_API_ID = int(os.getenv("TELEGRAM_USER_API_ID", "0"))
     TELETHON_API_ID = str(TELEGRAM_USER_API_ID) if TELEGRAM_USER_API_ID else ""
 except (ValueError, TypeError):
     TELEGRAM_USER_API_ID = 0
     TELETHON_API_ID = ""
+TELEGRAM_USER_API_HASH = os.getenv("TELEGRAM_USER_API_HASH", "").strip()
 
-TELEGRAM_USER_API_HASH = os.getenv("TELEGRAM_USER_API_HASH", "")
+# ATM Telethon (ATM signal ingestion)
+try:
+    ATM_TELETHON_API_ID = int(os.getenv("ATM_TELETHON_API_ID", "0"))
+except (ValueError, TypeError):
+    ATM_TELETHON_API_ID = 0
+ATM_TELETHON_API_HASH = os.getenv("ATM_TELETHON_API_HASH", "").strip()
+if not ATM_TELETHON_API_ID:
+    ATM_TELETHON_API_ID = TELEGRAM_USER_API_ID
+if not ATM_TELETHON_API_HASH:
+    ATM_TELETHON_API_HASH = TELEGRAM_USER_API_HASH
+ATM_TELETHON_SESSION_FILE = os.getenv("ATM_TELETHON_SESSION_FILE", "").strip()
+ATM_CHANNEL_IDS = _get_list_of_ints("ATM_CHANNEL_IDS")
+ATM_INGEST_ENABLED = _get_bool("ATM_INGEST_ENABLED", False)
+ATM_DEFAULT_USD_VALUE = _get_int("ATM_DEFAULT_USD_VALUE", 1200)  # synthetic usd_value for ATM signals
+ATM_RATE_LIMIT_PER_MIN = _get_int("ATM_RATE_LIMIT_PER_MIN", 120)  # per-channel guard
+
+# Telethon (User client for groups)
+
 TELETHON_API_HASH = TELEGRAM_USER_API_HASH or _load_secret("TELETHON_API_HASH", min_len=16)
 
 TELEGRAM_USER_SESSION_FILE = os.getenv("TELEGRAM_USER_SESSION_FILE", "var/relay_user.session")
+if not ATM_TELETHON_SESSION_FILE:
+    ATM_TELETHON_SESSION_FILE = TELEGRAM_USER_SESSION_FILE or "var/atm_relay.session"
 TELETHON_SESSION_FILE = TELEGRAM_USER_SESSION_FILE or os.getenv("TELETHON_SESSION_FILE", "var/relay_user.session")
 
 try:
@@ -281,7 +292,6 @@ BUDGET_HARD_BLOCK = _get_bool("BUDGET_HARD_BLOCK", False)
 # FEATURE FLAGS
 # ============================================================================
 
-USE_CIELO_STATS = _get_bool("USE_CIELO_STATS", True)
 TELEGRAM_THROTTLE_ENABLED = _get_bool("TELEGRAM_THROTTLE_ENABLED", True)
 TELEGRAM_ALERT_MIN_INTERVAL = _get_int("TELEGRAM_ALERT_MIN_INTERVAL", 0)
 
@@ -314,12 +324,12 @@ STABLE_MINTS = [
     "So11111111111111111111111111111111111111112",   # Wrapped SOL
 ]
 
-# Market cap limits - STRICT $180k CAP to avoid scams
-# DATA-DRIVEN: $50k-$100k has 28.8% 2x+ rate (best), <$50k has 63.9% rug rate (avoid!)
-# USER REQUIREMENT: Hard cap at $180k to filter out high mcap scams
-MIN_MARKET_CAP_USD = _get_float("MIN_MARKET_CAP_USD", 50000.0)  # $50k minimum (avoid death zone)
-MAX_MARKET_CAP_USD = _get_float("MAX_MARKET_CAP_USD", 180000.0)  # $180k STRICT CAP (avoid high mcap scams)
-MAX_MARKET_CAP_FOR_DEFAULT_ALERT = _get_float("MAX_MARKET_CAP_FOR_DEFAULT_ALERT", 180000.0)  # $180k max for alerts
+# Market cap limits - UPDATED Nov 3 2025 for recovery pattern strategy
+# USER REQUIREMENT: $65K-$1M range for V-shaped recovery pattern detection
+# Strategy: Catch "dip and rip" patterns in established tokens (not micro-caps)
+MIN_MARKET_CAP_USD = _get_float("MIN_MARKET_CAP_USD", 65000.0)  # $65k minimum (user specified)
+MAX_MARKET_CAP_USD = _get_float("MAX_MARKET_CAP_USD", 1000000.0)  # $1M maximum (user specified)
+MAX_MARKET_CAP_FOR_DEFAULT_ALERT = _get_float("MAX_MARKET_CAP_FOR_DEFAULT_ALERT", 1000000.0)  # $1M max for alerts
 LARGE_CAP_MOMENTUM_GATE_1H = _get_float("LARGE_CAP_MOMENTUM_GATE_1H", 5.0)
 LARGE_CAP_HOLDER_STATS_MCAP_USD = _get_float("LARGE_CAP_HOLDER_STATS_MCAP_USD", 200000.0)  # Updated to $200k
 
@@ -594,7 +604,8 @@ __all__ = [
     # Security
     "SSRF_ALLOWED_HOSTS",
     # API Keys
-    "CIELO_API_KEY", "TELEGRAM_BOT_TOKEN", "SOLANA_WALLET_SECRET",
+    "TELEGRAM_BOT_TOKEN", "SOLANA_WALLET_SECRET",
+    "ATM_TELETHON_API_ID", "ATM_TELETHON_API_HASH", "ATM_TELETHON_SESSION_FILE", "ATM_CHANNEL_IDS", "ATM_INGEST_ENABLED",
     # Core Settings
     "HIGH_CONFIDENCE_SCORE", "DRY_RUN",
     # Gates

@@ -5,8 +5,6 @@ import json
 import threading
 from typing import Dict, Tuple, List, Any, Optional
 from app.config_unified import (
-    CIELO_API_KEY,
-    CIELO_DISABLE_STATS,
     MCAP_MICRO_MAX,
     MCAP_SMALL_MAX,
     MCAP_MID_MAX,
@@ -46,7 +44,6 @@ from app.config_unified import (
 )
 from app.config_unified import HTTP_TIMEOUT_STATS
 from app.http_client import request_json
-from app.budget import get_budget
 from app.logger_utils import log_process
 
 
@@ -245,7 +242,8 @@ _stats_cache: Dict[str, Tuple[float, Dict[str, Any]]] = {}
 _stats_lock = threading.Lock()
 _STATS_TTL_SEC = int(os.getenv("STATS_TTL_SEC", os.getenv("CALLSBOT_STATS_TTL", "900")))  # default 15 minutes
 
-_REDIS_URL = os.getenv("REDIS_URL") or os.getenv("CALLSBOT_REDIS_URL") or ""
+_USE_REDIS = os.getenv("USE_REDIS", "true").strip().lower() == "true"
+_REDIS_URL = (os.getenv("REDIS_URL") or os.getenv("CALLSBOT_REDIS_URL") or "") if _USE_REDIS else ""
 _redis_client = None
 if _REDIS_URL:
     try:
@@ -305,11 +303,10 @@ def _cache_set(token_address: str, data: Dict[str, Any]) -> None:
 
 
 def get_token_stats(token_address: str, force_refresh: bool = False) -> Dict[str, Any]:
-    """OPTIMIZED: Streamlined stats fetching with simplified retry logic"""
+    """Fetch token stats from DexScreener."""
     if not token_address:
         return {}
     
-    # Check cache
     cached = _cache_get(token_address) if not force_refresh else None
     if cached:
         try:
@@ -325,92 +322,15 @@ def get_token_stats(token_address: str, force_refresh: bool = False) -> Dict[str
     except Exception:
         pass
     
-    # Budget check
-    try:
-        b = get_budget()
-        if b and not b.can_spend("stats"):
-            ds = _get_token_stats_dexscreener(token_address)
-            stats = _normalize_stats_schema(ds) if ds else {}
-            # CRITICAL FIX: Inject token_address so TokenStats.from_api_response() can parse it
-            if stats and not stats.get("token_address"):
-                stats["token_address"] = token_address
-            return stats
-    except Exception:
-        pass
-
-    # Skip Cielo if disabled or denied
-    if CIELO_DISABLE_STATS or deny_is_denied() or not CIELO_API_KEY:
-        stats = _normalize_stats_schema(_get_token_stats_dexscreener(token_address) or {})
-        # CRITICAL FIX: Inject token_address so TokenStats.from_api_response() can parse it
-        if stats and not stats.get("token_address"):
-            stats["token_address"] = token_address
-        return stats
-
-    # OPTIMIZED: Single URL and header (removed combinatorial explosion)
-    url = "https://feed-api.cielo.finance/api/v1/token/stats"
-    params = {"token_address": token_address, "chain": "solana"}
-    headers = {"X-API-Key": CIELO_API_KEY}
-    
-    # Try Cielo API with simple retry
-    max_retries = 2
-    for attempt in range(max_retries):
-        result = request_json("GET", url, params=params, headers=headers, timeout=HTTP_TIMEOUT_STATS)
-        status = result.get("status_code")
-        
-        if status == 200:
-            try:
-                get_budget().spend("stats")
-            except Exception:
-                pass
-            
-            api_response = result.get("json", {})
-            if api_response.get("status") == "ok" and "data" in api_response:
-                data = _normalize_stats_schema(api_response["data"])
-                data["_source"] = "cielo"
-                
-                # OPTIMIZED: Simplified augmentation logic
-                if not data.get("liquidity_usd") or not data.get("market_cap_usd") or not data.get("symbol"):
-                    ds = _get_token_stats_dexscreener(token_address)
-                    if ds:
-                        data["liquidity_usd"] = data.get("liquidity_usd") or ds.get("liquidity_usd")
-                        data["market_cap_usd"] = data.get("market_cap_usd") or ds.get("market_cap_usd")
-                        data["symbol"] = data.get("symbol") or ds.get("symbol")
-                        data["name"] = data.get("name") or ds.get("name")
-                        data["_source"] = "cielo+ds"
-                
-                # CRITICAL FIX: Inject token_address so TokenStats.from_api_response() can parse it
-                if not data.get("token_address"):
-                    data["token_address"] = token_address
-                
-                _cache_set(token_address, data)
-                return data
-            break
-            
-        elif status == 429:
-            if attempt < max_retries - 1:
-                time.sleep(min(2 ** attempt, 10))
-                continue
-            deny_mark_denied()
-            break
-            
-        elif status in (401, 403):
-            deny_mark_denied()
-            break
-            
-        elif status == 404:
-            return {}
-            
-        elif attempt < max_retries - 1:
-            time.sleep(1)
-            continue
-        else:
-            break
-    
-    # Fallback to DexScreener
-    stats = _normalize_stats_schema(_get_token_stats_dexscreener(token_address) or {})
-    # CRITICAL FIX: Inject token_address so TokenStats.from_api_response() can parse it
+    stats_raw = _get_token_stats_dexscreener(token_address)
+    stats = _normalize_stats_schema(stats_raw) if stats_raw else {}
     if stats and not stats.get("token_address"):
         stats["token_address"] = token_address
+    if stats and not stats.get("_source"):
+        stats["_source"] = "dexscreener"
+    
+    if stats:
+        _cache_set(token_address, stats)
     return stats
 
 
@@ -491,7 +411,7 @@ def calculate_preliminary_score(tx_data: Dict[str, Any], smart_money_detected: b
 
     # USD value indicates serious activity; downweight synthetic fallback items
     # OPTIMIZED: Lowered thresholds for micro-cap focus
-    # FIX: Support both usd_value (Cielo) and token1_amount_usd (fallback feeds)
+    # Support both usd_value and token1_amount_usd (different feed sources)
     usd_value = tx_data.get('usd_value') or tx_data.get('token1_amount_usd', 0) or 0
     is_synthetic = bool(tx_data.get('is_synthetic')) or str(tx_data.get('tx_type') or '').endswith('_fallback')
     
@@ -801,6 +721,31 @@ def score_token(stats: Dict[str, Any], smart_money_detected: bool = False, token
             except Exception:
                 pass
     # === END MULTI-BOT VALIDATION ===
+    
+    # === RECOVERY PATTERN DETECTION (NEW!) ===
+    # Detect "dip and rip" patterns: ATH → -30% drop → recovery to ATH+10%
+    # These are high-conviction signals showing strong buying pressure
+    if token_address:
+        try:
+            from app.recovery_pattern_detector import is_recovery_signal
+            
+            # Check if token recently completed a recovery pattern
+            has_recovery_pattern = is_recovery_signal(token_address, max_age_sec=300)
+            
+            if has_recovery_pattern:
+                score += 3  # Big bonus for proven recovery pattern
+                scoring_details.append(f"🎯 RECOVERY PATTERN: +3 (dip and rip confirmed!)")
+        except ImportError:
+            # Recovery detector module not available - skip this bonus
+            pass
+        except Exception as e:
+            # Log unexpected errors but don't fail scoring
+            try:
+                from app.logger_utils import log_process
+                log_process({"type": "recovery_pattern_error", "error": str(e), "token": token_address})
+            except Exception:
+                pass
+    # === END RECOVERY PATTERN DETECTION ===
 
     # Penalize if 24h is extremely negative (might be dump)
     # FIXED: Threshold now -60% (was -30%) to allow more dip buying

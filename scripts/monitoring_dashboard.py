@@ -14,8 +14,8 @@ from typing import Dict, List
 # Add parent directory to path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from tradingSystem.config_optimized import DB_PATH
-from tradingSystem.circuit_breaker import get_circuit_breaker
+from src.tradingSystem.config_optimized import DB_PATH
+from src.tradingSystem.circuit_breaker import get_circuit_breaker
 
 
 def get_open_positions() -> List[Dict]:
@@ -248,6 +248,9 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+
 
 
 

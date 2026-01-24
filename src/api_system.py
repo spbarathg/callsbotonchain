@@ -267,8 +267,6 @@ def get_current_config() -> Dict[str, Any]:
             "stats_cost": int(os.getenv("BUDGET_STATS_COST", "1"))
         },
         "api": {
-            "cielo_enabled": os.getenv("CIELO_API_KEY", "") != "",
-            "new_trade_only": os.getenv("CIELO_NEW_TRADE_ONLY", "false") == "true",
             "force_fallback": os.getenv("CALLSBOT_FORCE_FALLBACK", "false") == "true"
         }
     }

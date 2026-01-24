@@ -2,9 +2,10 @@
 """Check wallet's on-chain balance for a specific token"""
 
 import sys
-sys.path.insert(0, '/app')
+import os
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from tradingSystem.token_balance import get_token_balance
+from src.tradingSystem.token_balance import get_token_balance
 
 token = 'SPeoKNTCG4knwrCC2pgAS98CMqnpy8AY1PyHmKyV7fE'
 

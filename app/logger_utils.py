@@ -1,6 +1,7 @@
 import json
 import os
 import sys
+import socket
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 from hashlib import sha256
@@ -15,6 +16,11 @@ os.makedirs(LOG_DIR, exist_ok=True)
 
 # Optional: mirror JSON logs to stdout for containers/process supervisors
 LOG_STDOUT = (os.getenv("CALLSBOT_LOG_STDOUT", "false").strip().lower() == "true")
+
+# Log rotation (size-based)
+LOG_MAX_MB = int(os.getenv("CALLSBOT_LOG_MAX_MB", "20") or 20)
+LOG_MAX_FILES = int(os.getenv("CALLSBOT_LOG_MAX_FILES", "5") or 5)
+LOG_MAX_BYTES = max(1, LOG_MAX_MB) * 1024 * 1024
 
 _log_lock = Lock()
 
@@ -78,18 +84,45 @@ def _sanitize_obj(obj: Any) -> Any:
         return "<sanitization_error>"
 
 
+def _rotate_log(path: str) -> None:
+    try:
+        if not os.path.exists(path):
+            return
+        if os.path.getsize(path) < LOG_MAX_BYTES:
+            return
+        # Rotate: file -> .1, .1 -> .2, etc.
+        for idx in range(LOG_MAX_FILES - 1, 0, -1):
+            src = f"{path}.{idx}"
+            dst = f"{path}.{idx + 1}"
+            if os.path.exists(src):
+                os.replace(src, dst)
+        os.replace(path, f"{path}.1")
+    except Exception:
+        # Never break main flow because of rotation
+        return
+
+
+def _base_context() -> Dict[str, Any]:
+    return {
+        "pid": os.getpid(),
+        "host": socket.gethostname(),
+    }
+
+
 def write_jsonl(filename: str, record: Dict[str, Any]) -> None:
     path = _log_path(filename)
     rec = dict(record)
     # Inject defaults for structured logs
     rec.setdefault("level", "info")
     rec.setdefault("component", filename.replace(".jsonl", ""))
+    rec.update(_base_context())
     record = _sanitize_obj(rec)
     record["ts"] = record.get("ts") or datetime.now(timezone.utc).isoformat()
     line = json.dumps(record, ensure_ascii=False) + "\n"
     data = line.encode("utf-8")
     # Atomic-ish append: single os.write call under a lock to avoid partial interleaving
     with _log_lock:
+        _rotate_log(path)
         fd = os.open(path, os.O_CREAT | os.O_APPEND | os.O_WRONLY, 0o644)
         try:
             os.write(fd, data)
@@ -126,6 +159,20 @@ def log_alert(event: Dict[str, Any]) -> None:
 
 def log_tracking(event: Dict[str, Any]) -> None:
     write_jsonl("tracking.jsonl", event)
+
+
+def log_atm_message(event: Dict[str, Any]) -> None:
+    write_jsonl("atm_messages.jsonl", event)
+
+
+def log_atm_signal(event: Dict[str, Any]) -> None:
+    write_jsonl("atm_signals.jsonl", event)
+
+
+def log_error(event: Dict[str, Any]) -> None:
+    evt = dict(event)
+    evt.setdefault("level", "error")
+    write_jsonl("errors.jsonl", evt)
 
 
 # Monitoring helpers

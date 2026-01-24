@@ -6,7 +6,7 @@ import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from tradingSystem.db import close_position, list_open_positions
+from src.tradingSystem.db import close_position, list_open_positions
 
 def main():
     """Force-close ghost positions"""

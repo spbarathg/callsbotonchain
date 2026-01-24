@@ -10,7 +10,7 @@ Ideology:
 - Capital always allocated to highest-momentum opportunities
 - Manages opportunity cost actively
 
-Author: Cielo Signal Optimizer Team
+Author: CallsBot Team
 Date: October 10, 2025
 """
 

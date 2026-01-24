@@ -15,9 +15,6 @@ import requests
 # Add parent directory to path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from app.config_unified import CIELO_API_KEY
-
-
 def collect_signals_from_logs(log_path: str, start_date: str, end_date: str) -> List[Dict]:
     """
     Extract signals from trading logs
@@ -242,6 +239,9 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+
 
 
 

@@ -197,6 +197,7 @@ def init_db():
         ("realistic_gain_percent", "REAL"),
         ("trailing_stop_pct", "REAL DEFAULT 15.0"),
         ("would_have_exited_at", "REAL"),
+        ("signal_source", "TEXT"),
     ]
     
     # Hardened: validate column names against allowlist before ALTER TABLE
@@ -367,8 +368,9 @@ def record_alert_with_metadata(
             top10_concentration, bundlers_percent, insiders_percent,
             sol_price_usd, feed_source, dex_name,
             price_change_1h, price_change_24h,
-            ml_enhanced, ml_predicted_gain, ml_winner_probability
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ml_enhanced, ml_predicted_gain, ml_winner_probability,
+            signal_source
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         token_address,
         now,
@@ -411,6 +413,7 @@ def record_alert_with_metadata(
         alert_metadata.get('ml_enhanced', False),
         alert_metadata.get('ml_predicted_gain'),
         alert_metadata.get('ml_winner_probability'),
+        alert_metadata.get('signal_source'),
     ))
     
     conn.commit()
@@ -1117,7 +1120,8 @@ def get_all_tracked_tokens_summary(limit: int = 100) -> List[Dict[str, Any]]:
             s.last_price_usd, s.max_gain_percent, s.is_rug,
             s.first_liquidity_usd, s.last_liquidity_usd, s.last_volume_24h_usd,
             (SELECT COUNT(*) FROM transaction_snapshots WHERE token_address = a.token_address) as tx_count,
-            (SELECT COUNT(*) FROM wallet_first_buys WHERE token_address = a.token_address) as buyer_count
+            (SELECT COUNT(*) FROM wallet_first_buys WHERE token_address = a.token_address) as buyer_count,
+            s.signal_source
         FROM alerted_tokens a
         LEFT JOIN alerted_token_stats s ON a.token_address = s.token_address
         ORDER BY a.alerted_at DESC
@@ -1155,7 +1159,8 @@ def get_all_tracked_tokens_summary(limit: int = 100) -> List[Dict[str, Any]]:
             "liquidity": row[12],
             "volume_24h": row[13],
             "tx_count": row[14],
-            "buyer_count": row[15]
+            "buyer_count": row[15],
+            "signal_source": row[16],
         })
     
     conn.close()

@@ -31,6 +31,11 @@ def _init_redis():
     """Initialize Redis client for signal aggregator."""
     global _redis_client, _redis_status
     
+    use_redis = os.getenv("USE_REDIS", "true").strip().lower() == "true"
+    if not use_redis:
+        _redis_status = "disabled"
+        return None
+
     if _redis_client is not None:
         return _redis_client
     
@@ -40,11 +45,11 @@ def _init_redis():
         _redis_client = redis.from_url(redis_url, decode_responses=True, socket_timeout=5, socket_connect_timeout=5)
         _redis_client.ping()
         _redis_status = "connected"
-        print(f"✅ Signal Aggregator: Connected to Redis at {redis_url}", flush=True)
+        print(f"[OK] Signal Aggregator: Connected to Redis at {redis_url}", flush=True)
         return _redis_client
     except Exception as e:
         _redis_status = f"error: {e}"
-        print(f"❌ Signal Aggregator: Failed to connect to Redis: {e}", flush=True)
+        print(f"[ERROR] Signal Aggregator: Failed to connect to Redis: {e}", flush=True)
         return None
 
 # Fallback in-memory cache for when Redis is unavailable
@@ -52,8 +57,25 @@ _signal_cache: Dict[str, List[Tuple[datetime, str]]] = defaultdict(list)
 _validated_tokens: Dict[str, bool] = {}  # Cache of validated tokens
 _cache_lock = asyncio.Lock()
 
+def _get_list_of_ints_env(key: str) -> List[int]:
+    raw = os.getenv(key, "") or ""
+    out: List[int] = []
+    for part in raw.split(","):
+        p = part.strip()
+        if not p:
+            continue
+        try:
+            out.append(int(p))
+        except ValueError:
+            continue
+    return out
+
+
 # Signal groups to monitor (all treated equally)
-MONITORED_CHANNELS = [
+# Prefer explicit channel IDs (ATM channels) from env; legacy usernames are opt-in only.
+MONITORED_CHANNEL_IDS = _get_list_of_ints_env("SIGNAL_AGGREGATOR_CHANNEL_IDS") or _get_list_of_ints_env("ATM_CHANNEL_IDS")
+ALLOW_LEGACY_CHANNELS = os.getenv("SIGNAL_AGGREGATOR_ALLOW_LEGACY_CHANNELS", "false").strip().lower() == "true"
+LEGACY_SIGNAL_CHANNELS = [
     '@MooDengPresidentCallers',
     '@Bot_NovaX',
     '@Ranma_Calls_Solana',
@@ -68,6 +90,7 @@ MONITORED_CHANNELS = [
     '@wifechangingcallss',
     '@SAVANNAHCALLS'
 ]
+MONITORED_CHANNELS = MONITORED_CHANNEL_IDS or (LEGACY_SIGNAL_CHANNELS if ALLOW_LEGACY_CHANNELS else [])
 
 
 def extract_token_address(text: str) -> Optional[str]:
@@ -155,7 +178,7 @@ async def validate_token_quality(token_address: str) -> bool:
         
         if liquidity < MIN_LIQUIDITY or volume_24h < MIN_VOLUME:
             _validated_tokens[token_address] = False
-            print(f"⚠️  Signal Aggregator: Rejected {token_address[:8]}... "
+            print(f"[WARN] Signal Aggregator: Rejected {token_address[:8]}... "
                   f"(liq: ${liquidity:,.0f}, vol: ${volume_24h:,.0f})", flush=True)
             return False
         
@@ -186,24 +209,24 @@ async def validate_token_quality(token_address: str) -> bool:
             
             if quote_result["status_code"] != 200 or not quote_result.get("json"):
                 _validated_tokens[token_address] = False
-                print(f"⚠️  Signal Aggregator: Rejected {token_address[:8]}... "
+                print(f"[WARN] Signal Aggregator: Rejected {token_address[:8]}... "
                       f"(Jupiter can't route: {quote_result.get('error', 'No route')})", flush=True)
                 return False
             
             out_amount = quote_result["json"].get("outAmount")
             if not out_amount or int(out_amount) <= 0:
                 _validated_tokens[token_address] = False
-                print(f"⚠️  Signal Aggregator: Rejected {token_address[:8]}... "
+                print(f"[WARN] Signal Aggregator: Rejected {token_address[:8]}... "
                       f"(Invalid Jupiter quote)", flush=True)
                 return False
             
-            print(f"✅ Signal Aggregator: Validated {token_address[:8]}... "
+            print(f"[OK] Signal Aggregator: Validated {token_address[:8]}... "
                   f"(liq: ${liquidity:,.0f}, vol: ${volume_24h:,.0f}, Jupiter: OK)", flush=True)
             
         except Exception as e:
             # If Jupiter check fails, be conservative and reject
             _validated_tokens[token_address] = False
-            print(f"⚠️  Signal Aggregator: Rejected {token_address[:8]}... "
+            print(f"[WARN] Signal Aggregator: Rejected {token_address[:8]}... "
                   f"(Jupiter check error: {e})", flush=True)
             return False
         
@@ -212,7 +235,7 @@ async def validate_token_quality(token_address: str) -> bool:
         return True
         
     except Exception as e:
-        print(f"❌ Signal Aggregator: Validation error for {token_address[:8]}...: {e}", flush=True)
+        print(f"[ERROR] Signal Aggregator: Validation error for {token_address[:8]}...: {e}", flush=True)
         _validated_tokens[token_address] = False
         return False
 
@@ -249,7 +272,7 @@ async def record_signal(token_address: str, group_name: str = "unknown", skip_va
             
             return
         except Exception as e:
-            print(f"⚠️ Redis error, falling back to memory: {e}", flush=True)
+            print(f"[WARN] Redis error, falling back to memory: {e}", flush=True)
     
     # Fallback to in-memory cache
     async with _cache_lock:
@@ -344,7 +367,7 @@ def cleanup_old_signals() -> None:
             pattern = "signal_aggregator:token:*"
             keys = redis.keys(pattern)
             if keys:
-                print(f"📊 Signal Aggregator: {len(keys)} tokens with active signals in Redis", flush=True)
+                print(f"[INFO] Signal Aggregator: {len(keys)} tokens with active signals in Redis", flush=True)
         except Exception:
             pass
 
@@ -354,8 +377,11 @@ async def start_monitoring():
     Start monitoring bot channels (run in background).
     This should be called once when the bot starts.
     """
+    if os.getenv("SIGNAL_AGGREGATOR_ENABLED", "true").strip().lower() != "true":
+        print("[WARN] Signal Aggregator: Disabled via SIGNAL_AGGREGATOR_ENABLED=false", flush=True)
+        return
     if not MONITORED_CHANNELS:
-        print("⚠️  Signal Aggregator: No channels configured to monitor", flush=True)
+        print("[WARN] Signal Aggregator: No channels configured to monitor. Set SIGNAL_AGGREGATOR_CHANNEL_IDS or ATM_CHANNEL_IDS.", flush=True)
         return
     
     try:
@@ -368,13 +394,13 @@ async def start_monitoring():
         import os
         
         if not TELETHON_ENABLED:
-            print("⚠️  Signal Aggregator: Telethon not enabled", flush=True)
+            print("[WARN] Signal Aggregator: Telethon not enabled", flush=True)
             return
         
         # Use separate session file for monitoring to avoid conflicts with alert sender
         SIGNAL_AGGREGATOR_SESSION_FILE = os.getenv("SIGNAL_AGGREGATOR_SESSION_FILE", "var/memecoin_session.session")
         
-        print(f"✅ Signal Aggregator: Starting to monitor {len(MONITORED_CHANNELS)} channels...", flush=True)
+        print(f"[OK] Signal Aggregator: Starting to monitor {len(MONITORED_CHANNELS)} channels...", flush=True)
         print(f"   Using session: {SIGNAL_AGGREGATOR_SESSION_FILE}", flush=True)
         
         async with TelegramClient(
@@ -412,13 +438,13 @@ async def start_monitoring():
                         signal_count = get_signal_count(token_address)
                         
                         if signal_count > 0:  # Only log if validated
-                            print(f"✅ Signal Aggregator: {group_name} → {token_address[:8]}... "
+                            print(f"[OK] Signal Aggregator: {group_name} → {token_address[:8]}... "
                                   f"(total groups: {signal_count})", flush=True)
                     else:
                         print(f"   No token address found in message", flush=True)
                 
                 except Exception as e:
-                    print(f"❌ Signal Aggregator: Error processing message: {e}", flush=True)
+                    print(f"[ERROR] Signal Aggregator: Error processing message: {e}", flush=True)
             
             # Cleanup task (every 5 minutes)
             async def cleanup_task():
@@ -429,13 +455,13 @@ async def start_monitoring():
             # Start cleanup task
             asyncio.create_task(cleanup_task())
             
-            print("✅ Signal Aggregator: Monitoring active", flush=True)
+            print("[OK] Signal Aggregator: Monitoring active", flush=True)
             
             # Keep running
             await client.run_until_disconnected()
     
     except Exception as e:
-        print(f"❌ Signal Aggregator: Failed to start monitoring: {e}", flush=True)
+        print(f"[ERROR] Signal Aggregator: Failed to start monitoring: {e}", flush=True)
 
 
 # Synchronous wrapper for use in scoring

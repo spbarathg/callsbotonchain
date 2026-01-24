@@ -44,6 +44,24 @@ def init() -> None:
 		)
 		"""
 	)
+	c.execute(
+		"""
+		CREATE TABLE IF NOT EXISTS position_price_snapshots (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			position_id INTEGER,
+			token_address TEXT,
+			snapshot_at REAL,
+			price_usd REAL,
+			qty REAL,
+			position_value_usd REAL,
+			unrealized_pnl_pct REAL,
+			source TEXT,
+			FOREIGN KEY(position_id) REFERENCES positions(id)
+		)
+		"""
+	)
+	c.execute("CREATE INDEX IF NOT EXISTS idx_position_snapshots_position ON position_price_snapshots(position_id)")
+	c.execute("CREATE INDEX IF NOT EXISTS idx_position_snapshots_time ON position_price_snapshots(snapshot_at)")
 	conn.commit()
 	conn.close()
 
@@ -255,4 +273,68 @@ def get_open_qty_by_token(token_address: str) -> Optional[float]:
 		return get_open_qty(position_id)
 	except Exception:
 		return None
+
+
+def get_open_positions() -> list:
+	"""
+	Return a list of open positions for tracking.
+	Each item: dict with id, token_address, entry_price, qty, usd_size, open_at, peak_price, trail_pct.
+	"""
+	conn = _conn()
+	c = conn.cursor()
+	c.execute(
+		"""
+		SELECT id, token_address, entry_price, qty, usd_size, open_at, peak_price, trail_pct
+		FROM positions
+		WHERE status='open'
+		ORDER BY id DESC
+		"""
+	)
+	rows = c.fetchall()
+	conn.close()
+	positions = []
+	for row in rows:
+		positions.append({
+			"id": row[0],
+			"token_address": row[1],
+			"entry_price": row[2],
+			"qty": row[3],
+			"usd_size": row[4],
+			"open_at": row[5],
+			"peak_price": row[6],
+			"trail_pct": row[7],
+		})
+	return positions
+
+
+def record_position_price_snapshot(
+	position_id: int,
+	token_address: str,
+	price_usd: float,
+	qty: float,
+	entry_price: float,
+	source: str,
+) -> None:
+	"""Persist a position price snapshot for long-term tracking."""
+	if price_usd <= 0 or qty <= 0:
+		return
+	position_value = price_usd * qty
+	unrealized_pct = 0.0
+	if entry_price and entry_price > 0:
+		unrealized_pct = ((price_usd - entry_price) / entry_price) * 100.0
+	conn = _conn()
+	c = conn.cursor()
+	try:
+		c.execute(
+			"""
+			INSERT INTO position_price_snapshots (
+				position_id, token_address, snapshot_at, price_usd, qty,
+				position_value_usd, unrealized_pnl_pct, source
+			) VALUES (?, ?, strftime('%s','now'), ?, ?, ?, ?, ?)
+			""",
+			(position_id, token_address, price_usd, qty, position_value, unrealized_pct, source),
+		)
+		conn.commit()
+	finally:
+		conn.close()
 

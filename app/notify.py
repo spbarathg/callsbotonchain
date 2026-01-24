@@ -8,7 +8,8 @@ from app.http_client import request_json
 
 
 # Redis client for signal passing (optional, graceful fallback if not available)
-_REDIS_URL = os.getenv("REDIS_URL") or os.getenv("CALLSBOT_REDIS_URL") or ""
+_USE_REDIS = os.getenv("USE_REDIS", "true").strip().lower() == "true"
+_REDIS_URL = (os.getenv("REDIS_URL") or os.getenv("CALLSBOT_REDIS_URL") or "") if _USE_REDIS else ""
 _redis_client = None
 _redis_status = "not_configured"
 
@@ -34,7 +35,7 @@ def _create_redis_client():
         )
         return redis.Redis(connection_pool=pool)
     except Exception as e:
-        print(f"⚠️ Redis client creation failed: {e}")
+        print(f"[WARN] Redis client creation failed: {e}")
         return None
 
 if _REDIS_URL:
@@ -47,15 +48,16 @@ if _REDIS_URL:
             try:
                 from urllib.parse import urlparse
                 _host = urlparse(_REDIS_URL).hostname or "redis"
-                print(f"✅ Redis client connected successfully (host={_host})")
+                print(f"[OK] Redis client connected successfully (host={_host})")
             except Exception:
-                print("✅ Redis client connected successfully")
+                print("[OK] Redis client connected successfully")
         except Exception as e:
-            print(f"⚠️ Redis not available for signal passing: {e}")
+            print(f"[WARN] Redis not available for signal passing: {e}")
             _redis_client = None
             _redis_status = "failed"
 else:
-    print("⚠️ REDIS_URL not configured, signal passing to paper trader disabled")
+    if _USE_REDIS:
+        print("[WARN] REDIS_URL not configured, signal passing to paper trader disabled")
 
 def get_redis_status() -> str:
     """Return current Redis connection status."""
@@ -72,7 +74,7 @@ def push_signal_to_redis(signal_data: dict) -> bool:
         True if pushed successfully, False otherwise
     """
     if _redis_client is None:
-        print(f"⚠️ Cannot push signal to Redis: client not connected (status: {_redis_status})")
+        print(f"[WARN] Cannot push signal to Redis: client not connected (status: {_redis_status})")
         return False
     
     try:
@@ -84,7 +86,7 @@ def push_signal_to_redis(signal_data: dict) -> bool:
     except Exception as e:
         # Retry basic reconnect once
         try:
-            print(f"⚠️ Redis push failed, attempting reconnect: {e}")
+            print(f"[WARN] Redis push failed, attempting reconnect: {e}")
             client = _create_redis_client()
             if client is not None:
                 globals()["_redis_client"] = client
@@ -94,7 +96,7 @@ def push_signal_to_redis(signal_data: dict) -> bool:
                 client.ltrim("trading_signals", 0, 999)
                 return True
         except Exception as e2:
-            print(f"⚠️ Failed to push signal to Redis after reconnect: {e2}")
+            print(f"[WARN] Failed to push signal to Redis after reconnect: {e2}")
         return False
 
 

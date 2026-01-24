@@ -148,13 +148,75 @@ class SignalProcessor:
         stats_raw = get_token_stats(token_address)
         self._log(f"DEBUG: Stats fetch result: {'SUCCESS' if stats_raw else 'FAILED'}")
         if not stats_raw:
-            return ProcessResult(
-                status="skipped",
-                token_address=token_address,
-                preliminary_score=preliminary_score,
-                error_message="Failed to fetch stats"
-            )
+            atm_meta = tx.get("atm_meta") or {}
+            if atm_meta:
+                # Build a minimal stats payload from ATM message metadata
+                stats_raw = {
+                    "token_address": token_address,
+                    "market_cap_usd": atm_meta.get("market_cap_usd"),
+                    "price_usd": atm_meta.get("price_usd"),
+                    "volume": {
+                        "24h": {
+                            "volume_usd": (atm_meta.get("volume_buy", {}).get("24h") or 0)
+                            + (atm_meta.get("volume_sell", {}).get("24h") or 0)
+                        }
+                    },
+                    "change": {
+                        "1h": (atm_meta.get("price_change", {}).get("1h")),
+                        "24h": (atm_meta.get("price_change", {}).get("24h")),
+                    },
+                    "holders": {
+                        "top10_percent": atm_meta.get("top10_percent") or (atm_meta.get("holders_analytics", {}).get("top10_percent")),
+                        "holder_count": atm_meta.get("holder_count"),
+                    },
+                    "security": {
+                        "is_mint_revoked": (atm_meta.get("audit", {}).get("not_mintable") is True),
+                        "is_honeypot": False,
+                    },
+                    "liquidity": {
+                        "is_lp_locked": None,
+                    },
+                    "_source": "atm_message",
+                }
+                self._log(f"DEBUG: Using ATM metadata fallback for {token_address[:8]}")
+            else:
+                return ProcessResult(
+                    status="skipped",
+                    token_address=token_address,
+                    preliminary_score=preliminary_score,
+                    error_message="Failed to fetch stats",
+                )
         
+        # Merge ATM metadata into stats if present (fill missing fields only)
+        atm_meta = tx.get("atm_meta") or {}
+        if atm_meta and stats_raw:
+            try:
+                if stats_raw.get("market_cap_usd") in (None, 0):
+                    stats_raw["market_cap_usd"] = atm_meta.get("market_cap_usd")
+                if stats_raw.get("price_usd") in (None, 0):
+                    stats_raw["price_usd"] = atm_meta.get("price_usd")
+                stats_raw.setdefault("change", {})
+                if stats_raw["change"].get("1h") in (None, 0):
+                    stats_raw["change"]["1h"] = atm_meta.get("price_change", {}).get("1h")
+                if stats_raw["change"].get("24h") in (None, 0):
+                    stats_raw["change"]["24h"] = atm_meta.get("price_change", {}).get("24h")
+                stats_raw.setdefault("volume", {}).setdefault("24h", {})
+                if not stats_raw["volume"]["24h"].get("volume_usd"):
+                    stats_raw["volume"]["24h"]["volume_usd"] = (
+                        (atm_meta.get("volume_buy", {}).get("24h") or 0)
+                        + (atm_meta.get("volume_sell", {}).get("24h") or 0)
+                    )
+                stats_raw.setdefault("holders", {})
+                if not stats_raw["holders"].get("top10_percent"):
+                    stats_raw["holders"]["top10_percent"] = (
+                        atm_meta.get("top10_percent")
+                        or (atm_meta.get("holders_analytics", {}).get("top10_percent"))
+                    )
+                if not stats_raw["holders"].get("holder_count"):
+                    stats_raw["holders"]["holder_count"] = atm_meta.get("holder_count")
+            except Exception:
+                pass
+
         # Parse stats into model
         stats = TokenStats.from_api_response(stats_raw, source=stats_raw.get("_source", "unknown"))
         self._log(f"DEBUG: Stats parse result: {'SUCCESS' if stats else 'FAILED'}")
@@ -165,6 +227,27 @@ class SignalProcessor:
                 preliminary_score=preliminary_score,
                 error_message="Failed to parse stats"
             )
+        
+        # RECOVERY PATTERN TRACKING: Feed price data to detector
+        # This tracks "dip and rip" patterns (ATH → -30% → recovery to ATH+10%)
+        try:
+            from app.recovery_pattern_detector import add_token_data
+            
+            market_cap = stats.market_cap_usd or 0
+            price = stats.price_usd or 0
+            volume = stats.volume_24h_usd or 0
+            
+            if market_cap > 0 and price > 0:
+                # Feed data to detector (returns pattern if detected)
+                pattern = add_token_data(token_address, market_cap, price, volume)
+                
+                if pattern:
+                    self._log(f"🎯 RECOVERY PATTERN DETECTED: {token_address[:8]}... "
+                             f"ATH ${pattern.ath_mcap:,.0f} → ${pattern.drop_mcap:,.0f} (-{pattern.drop_percent:.1f}%) → "
+                             f"${pattern.recovery_mcap:,.0f} in {pattern.recovery_candles} candles")
+        except Exception as e:
+            # Don't fail processing if recovery tracking fails
+            self._log(f"⚠️ Recovery pattern tracking error: {e}")
         
         # EARLY GATE: Liquidity pre-filter (fast rejection before expensive scoring)
         # NOTE: Also checked in junior_strict/nuanced for nuanced liquidity_factor support
@@ -705,6 +788,7 @@ class SignalProcessor:
                                stats: TokenStats, jr_strict_ok: bool, trader: Optional[str], feed_tx: FeedTransaction, ml_data: Optional[dict] = None):
         """Record comprehensive alert metadata"""
         try:
+            signal_source = feed_tx.raw_data.get("source") or "feed"
             token_age_minutes = None
             try:
                 all_obs = get_recent_token_signals(token_address, 365*24*3600)
@@ -733,6 +817,7 @@ class SignalProcessor:
                 'ml_enhanced': ml_data.get('ml_enhanced', False) if ml_data else False,
                 'ml_predicted_gain': ml_data.get('predicted_gain') if ml_data else None,
                 'ml_winner_probability': ml_data.get('winner_probability') if ml_data else None,
+                'signal_source': signal_source,
             }
             
             record_alert_with_metadata(
@@ -781,7 +866,7 @@ class SignalProcessor:
             
             if result["status_code"] != 200 or not result.get("json"):
                 error_msg = result.get("error", "No route found")
-                print(f"[JUPITER] ❌ Cannot route {token[:8]}... via Jupiter: {error_msg}", flush=True)
+                print(f"[JUPITER] Cannot route {token[:8]}... via Jupiter: {error_msg}", flush=True)
                 print(f"[JUPITER] 🚫 Rejecting signal - token not tradeable on Jupiter", flush=True)
                 self._log(f"⚠️ Signal rejected: Jupiter routing failed for {token[:8]}... ({error_msg})")
                 return  # Don't push untradeable tokens to trader
@@ -790,18 +875,18 @@ class SignalProcessor:
             out_amount = quote_data.get("outAmount")
             
             if not out_amount or int(out_amount) <= 0:
-                print(f"[JUPITER] ❌ Invalid quote for {token[:8]}... (outAmount={out_amount})", flush=True)
+                print(f"[JUPITER] Invalid quote for {token[:8]}... (outAmount={out_amount})", flush=True)
                 print(f"[JUPITER] 🚫 Rejecting signal - invalid Jupiter quote", flush=True)
                 self._log(f"⚠️ Signal rejected: Invalid Jupiter quote for {token[:8]}...")
                 return
             
-            print(f"[JUPITER] ✅ Route confirmed for {token[:8]}... (outAmount={out_amount})", flush=True)
+            print(f"[JUPITER] Route confirmed for {token[:8]}... (outAmount={out_amount})", flush=True)
             
         except Exception as e:
             # If Jupiter check fails due to system error, log but don't block
             # This prevents legitimate signals from being lost due to temporary API issues
-            print(f"[JUPITER] ⚠️ Routing check error for {token[:8]}...: {e}", flush=True)
-            print(f"[JUPITER] ⚠️ Allowing signal through despite check failure (may fail at trader)", flush=True)
+            print(f"[JUPITER] Routing check error for {token[:8]}...: {e}", flush=True)
+            print(f"[JUPITER] Allowing signal through despite check failure (may fail at trader)", flush=True)
             self._log(f"⚠️ Jupiter routing check error: {e}")
         
         # Jupiter routing validated - proceed with Redis push
@@ -827,11 +912,11 @@ class SignalProcessor:
             }
             result = push_signal_to_redis(signal_payload)
             if result:
-                print(f"[REDIS] ✅ Successfully pushed signal for {token[:8]}...", flush=True)
+                print(f"[REDIS] Successfully pushed signal for {token[:8]}...", flush=True)
             else:
-                print(f"[REDIS] ❌ Failed to push signal for {token[:8]}...", flush=True)
+                print(f"[REDIS] Failed to push signal for {token[:8]}...", flush=True)
         except Exception as e:
-            print(f"[REDIS] ❌ Exception pushing signal: {e}", flush=True)
+            print(f"[REDIS] Exception pushing signal: {e}", flush=True)
             self._log(f"⚠️ Redis signal push failed: {e}")
     
     def _log_alert_event(self, token: str, stats: TokenStats, score: int, prelim: int, conviction: str, feed_tx: FeedTransaction):

@@ -7,7 +7,7 @@ import os
 import sqlite3
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from tradingSystem.db import _conn
+from src.tradingSystem.db import _conn
 
 def main():
     """Force-close ghost positions"""

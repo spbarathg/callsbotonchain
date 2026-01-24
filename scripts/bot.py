@@ -274,7 +274,7 @@ def handle_cooldown(feed_error: Optional[str], retry_after_sec: int) -> None:
 		retry_after_sec = max(300, FETCH_INTERVAL)
 	elif retry_after_sec <= 0:
 		retry_after_sec = max(60, FETCH_INTERVAL)
-	_out(f"Cielo {'quota' if feed_error == 'quota_exceeded' else 'rate limit'} hit. Cooling down for {retry_after_sec}s")
+	_out(f"API {'quota' if feed_error == 'quota_exceeded' else 'rate limit'} hit. Cooling down for {retry_after_sec}s")
 	try:
 		log_process({
 			"type": "cooldown",
@@ -344,14 +344,17 @@ def run_bot():
     last_track_time = 0
 
     from app.config_unified import HIGH_CONFIDENCE_SCORE, FETCH_INTERVAL
+    feed_disabled = os.getenv("CALLSBOT_FEED_DISABLED", "false").strip().lower() == "true"
     _out("SMART MONEY ENHANCED SOLANA MEMECOIN BOT STARTED")
     _out(f"Configuration: Score threshold = {HIGH_CONFIDENCE_SCORE}, Fetch interval = {FETCH_INTERVAL}s")
+    if feed_disabled:
+        _out("Feed source: DISABLED (ATM-only mode)")
     if 'CURRENT_GATES' in globals() and CURRENT_GATES:
         gm = CURRENT_GATES.get('GATE_MODE')
         _out(f"Gate Mode: {gm} | Gates: score>={CURRENT_GATES.get('HIGH_CONFIDENCE_SCORE')}, liq>={CURRENT_GATES.get('MIN_LIQUIDITY_USD')}, vol24>={CURRENT_GATES.get('VOL_24H_MIN_FOR_ALERT')}, mcap<={CURRENT_GATES.get('MAX_MARKET_CAP_FOR_DEFAULT_ALERT')}, vol/mcap>={CURRENT_GATES.get('VOL_TO_MCAP_RATIO_MIN')}")
     _out("Features: Smart Money Detection + Enhanced Scoring + Detailed Analysis")
     _out("Smart-money cycle enabled (top_wallets=true, min_wallet_pnl=1000)")
-    _out("Adaptive cooldown on Cielo rate limits is enabled")
+    _out("Adaptive cooldown on API rate limits is enabled")
     
     # Send startup notification
     startup_message = (
@@ -397,6 +400,13 @@ def run_bot():
                     time.sleep(1)
                 continue
 
+            if feed_disabled:
+                _out("Feed disabled; ATM-only mode active. Sleeping...")
+                for _ in range(max(5, FETCH_INTERVAL // 2)):
+                    if shutdown_flag:
+                        break
+                    time.sleep(1)
+                continue
             # Alternate between general feed and smart-money-only feed
             if is_smart_cycle:
                 feed = fetch_solana_feed(cursor_smart, smart_money_only=True)
@@ -553,7 +563,7 @@ if __name__ == "__main__":
             app = create_app()
             app.run(host=args.host, port=args.port, debug=False)
         elif cmd == "trade":
-            from tradingSystem.cli_optimized import run as trade_run
+            from src.tradingSystem.cli_optimized import run as trade_run
             trade_run()
         else:
             run_bot()

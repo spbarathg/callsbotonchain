@@ -3,6 +3,7 @@ Circuit Breaker and Loss Limits
 Prevents catastrophic losses by halting trading when risk thresholds are exceeded
 """
 
+import os
 import time
 from typing import Dict, Optional, Tuple
 from datetime import datetime, timedelta
@@ -24,12 +25,32 @@ class CircuitBreaker:
     def __init__(self):
         self.lock = threading.Lock()
         
+        def _get_env_float(name: str, default: float) -> float:
+            raw = os.getenv(name)
+            if raw is None or str(raw).strip() == "":
+                return default
+            try:
+                return float(raw)
+            except ValueError:
+                return default
+        
+        def _get_env_int(name: str, default: int) -> int:
+            raw = os.getenv(name)
+            if raw is None or str(raw).strip() == "":
+                return default
+            try:
+                return int(float(raw))
+            except ValueError:
+                return default
+        
+        self.enabled = os.getenv("TS_CIRCUIT_BREAKER_ENABLED", "true").strip().lower() == "true"
+        
         # Configuration (can be overridden via env vars)
-        self.daily_loss_limit_usd = 100.0  # $100 per day
-        self.weekly_loss_limit_usd = 300.0  # $300 per week
-        self.consecutive_loss_limit = 3  # Halt after 3 consecutive losses
-        self.excessive_slippage_threshold = 10.0  # 10% slippage is excessive
-        self.slippage_event_limit = 5  # 5 excessive slippage events triggers circuit breaker
+        self.daily_loss_limit_usd = _get_env_float("TS_DAILY_LOSS_LIMIT_USD", 100.0)  # $100 per day
+        self.weekly_loss_limit_usd = _get_env_float("TS_WEEKLY_LOSS_LIMIT_USD", 300.0)  # $300 per week
+        self.consecutive_loss_limit = _get_env_int("TS_CONSECUTIVE_LOSS_LIMIT", 3)  # Halt after 3 consecutive losses
+        self.excessive_slippage_threshold = _get_env_float("TS_EXCESSIVE_SLIPPAGE_THRESHOLD", 10.0)  # 10% slippage is excessive
+        self.slippage_event_limit = _get_env_int("TS_SLIPPAGE_EVENT_LIMIT", 5)  # 5 excessive slippage events triggers circuit breaker
         
         # State tracking
         self.is_tripped = False
@@ -57,9 +78,18 @@ class CircuitBreaker:
         Returns:
             (can_trade, reason_if_blocked)
         
-        NOTE: CIRCUIT BREAKER PERMANENTLY DISABLED PER USER REQUEST
+        Returns:
+            (can_trade, reason_if_blocked)
         """
-        # CIRCUIT BREAKER DISABLED - Always allow trading
+        if not self.enabled:
+            return True, None
+        
+        with self.lock:
+            if self.manual_override:
+                return False, "Manual emergency stop"
+            if self.is_tripped:
+                return False, self.trip_reason or "Circuit breaker tripped"
+        
         return True, None
     
     def record_trade(self, pnl_usd: float, slippage_pct: float = 0.0):
@@ -134,9 +164,13 @@ class CircuitBreaker:
             return
     
     def _trip(self, reason: str):
-        """Internal: Trip the circuit breaker - DISABLED"""
-        # CIRCUIT BREAKER DISABLED - No-op
-        pass
+        """Internal: Trip the circuit breaker"""
+        if not self.enabled:
+            return
+        self.is_tripped = True
+        self.trip_reason = reason
+        self.trip_time = time.time()
+        print(f"[CIRCUIT_BREAKER] 🛑 TRIPPED: {reason}", flush=True)
     
     def reset(self):
         """Reset the circuit breaker (admin action)"""

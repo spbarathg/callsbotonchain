@@ -218,7 +218,7 @@ EXIT_CHECK_INTERVAL_SEC = _get_float("TS_EXIT_CHECK_INTERVAL", 10.0)  # Increase
 
 # Jupiter Price Oracle Cache TTL (for exit monitoring only)
 # Aggressive 10s cache minimizes API calls while maintaining accuracy
-# Signal detection still uses Cielo+DexScreener (proven 33% WR, 7.9x avg)
+# Signal detection uses DexScreener + ATM (proven win rates)
 JUPITER_PRICE_CACHE_TTL = _get_int("TS_JUPITER_PRICE_CACHE_TTL", 10)
 
 # ==================== CIRCUIT BREAKERS ====================

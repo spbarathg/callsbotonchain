@@ -2,9 +2,10 @@
 """Check what database the bot is using"""
 
 import sys
-sys.path.insert(0, '/app')
+import os
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from tradingSystem.config_optimized import DB_PATH
+from src.tradingSystem.config_optimized import DB_PATH
 import sqlite3
 
 print(f"🔍 Bot's DB_PATH: {DB_PATH}\n")

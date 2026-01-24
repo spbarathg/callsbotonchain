@@ -48,18 +48,21 @@ class WatchListMonitor:
     def _monitor_loop(self):
         """Main monitoring loop"""
         print("[WATCH_MONITOR_DEBUG] 🎬 Monitor loop thread STARTED!", flush=True)
+        print(f"[WATCH_MONITOR_DEBUG] self.running = {self.running}", flush=True)
         iteration = 0
         while self.running:
+            print(f"[WATCH_MONITOR_DEBUG] ==> LOOP ITERATION {iteration + 1} START", flush=True)
             try:
                 iteration += 1
-                # DEBUG: Log every iteration to prove the loop is running
-                if iteration % 6 == 0:  # Every 30s (6 iterations * 5s)
-                    watchlist_size = len(self.watch_manager.watch_list)
-                    print(f"[WATCH_MONITOR_DEBUG] Iteration {iteration} | Watchlist size: {watchlist_size} | "
-                          f"Total checks: {self.watch_manager.price_checks}", flush=True)
+                # AGGRESSIVE DEBUG: Log EVERY iteration to prove the loop is running
+                watchlist_size = len(self.watch_manager.watch_list)
+                print(f"[WATCH_MONITOR_DEBUG] Iteration {iteration} | Watchlist size: {watchlist_size} | "
+                      f"Total checks: {self.watch_manager.price_checks}", flush=True)
                 
                 # Update all prices and get recommendations
+                print(f"[WATCH_MONITOR_DEBUG] Calling update_prices()...", flush=True)
                 recommendations = self.watch_manager.update_prices()
+                print(f"[WATCH_MONITOR_DEBUG] update_prices() returned: {len(recommendations['enter'])} entries, {len(recommendations['reenter'])} reentries", flush=True)
                 
                 # Store recommendations for main loop
                 with self.lock:
@@ -76,7 +79,9 @@ class WatchListMonitor:
                     self.watch_manager.cleanup_old_signals()
                 
                 # Sleep briefly (actual interval is per-token in watch_manager)
+                print(f"[WATCH_MONITOR_DEBUG] Sleeping 5s...", flush=True)
                 time.sleep(5)
+                print(f"[WATCH_MONITOR_DEBUG] Sleep complete, looping back", flush=True)
                 
             except Exception as e:
                 print(f"[WATCH_MONITOR] ⚠️ Error in monitor loop: {e}", flush=True)

@@ -339,11 +339,7 @@ class TradeEngine:
         
         try:
             # Execute buy
-            fill = self.broker.market_buy(
-                token_mint=token,
-                usd_amount=additional_usd,
-                max_slippage_bps=500  # 5% slippage OK for pyramiding
-            )
+            fill = self.broker.market_buy(token, additional_usd)
             
             if not fill.success or fill.qty <= 0:
                 self._log("pyramid_failed", token=token, reason="buy_failed")
@@ -362,10 +358,10 @@ class TradeEngine:
             
             # Update DB
             from .db import update_position_qty, add_fill
-            pid = data.get("id")
+            pid = data.get("pid")
             if pid:
                 update_position_qty(pid, new_qty, avg_entry)
-                add_fill(pid, "buy", fill.price, fill.qty, fill.tx)
+                add_fill(pid, "buy", fill.price, fill.qty, fill.usd)
             
             self._log("pyramid_success", token=token, additional_qty=fill.qty, 
                      new_total_qty=new_qty, avg_entry=avg_entry, pyramid_num=pyramid_count + 1)
@@ -439,8 +435,11 @@ class TradeEngine:
                 # DUST POSITION CHECK: Auto-close if position value < $1 (not worth monitoring)
                 # Use ACTUAL on-chain balance, not database (which may be stale after partial sells)
                 try:
-                    from .token_balance import get_token_balance
-                    actual_holdings = get_token_balance(token)
+                    from .token_balance import get_token_balance_simple
+                    wallet_address = self.broker._pubkey
+                    actual_holdings = None
+                    if wallet_address:
+                        actual_holdings = get_token_balance_simple(self.broker._rpc, wallet_address, token)
                     if actual_holdings is not None and actual_holdings > 0:
                         position_value_usd = actual_holdings * price if price > 0 else 0
                         if position_value_usd < 1.0:
@@ -839,7 +838,7 @@ class TradeEngine:
                         # Log failures with backoff info
                         if sell_failures + 1 <= 5:  # Log first 5 failures
                             print(f"[TRADER] ⚠️ Sell attempt {sell_failures + 1} failed for {token[:8]}: {fill.error}", flush=True)
-                            print(f"[TRADER] Next retry in {backoff_times[min(sell_failures + 1, len(backoff_times) - 1)]}s", flush=True)
+                            print(f"[TRADER] Next retry in {int(backoff_seconds)}s", flush=True)
                         elif (sell_failures + 1) % 10 == 0:  # Then log every 10 failures
                             print(f"[TRADER] ⚠️ Position {token[:8]} has {sell_failures + 1} sell failures - retrying every {backoff_seconds}s", flush=True)
                     

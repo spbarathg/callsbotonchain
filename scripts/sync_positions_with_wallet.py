@@ -10,8 +10,8 @@ import os
 # Add parent directory to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from tradingSystem.db import _conn, update_position_qty, close_position
-from tradingSystem.token_balance import get_token_balance_simple
+from src.tradingSystem.db import _conn, update_position_qty, close_position
+from src.tradingSystem.token_balance import get_token_balance_simple
 from solders.keypair import Keypair  # type: ignore
 from base58 import b58decode
 import time

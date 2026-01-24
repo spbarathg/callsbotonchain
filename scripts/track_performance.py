@@ -3,10 +3,7 @@
 Price Performance Tracker for Alerted Tokens
 Runs continuously to track price movements and detect rugs
 
-OPTIMIZED FOR ZERO CREDIT USAGE:
-- Uses only FREE APIs (DexScreener, Jupiter, GeckoTerminal)
-- Never touches Cielo API
-- Perfect for historical performance tracking
+Uses free APIs (DexScreener, Jupiter, GeckoTerminal) for tracking.
 """
 import sys
 import os
@@ -22,20 +19,52 @@ from app.storage import (
     update_token_performance,
     get_performance_summary
 )
-from app.logger_utils import _out
+from app.logger_utils import _out, log_tracking, log_process
 
 
 def get_token_price_free(token_address: str) -> dict:
     """
-    Get token price using ONLY free APIs (no Cielo credits burned).
+    Get token price using free APIs (DexScreener, Jupiter, GeckoTerminal).
     Tries multiple sources for reliability.
     
     Returns dict with price data in the same format as get_token_stats()
     """
     from app.http_client import request_json
     
+    # Try 0: Birdeye (paid, rate-limited)
+    try:
+        from app.birdeye_client import get_price as birdeye_price, birdeye_enabled
+        if birdeye_enabled():
+            start = time.time()
+            stats = birdeye_price(token_address)
+            if stats:
+                log_tracking({
+                    "type": "price_fetch",
+                    "token": token_address,
+                    "source": "birdeye",
+                    "status": "ok",
+                    "elapsed_ms": int((time.time() - start) * 1000),
+                })
+                return stats
+            log_tracking({
+                "type": "price_fetch",
+                "token": token_address,
+                "source": "birdeye",
+                "status": "empty",
+                "elapsed_ms": int((time.time() - start) * 1000),
+            })
+    except Exception as e:
+        log_tracking({
+            "type": "price_fetch",
+            "token": token_address,
+            "source": "birdeye",
+            "status": "error",
+            "error": str(e),
+        })
+
     # Try 1: DexScreener (most reliable for Solana)
     try:
+        start = time.time()
         url = f"https://api.dexscreener.com/latest/dex/tokens/{token_address}"
         result = request_json("GET", url, timeout=10)
         
@@ -68,11 +97,26 @@ def get_token_price_free(token_address: str) -> dict:
                         "market_cap_usd": best_pair.get("marketCap"),
                         "source": "dexscreener_free"
                     }
+        log_tracking({
+            "type": "price_fetch",
+            "token": token_address,
+            "source": "dexscreener_free",
+            "status": "empty",
+            "elapsed_ms": int((time.time() - start) * 1000),
+        })
     except Exception as e:
         _out(f"DexScreener free API failed: {e}")
+        log_tracking({
+            "type": "price_fetch",
+            "token": token_address,
+            "source": "dexscreener_free",
+            "status": "error",
+            "error": str(e),
+        })
     
     # Try 2: Jupiter Price API (free, no key needed)
     try:
+        start = time.time()
         url = f"https://price.jup.ag/v4/price?ids={token_address}"
         result = request_json("GET", url, timeout=8)
         
@@ -92,11 +136,26 @@ def get_token_price_free(token_address: str) -> dict:
                         },
                         "source": "jupiter_free"
                     }
+        log_tracking({
+            "type": "price_fetch",
+            "token": token_address,
+            "source": "jupiter_free",
+            "status": "empty",
+            "elapsed_ms": int((time.time() - start) * 1000),
+        })
     except Exception as e:
         _out(f"Jupiter free API failed: {e}")
+        log_tracking({
+            "type": "price_fetch",
+            "token": token_address,
+            "source": "jupiter_free",
+            "status": "error",
+            "error": str(e),
+        })
     
     # Try 3: GeckoTerminal (free, good for trending tokens)
     try:
+        start = time.time()
         url = f"https://api.geckoterminal.com/api/v2/networks/solana/tokens/{token_address}"
         result = request_json("GET", url, timeout=10)
         
@@ -119,8 +178,22 @@ def get_token_price_free(token_address: str) -> dict:
                     "market_cap_usd": attrs.get("market_cap_usd"),
                     "source": "geckoterminal_free"
                 }
+        log_tracking({
+            "type": "price_fetch",
+            "token": token_address,
+            "source": "geckoterminal_free",
+            "status": "empty",
+            "elapsed_ms": int((time.time() - start) * 1000),
+        })
     except Exception as e:
         _out(f"GeckoTerminal free API failed: {e}")
+        log_tracking({
+            "type": "price_fetch",
+            "token": token_address,
+            "source": "geckoterminal_free",
+            "status": "error",
+            "error": str(e),
+        })
     
     return {}
 
@@ -134,8 +207,7 @@ def track_token_performance(token_address: str, retry_count: int = 0) -> bool:
     We handle this gracefully and keep trying.
     """
     try:
-        # TRACKER OPTIMIZATION: Use ONLY free APIs (no Cielo credits)
-        # This is perfect for historical tracking where we just need basic price data
+        # Use free APIs for historical tracking
         stats = get_token_price_free(token_address)
         
         if not stats:
@@ -164,13 +236,79 @@ def track_token_performance(token_address: str, retry_count: int = 0) -> bool:
             emoji = "🚀" if change_1h > 0 else "💥"
             _out(f"{emoji} {token_address[:8]}... {change_1h:+.1f}% (1h) | ${current_price:.8f}")
         
+        log_tracking({
+            "type": "alerted_token_snapshot",
+            "token": token_address,
+            "price_usd": current_price,
+            "change_1h": change_1h,
+            "source": stats.get("source"),
+        })
         return True
         
     except Exception as e:
         # Only log unexpected errors (not expected API failures)
         if "404" not in str(e) and "not found" not in str(e).lower():
             _out(f"❌ Error tracking {token_address[:8]}...: {e}")
+            log_tracking({
+                "type": "alerted_token_snapshot",
+                "token": token_address,
+                "status": "error",
+                "error": str(e),
+            })
         return False
+
+
+def track_open_positions() -> int:
+    """Track price movements for open positions using Jupiter oracle."""
+    from tradingSystem.db import init as init_trading_db
+    from tradingSystem.db import get_open_positions, record_position_price_snapshot
+    from tradingSystem.jupiter_price_oracle import get_jupiter_oracle
+
+    # Ensure trading DB schema exists before inserting snapshots
+    init_trading_db()
+    positions = get_open_positions()
+    if not positions:
+        return 0
+
+    oracle = get_jupiter_oracle(cache_ttl=15)
+    tracked = 0
+    for pos in positions:
+        token = pos.get("token_address")
+        qty = float(pos.get("qty") or 0)
+        entry = float(pos.get("entry_price") or 0)
+        if not token or qty <= 0:
+            continue
+        price = oracle.get_price(token, qty)
+        if price <= 0:
+            log_tracking({
+                "type": "position_snapshot",
+                "position_id": pos.get("id"),
+                "token": token,
+                "status": "no_price",
+                "source": "jupiter_oracle",
+            })
+            continue
+        record_position_price_snapshot(
+            position_id=int(pos.get("id")),
+            token_address=token,
+            price_usd=price,
+            qty=qty,
+            entry_price=entry,
+            source="jupiter_oracle",
+        )
+        pnl_pct = ((price - entry) / entry * 100.0) if entry > 0 else 0.0
+        log_tracking({
+            "type": "position_snapshot",
+            "position_id": pos.get("id"),
+            "token": token,
+            "price_usd": price,
+            "qty": qty,
+            "pnl_pct": pnl_pct,
+            "source": "jupiter_oracle",
+        })
+        tracked += 1
+        time.sleep(1)
+    return tracked
 
 
 def print_summary():
@@ -241,6 +379,9 @@ def main():
     _out("Tracking alerted tokens from last 24 hours...")
     _out("✅ ZERO CREDIT MODE: Using only FREE APIs (DexScreener, Jupiter, GeckoTerminal)")
     _out("⏱️  Checking every 10 minutes for price movements")
+    track_positions_enabled = os.getenv("TRACK_POSITIONS_ENABLED", "true").strip().lower() == "true"
+    if track_positions_enabled:
+        _out("📌 Position tracking enabled (Jupiter oracle)")
     
     cycle = 0
     consecutive_failures = 0
@@ -249,6 +390,7 @@ def main():
         try:
             cycle += 1
             _out(f"\n📊 Tracking Cycle #{cycle} - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            cycle_start = time.time()
             
             # Get tokens to track
             tokens = get_alerted_tokens_for_tracking()
@@ -271,6 +413,13 @@ def main():
                 
                 if success_count > 0:
                     _out(f"✅ Updated {success_count}/{len(tokens)} tokens")
+                    log_process({
+                        "type": "tracking_cycle_tokens",
+                        "cycle": cycle,
+                        "tracked_ok": success_count,
+                        "tracked_failed": failed_count,
+                        "total": len(tokens),
+                    })
                 
                 # Detect persistent API failures and back off
                 if failed_count == len(tokens) and len(tokens) > 10:
@@ -286,6 +435,31 @@ def main():
                         continue
                 elif failed_count > 0:
                     _out(f"ℹ️  {failed_count} tokens not yet indexed (too new for DexScreener)")
+                    log_process({
+                        "type": "tracking_cycle_tokens",
+                        "cycle": cycle,
+                        "tracked_ok": success_count,
+                        "tracked_failed": failed_count,
+                        "total": len(tokens),
+                    })
+
+            # Track open positions (Jupiter oracle)
+            if track_positions_enabled:
+                try:
+                    tracked_positions = track_open_positions()
+                    log_process({
+                        "type": "tracking_cycle_positions",
+                        "cycle": cycle,
+                        "tracked_positions": tracked_positions,
+                    })
+                except Exception as e:
+                    _out(f"❌ Error tracking positions: {e}")
+                    log_process({
+                        "type": "tracking_cycle_positions",
+                        "cycle": cycle,
+                        "status": "error",
+                        "error": str(e),
+                    })
             
             # Print summary every 6 cycles (roughly every hour)
             if cycle % 6 == 0:
@@ -293,6 +467,13 @@ def main():
             
             # OPTIMIZED: 10 minute interval to save API credits while still capturing movements
             # Uses cache (15min) so most calls won't hit external APIs
+            elapsed_ms = int((time.time() - cycle_start) * 1000)
+            log_process({
+                "type": "tracking_cycle_complete",
+                "cycle": cycle,
+                "elapsed_ms": elapsed_ms,
+                "positions_tracking": track_positions_enabled,
+            })
             _out("Sleeping for 10 minutes...")
             time.sleep(600)
             

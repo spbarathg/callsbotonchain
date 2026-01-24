@@ -4,7 +4,7 @@ Momentum Ranker - Advanced Position Ranking
 Provides sophisticated momentum calculations for portfolio positions.
 Used by Portfolio Manager to determine which positions to keep/replace.
 
-Author: Cielo Signal Optimizer Team
+Author: CallsBot Team
 Date: October 10, 2025
 """
 

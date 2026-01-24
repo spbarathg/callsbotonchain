@@ -1,18 +1,10 @@
 #!/bin/bash
-# Force-close all open positions in the database
+# Convenience wrapper to close all open positions
 
-cd "$(dirname "$0")/.."
-DB_PATH="var/trading.db"
+set -euo pipefail
 
-echo "Closing all open positions..."
-sqlite3 "$DB_PATH" "UPDATE positions SET status='closed', closed_at=strftime('%s','now') WHERE status='open';"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-COUNT=$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM positions WHERE status='open';")
-echo "✅ Done! Open positions remaining: $COUNT"
-
-if [ "$COUNT" -eq 0 ]; then
-    echo "🎯 All positions closed successfully!"
-else
-    echo "⚠️ Warning: $COUNT positions still open"
-fi
-
+echo "Closing all open positions using force_close_all.py..."
+python "${PROJECT_ROOT}/scripts/force_close_all.py"

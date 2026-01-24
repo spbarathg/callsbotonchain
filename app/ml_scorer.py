@@ -51,7 +51,7 @@ class MLScorer:
             from app.logger_utils import log_process
             log_process({"type": "ml_scorer_info", "message": msg})
         except Exception:
-            print(f"✅ {msg}")
+            print(f"[OK] {msg}")
     
     @staticmethod
     def _log_warn(msg: str) -> None:
@@ -60,7 +60,7 @@ class MLScorer:
             from app.logger_utils import log_process
             log_process({"type": "ml_scorer_warning", "message": msg})
         except Exception:
-            print(f"⚠️  {msg}")
+            print(f"[WARN] {msg}")
     
     def is_available(self) -> bool:
         """Check if ML scoring is available"""
@@ -82,7 +82,7 @@ class MLScorer:
             predicted_gain = self.gain_model.predict([X])[0]
             return float(predicted_gain)
         except Exception as e:
-            print(f"⚠️  ML prediction error: {e}")
+            print(f"[WARN] ML prediction error: {e}")
             return None
     
     def predict_winner_probability(self, stats: Dict, score: int, 
@@ -101,7 +101,7 @@ class MLScorer:
             prob = self.winner_model.predict_proba([X])[0][1]  # Prob of class 1 (winner)
             return float(prob)
         except Exception as e:
-            print(f"⚠️  ML prediction error: {e}")
+            print(f"[WARN] ML prediction error: {e}")
             return None
     
     def _extract_features(self, stats: Dict, score: int, smart_money: bool, 
@@ -221,7 +221,7 @@ class MLScorer:
             return enhanced_score, reason_str
             
         except Exception as e:
-            print(f"⚠️  ML enhance_score error: {e}")
+            print(f"[WARN] ML enhance_score error: {e}")
             return base_score, f"ML error: {str(e)[:50]}"
 
 

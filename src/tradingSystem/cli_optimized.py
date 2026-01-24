@@ -1253,33 +1253,33 @@ def run() -> None:
                     print(f"[VALIDATOR] ✅ {validation_reason}", flush=True)
                 
                 # === TIERED ENTRY SYSTEM: Watch & Strike ===
-                # === AGGRESSIVE STRATEGY: HIGH CONVICTION INSTANT BUY ===
-                # Score 8-10/10 → INSTANT BUY (trust the signal, catch moonshots early!)
-                # Score 7/10 → Watch List (lower conviction needs momentum confirmation)
+                # === ULTRA AGGRESSIVE STRATEGY: HIGH CONVICTION INSTANT BUY ===
+                # Score 7-10/10 → INSTANT BUY (trust the signal, catch moonshots early!)
+                # Score 6/10 → Watch List (lower conviction needs momentum confirmation)
                 #
                 # Why aggressive for high scores:
-                # 1. Score 10/10 = Best possible signal (High Confidence smart money)
+                # 1. Score 7-10/10 = High quality signals (smart money, conviction)
                 # 2. By waiting 2-5min, tokens already up 20-30% (missed the boat!)
-                # 3. These are rare - only ~1-2 per hour, can't afford to miss them
+                # 3. Analysis shows 44% of signals are score 7-9, can't afford to miss them
                 # 4. Safety filters already applied (age, rugpull, Jupiter, dumps)
                 #
-                # Why still cautious for score 7:
-                # 1. Score 7/10 = Nuanced (weaker signal, needs confirmation)
+                # Why still cautious for score 6:
+                # 1. Score 6/10 = Moderate signal, needs confirmation
                 # 2. Watch list filters out fake pumps that stall
                 # 3. Only buys if shows real momentum
                 
-                if signal_score >= 8:
-                    # TIER 1: INSTANT ENTRY (Score 8-10/10 - Premium Signals)
-                    conviction_label = "HIGH CONVICTION" if signal_score >= 10 else "VERY HIGH QUALITY"
+                if signal_score >= 7:
+                    # TIER 1: INSTANT ENTRY (Score 7-10/10 - Premium Signals)
+                    conviction_label = "ULTRA HIGH CONVICTION" if signal_score >= 10 else "HIGH QUALITY"
                     
-                    # MOMENTUM VALIDATION (OCT 31 2025 - ULTRA AGGRESSIVE FOR MOONSHOTS)
-                    # Score 8-10: Instant entry, NO safety check (catch 2x, 5x, 10x runners EARLY!)
+                    # MOMENTUM VALIDATION (NOV 2 2025 - ULTRA AGGRESSIVE FOR MOONSHOTS)
+                    # Score 7-10: Instant entry, NO safety check (catch 2x, 5x, 10x runners EARLY!)
                     print(f"[ENTRY] 🚀🚀 {conviction_label} (Score {signal_score}/10) → INSTANT ENTRY", flush=True)
                     print(f"[ENTRY] Strategy: Trust premium signal, catch moonshot early with ${plan['usd_size']:.2f}", flush=True)
                     # Continue to position opening below
                     
-                elif signal_score >= 7:
-                    # TIER 2: WATCH LIST (Score 7/10 - Needs Momentum Confirmation)
+                elif signal_score >= 6:
+                    # TIER 2: WATCH LIST (Score 6/10 - Needs Momentum Confirmation)
                     print(f"[WATCHLIST] 📊 MEDIUM CONVICTION SIGNAL: {token_norm[:8]} (score {signal_score}/10)", flush=True)
                     print(f"[WATCHLIST] 💡 Strategy: Track movement for 2-5min, enter if shows real momentum", flush=True)
                     
