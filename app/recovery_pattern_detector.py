@@ -1,4 +1,4 @@
-"""
+﻿"""
 RECOVERY PATTERN DETECTOR
 Detects "dip and rip" patterns in memecoins
 
@@ -20,7 +20,7 @@ Example:
 - Drops to: $60K (-40%)
 - Recovers to: $110K (+10% above ATH)
 - Takes 5+ candles
-- → SIGNAL!
+- ΓåÆ SIGNAL!
 """
 import time
 from typing import Dict, List, Optional, Tuple
@@ -192,7 +192,7 @@ class RecoveryPatternDetector:
         # Calculate drop from ATH
         drop_pct = ((ath_mcap - current_mcap) / ath_mcap) * 100 if ath_mcap > 0 else 0
         
-        # STATE MACHINE: Track drop → recovery progression
+        # STATE MACHINE: Track drop ΓåÆ recovery progression
         
         # State 1: Detect significant drop from ATH
         if not state["in_drop"] and not state["in_recovery"]:

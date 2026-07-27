@@ -86,52 +86,115 @@ def get_token_balance(rpc_client: SolanaClient, wallet_pubkey: str, token_mint: 
         return None
 
 
-def get_token_balance_simple(rpc_client: SolanaClient, wallet_pubkey: str, token_mint: str) -> Optional[float]:
+def get_token_balance_simple(rpc_client: SolanaClient, wallet_pubkey: str, token_mint: str, retries: int = 3, verbose: bool = True) -> Optional[float]:
     """
-    Simplified token balance query using Associated Token Account (ATA)
+    ROBUST token balance query - uses JSON-RPC to find ANY token account for this mint
+    Not just the standard ATA (which can miss some tokens on Solana)
+    
+    CRITICAL FIX: Added retries to handle Solana public RPC inconsistency
+    Public RPC (api.mainnet-beta.solana.com) is load-balanced and different nodes
+    may have different data. Retrying helps get consistent results.
+    
+    Args:
+        rpc_client: Solana RPC client
+        wallet_pubkey: Wallet public key (str)
+        token_mint: Token mint address (str)
+        retries: Number of retry attempts (default 3)
+        verbose: Print debug messages (default True)
     
     Returns balance in tokens (with decimals applied), or 0.0 if no account exists
     """
-    try:
-        from solders.token.associated import get_associated_token_address
-        
-        wallet_pk = Pubkey.from_string(wallet_pubkey)
-        token_pk = Pubkey.from_string(token_mint)
-        
-        # Get the Associated Token Account (ATA) for this wallet+mint
-        # This is the standard way to find a token account
-        ata = get_associated_token_address(wallet_pk, token_pk)
-        
-        # Query the balance for that specific account
-        balance_response = rpc_client.get_token_account_balance(ata)
-        
-        if hasattr(balance_response, 'value') and balance_response.value:
-            token_amount = balance_response.value
+    import requests
+    import time
+    
+    last_balance = None
+    
+    for attempt in range(retries):
+        try:
+            # Get RPC URL from the client
+            rpc_url = rpc_client._provider.endpoint_uri
             
-            # Try ui_amount first (human-readable with decimals)
-            if hasattr(token_amount, 'ui_amount') and token_amount.ui_amount is not None:
-                balance = float(token_amount.ui_amount)
-                print(f"[BALANCE] ✅ On-chain balance: {balance:.4f} tokens", flush=True)
-                return balance
+            # Method 1: Use JSON-RPC getTokenAccountsByOwner (MOST RELIABLE)
+            # This finds ALL token accounts for this mint, not just standard ATA
+            payload = {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "getTokenAccountsByOwner",
+                "params": [
+                    wallet_pubkey,
+                    {"mint": token_mint},
+                    {"encoding": "jsonParsed"}
+                ]
+            }
             
-            # Fallback to manual calculation
-            if hasattr(token_amount, 'amount') and hasattr(token_amount, 'decimals'):
-                raw = int(token_amount.amount)
-                decimals = int(token_amount.decimals)
-                balance = float(raw) / (10 ** decimals)
-                print(f"[BALANCE] ✅ On-chain balance: {balance:.4f} tokens (calculated)", flush=True)
-                return balance
-        
-        print(f"[BALANCE] ⚠️ Could not parse balance response", flush=True)
-        return 0.0
-        
-    except Exception as e:
-        error_msg = str(e)
-        if "could not find account" in error_msg:
-            # Token account doesn't exist = 0 balance
-            print(f"[BALANCE] ℹ️ No token account exists (0 balance)", flush=True)
+            resp = requests.post(rpc_url, json=payload, timeout=30)
+            data = resp.json()
+            
+            if 'result' in data and data['result']['value']:
+                # Found token account(s) for this mint
+                for acc in data['result']['value']:
+                    info = acc['account']['data']['parsed']['info']
+                    if info['mint'] == token_mint:
+                        balance = info['tokenAmount']['uiAmount']
+                        if balance is not None and balance > 0:
+                            if verbose:
+                                print(f"[BALANCE] ✅ Found {balance:.4f} tokens via JSON-RPC", flush=True)
+                            return float(balance)
+                # Accounts exist but 0 balance
+                last_balance = 0.0
+            else:
+                # No accounts found - but might be RPC inconsistency
+                last_balance = 0.0
+            
+            # If we got 0, retry with a delay (RPC load balancing issue)
+            if attempt < retries - 1:
+                wait_time = (attempt + 1) * 2  # 2s, 4s, 6s
+                if verbose and attempt == 0:
+                    print(f"[BALANCE] ⏳ No tokens found, retrying ({attempt+1}/{retries})...", flush=True)
+                time.sleep(wait_time)
+                continue
+            
+            # Final attempt still shows 0
+            if verbose:
+                print(f"[BALANCE] ℹ️ No token account for {token_mint[:8]}... (0 balance after {retries} checks)", flush=True)
             return 0.0
-        else:
-            print(f"[BALANCE] ❌ Error: {e}", flush=True)
-            return None  # Unknown error, fall back to database
+            
+        except Exception as e:
+            if verbose:
+                print(f"[BALANCE] ❌ JSON-RPC error (attempt {attempt+1}): {e}", flush=True)
+            
+            if attempt < retries - 1:
+                time.sleep(2)
+                continue
+            
+            # Fallback to ATA method
+            try:
+                from solders.token.associated import get_associated_token_address
+                
+                wallet_pk = Pubkey.from_string(wallet_pubkey)
+                token_pk = Pubkey.from_string(token_mint)
+                ata = get_associated_token_address(wallet_pk, token_pk)
+                
+                balance_response = rpc_client.get_token_account_balance(ata)
+                
+                if hasattr(balance_response, 'value') and balance_response.value:
+                    token_amount = balance_response.value
+                    if hasattr(token_amount, 'ui_amount') and token_amount.ui_amount is not None:
+                        balance = float(token_amount.ui_amount)
+                        if verbose:
+                            print(f"[BALANCE] ✅ ATA balance: {balance:.4f} tokens", flush=True)
+                        return balance
+                
+                return 0.0
+                
+            except Exception as e2:
+                if "could not find account" in str(e2):
+                    if verbose:
+                        print(f"[BALANCE] ℹ️ No ATA exists (0 balance)", flush=True)
+                    return 0.0
+                if verbose:
+                    print(f"[BALANCE] ❌ ATA fallback error: {e2}", flush=True)
+                return None
+    
+    return last_balance if last_balance is not None else 0.0
 

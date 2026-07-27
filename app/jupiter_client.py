@@ -11,6 +11,7 @@ import os
 import time
 import threading
 import random
+from collections import deque
 
 # Apply DNS patch for Jupiter API before any requests are made
 from app.dns_patch import apply_dns_patch
@@ -19,38 +20,91 @@ apply_dns_patch()
 logger = logging.getLogger(__name__)
 
 # ==== GLOBAL RATE LIMIT ENFORCEMENT ====
-# Ensures ALL Jupiter API calls respect the 10 RPS limit, even across multiple client instances
-_global_request_times = []
+# Ensures ALL Jupiter API calls respect the configured RPS limit
+_global_request_times = deque()
 _global_request_lock = threading.Lock()
 
-def _enforce_global_rate_limit(rps_limit: int = 10):
+# ==== GLOBAL PRIORITY SCHEDULING ====
+# Enforces priority order under high load (high > medium > normal > low)
+_priority_lock = threading.Lock()
+_priority_cond = threading.Condition(_priority_lock)
+_priority_waiting = {"high": 0, "medium": 0, "normal": 0, "low": 0}
+_active_requests = 0
+
+def _enforce_global_rate_limit(rps_limit: float = 10.0):
     """
     Strict global rate limiter - blocks until safe to make request.
     Tracks actual request times across all instances.
     """
     with _global_request_lock:
+        if rps_limit <= 0:
+            return
         now = time.time()
-        
+        if rps_limit < 1.0:
+            min_interval = 1.0 / rps_limit
+            if _global_request_times:
+                elapsed = now - _global_request_times[-1]
+                if elapsed < min_interval:
+                    wait_time = min_interval - elapsed
+                    logger.debug(f"Global rate limit (<1 RPS): waiting {wait_time:.3f}s")
+                    time.sleep(wait_time)
+            _global_request_times.append(time.time())
+            cutoff = time.time() - 60.0
+            while _global_request_times and _global_request_times[0] < cutoff:
+                _global_request_times.popleft()
+            return
         # Remove requests older than 1 second
         cutoff = now - 1.0
-        global _global_request_times
-        _global_request_times = [t for t in _global_request_times if t > cutoff]
-        
+        while _global_request_times and _global_request_times[0] <= cutoff:
+            _global_request_times.popleft()
         # If at limit, calculate wait time
-        if len(_global_request_times) >= rps_limit:
-            # Wait until the oldest request is 1 second old
+        if len(_global_request_times) >= int(rps_limit):
             oldest = _global_request_times[0]
             wait_time = 1.0 - (now - oldest)
             if wait_time > 0:
                 logger.debug(f"Global rate limit: waiting {wait_time:.3f}s")
                 time.sleep(wait_time)
-                # Clean up again after sleep
                 now = time.time()
                 cutoff = now - 1.0
-                _global_request_times = [t for t in _global_request_times if t > cutoff]
-        
+                while _global_request_times and _global_request_times[0] <= cutoff:
+                    _global_request_times.popleft()
         # Record this request
         _global_request_times.append(time.time())
+
+
+def _priority_rank(priority: str) -> int:
+    return {"high": 0, "medium": 1, "normal": 2, "low": 3}.get(priority or "normal", 2)
+
+
+def _acquire_priority_slot(priority: str, max_concurrent: int) -> None:
+    global _active_requests
+    if max_concurrent <= 0:
+        return
+    priority = priority or "normal"
+    if priority not in _priority_waiting:
+        priority = "normal"
+    with _priority_cond:
+        _priority_waiting[priority] += 1
+        while True:
+            higher_waiting = False
+            for level, count in _priority_waiting.items():
+                if _priority_rank(level) < _priority_rank(priority) and count > 0:
+                    higher_waiting = True
+                    break
+            if not higher_waiting:
+                if _active_requests < max_concurrent:
+                    _priority_waiting[priority] -= 1
+                    _active_requests += 1
+                    return
+            _priority_cond.wait(timeout=0.1)
+
+
+def _release_priority_slot() -> None:
+    with _priority_cond:
+        global _active_requests
+        if _active_requests > 0:
+            _active_requests -= 1
+        _priority_cond.notify_all()
 
 class JupiterClient:
     """
@@ -64,7 +118,22 @@ class JupiterClient:
     def __init__(self):
         self.hostname = "quote-api.jup.ag"
         self.fallback_ips = ["104.26.11.139", "104.26.10.139", "172.67.133.245"]  # Cloudflare IPs
-        self.base_url = f"https://{self.hostname}"
+        env_base_url = os.getenv("JUPITER_BASE_URL", "").strip().rstrip("/")
+        if env_base_url:
+            try:
+                from urllib.parse import urlparse
+                parsed = urlparse(env_base_url)
+                if parsed.hostname:
+                    self.hostname = parsed.hostname
+            except Exception:
+                pass
+        self.base_url = env_base_url or f"https://{self.hostname}"
+        self.alt_base_url = os.getenv("JUPITER_ALT_BASE_URL", "").strip()
+        env_api_version = os.getenv("JUPITER_API_VERSION", "").strip().lower()
+        if env_api_version:
+            self.api_version = env_api_version
+        else:
+            self.api_version = "swap-v1" if "api.jup.ag" in self.base_url else "v6"
         self.using_ip_fallback = False
         self._current_ip = None
         
@@ -78,6 +147,10 @@ class JupiterClient:
             logger.info("📊 Jupiter Free tier - 60 RPM limit")
         
         self.session = requests.Session()
+        self.proxy_url = os.getenv("JUPITER_PROXY_URL", "").strip() or os.getenv("CALLSBOT_HTTP_PROXY", "").strip()
+        if self.proxy_url:
+            self.session.proxies.update({"http": self.proxy_url, "https": self.proxy_url})
+        self._request_jitter_ms = int(os.getenv("JUPITER_REQUEST_JITTER_MS", "0") or "0")
         self._dns_cache = {}
         self._dns_cache_timeout = timedelta(minutes=5)
         
@@ -92,25 +165,41 @@ class JupiterClient:
         self.session.mount('http://', adapter)
         
         # --- OPTIMIZED RATE LIMITER FOR PRO TIER ---
-        # Pro: 10 RPS = 600 RPM → use 540 RPM (90% utilization for safety)
-        # Free: 60 RPM → use 45 RPM (75% utilization)
+        # Pro: 10 RPS = 600 RPM -> use 540 RPM (90% utilization for safety)
+        # Free: 60 RPM -> use 45 RPM (75% utilization)
         if self.is_pro:
-            rpm_limit = int(os.getenv("JUP_PRO_RPM_LIMIT", "540"))  # 9 RPS effective
-            self._bucket_capacity = int(os.getenv("JUP_PRO_RATE_BUCKET", "20"))  # Larger bursts
-            self._429_threshold = int(os.getenv("JUP_PRO_429_THRESHOLD", "10"))  # More tolerant
-            self._cooldown_sec = int(os.getenv("JUP_PRO_COOLDOWN_SEC", "10"))  # Shorter cooldown
+            rpm_limit = int(os.getenv("JUP_PRO_RPM_LIMIT") or os.getenv("JUP_RPM_LIMIT", "540"))  # 9 RPS effective
+            self._bucket_capacity = int(os.getenv("JUP_PRO_RATE_BUCKET") or os.getenv("JUP_RATE_BUCKET", "20"))  # Larger bursts
+            self._429_threshold = int(os.getenv("JUP_PRO_429_THRESHOLD") or os.getenv("JUP_429_COOLDOWN_THRESHOLD", "10"))
+            self._cooldown_sec = int(os.getenv("JUP_PRO_COOLDOWN_SEC") or os.getenv("JUP_429_COOLDOWN_SEC", "10"))
         else:
-            rpm_limit = int(os.getenv("JUP_FREE_RPM_LIMIT", "45"))
-            self._bucket_capacity = int(os.getenv("JUP_FREE_RATE_BUCKET", "5"))
-            self._429_threshold = int(os.getenv("JUP_FREE_429_THRESHOLD", "3"))
-            self._cooldown_sec = int(os.getenv("JUP_FREE_COOLDOWN_SEC", "60"))
+            rpm_limit = int(os.getenv("JUP_FREE_RPM_LIMIT") or os.getenv("JUP_RPM_LIMIT", "45"))
+            self._bucket_capacity = int(os.getenv("JUP_FREE_RATE_BUCKET") or os.getenv("JUP_RATE_BUCKET", "5"))
+            self._429_threshold = int(os.getenv("JUP_FREE_429_THRESHOLD") or os.getenv("JUP_429_COOLDOWN_THRESHOLD", "3"))
+            self._cooldown_sec = int(os.getenv("JUP_FREE_COOLDOWN_SEC") or os.getenv("JUP_429_COOLDOWN_SEC", "60"))
+        self._rpm_limit = max(1, int(rpm_limit))
         
-        self._bucket_refill_rate = rpm_limit / 60.0  # tokens per second
+        self._bucket_refill_rate = self._rpm_limit / 60.0  # tokens per second
         self._bucket_tokens = float(self._bucket_capacity)
         self._bucket_last_refill = time.time()
         self._bucket_lock = threading.Lock()
+        self._request_times_60s = deque()
+        self._metrics_lock = threading.Lock()
+        self._metrics = {
+            "total": 0,
+            "success": 0,
+            "errors": 0,
+            "http_429": 0,
+            "last_log": time.time(),
+        }
+        self._metrics_log_interval = int(os.getenv("JUPITER_RATE_LOG_INTERVAL_SEC", "60"))
+        default_conc = 2 if self._rpm_limit <= 60 else 8
+        self._max_concurrent = int(os.getenv("JUP_MAX_CONCURRENT") or default_conc)
         
-        logger.info(f"Rate limiter: {rpm_limit} RPM ({rpm_limit/60:.1f} RPS), burst={self._bucket_capacity}")
+        logger.info(
+            f"Rate limiter: {self._rpm_limit} RPM ({self._rpm_limit/60:.2f} RPS), "
+            f"burst={self._bucket_capacity}, max_concurrent={self._max_concurrent}"
+        )
         
         # 429 handling state
         self._consecutive_429 = 0
@@ -120,9 +209,7 @@ class JupiterClient:
         # CRITICAL FIX: NEVER use IP fallback for HTTPS - SSL cert validation will fail
         # Always use domain name for actual trades
         # DNS resolution in Docker containers works fine - health check failures are cosmetic
-        logger.info(f"Jupiter client initialized with DNS resolution (domain: {self.hostname})")
-        # Keep base_url as domain for SSL compatibility
-        self.base_url = f"https://{self.hostname}"
+        logger.info(f"Jupiter client initialized (base_url={self.base_url})")
     
     def is_in_cooldown(self) -> tuple[bool, float]:
         """
@@ -150,7 +237,7 @@ class JupiterClient:
         try:
             ip = socket.gethostbyname(domain)
             self._dns_cache[domain] = (ip, datetime.now())
-            logger.debug(f"DNS resolved: {domain} → {ip}")
+            logger.debug(f"DNS resolved: {domain} -> {ip}")
             return ip
         except socket.gaierror as e:
             logger.warning(f"DNS resolution failed for {domain}: {e}")
@@ -171,7 +258,8 @@ class JupiterClient:
         params: Optional[Dict] = None,
         json: Optional[Dict] = None,
         timeout: float = 10.0,
-        retries: int = 3
+        retries: int = 3,
+        priority: str = "normal"
     ) -> Dict[str, Any]:
         """
         Make HTTP request with DNS fallback and retry logic
@@ -197,9 +285,14 @@ class JupiterClient:
             # 1. Token bucket (per-instance smooth rate limiting)
             self._acquire_rate_token()
             # 2. Global tracker (absolute guarantee across all instances)
-            rps_limit = 10 if self.is_pro else 1
+            rps_limit = max(0.1, self._rpm_limit / 60.0)
             _enforce_global_rate_limit(rps_limit)
+            acquired = False
             try:
+                _acquire_priority_slot(priority, self._max_concurrent)
+                acquired = True
+                if self._request_jitter_ms > 0:
+                    time.sleep(random.uniform(0, self._request_jitter_ms) / 1000.0)
                 # NO MORE REQUEST LOCK - allows concurrent requests (better throughput!)
                 # Token bucket prevents overloading Jupiter API
                 if method == "GET":
@@ -223,10 +316,37 @@ class JupiterClient:
                 else:
                     raise ValueError(f"Unsupported method: {method}")
                 
+                # Cloudflare 530 fallback to alternate base URL if configured
+                if response.status_code == 530 and self.alt_base_url:
+                    alt_url = f"{self.alt_base_url}{path}"
+                    try:
+                        if method == "GET":
+                            response = self.session.get(
+                                alt_url,
+                                params=params,
+                                timeout=timeout,
+                                headers=headers,
+                                verify=True,
+                            )
+                        elif method == "POST":
+                            response = self.session.post(
+                                alt_url,
+                                json=json,
+                                timeout=timeout,
+                                headers=headers,
+                                verify=True,
+                            )
+                    except Exception:
+                        pass
+
+                # Calculate latency
+                request_latency_ms = (time.time() - now) * 1000 if 'now' in dir() else 0.0
+                
                 # Success
                 if response.status_code == 200:
                     # Success clears 429 counters
                     self._consecutive_429 = 0
+                    self._record_metrics(200, latency_ms=request_latency_ms)
                     return {
                         "status_code": 200,
                         "json": response.json(),
@@ -236,6 +356,7 @@ class JupiterClient:
                     # Handle explicit 429 with adaptive backoff (Pro tier gets shorter delays)
                     if response.status_code == 429:
                         self._consecutive_429 += 1
+                        self._record_metrics(429)
                         # Pro tier: faster retries (should rarely hit 429)
                         # Free tier: standard exponential backoff
                         if self.is_pro:
@@ -250,6 +371,7 @@ class JupiterClient:
                             self._cooldown_until = time.time() + self._cooldown_sec
                             logger.error(f"Entering Jupiter cooldown for {self._cooldown_sec}s due to repeated 429s")
                         continue
+                    self._record_metrics(response.status_code)
                     return {
                         "status_code": response.status_code,
                         "json": None,
@@ -257,6 +379,7 @@ class JupiterClient:
                     }
                     
             except requests.exceptions.RequestException as e:
+                self._record_metrics(None)
                 logger.warning(f"Jupiter API attempt {attempt + 1}/{retries} failed: {e}")
                 
                 # No IP fallback - always use domain name for HTTPS/SSL compatibility
@@ -271,6 +394,9 @@ class JupiterClient:
                 
                 # Wait before retry with exponential backoff
                 time.sleep(1 * (attempt + 1) + random.uniform(0, 0.2))
+            finally:
+                if acquired:
+                    _release_priority_slot()
         
         return {
             "status_code": None,
@@ -315,6 +441,46 @@ class JupiterClient:
                 return
             # Fallback: enforce small sleep to avoid tight loops
             time.sleep(0.2)
+
+    def _record_metrics(self, status_code: Optional[int], latency_ms: float = 0.0) -> None:
+        now = time.time()
+        with self._metrics_lock:
+            self._metrics["total"] += 1
+            if status_code == 200:
+                self._metrics["success"] += 1
+            elif status_code == 429:
+                self._metrics["http_429"] += 1
+                self._metrics["errors"] += 1
+                # Record 429 in position controller for health tracking
+                try:
+                    from app.position_controller import get_position_controller
+                    get_position_controller().record_api_429()
+                except Exception:
+                    pass
+            elif status_code is None:
+                self._metrics["errors"] += 1
+            else:
+                self._metrics["errors"] += 1
+            
+            # Record latency for health tracking
+            if latency_ms > 0:
+                try:
+                    from app.position_controller import get_position_controller
+                    get_position_controller().record_api_latency(latency_ms)
+                except Exception:
+                    pass
+            
+            self._request_times_60s.append(now)
+            cutoff = now - 60.0
+            while self._request_times_60s and self._request_times_60s[0] < cutoff:
+                self._request_times_60s.popleft()
+            if now - self._metrics["last_log"] >= self._metrics_log_interval:
+                rpm = len(self._request_times_60s)
+                logger.info(
+                    f"Jupiter rate stats: rpm={rpm} total={self._metrics['total']} "
+                    f"ok={self._metrics['success']} err={self._metrics['errors']} 429={self._metrics['http_429']}"
+                )
+                self._metrics["last_log"] = now
     
     def get_quote(
         self,
@@ -324,7 +490,8 @@ class JupiterClient:
         slippage_bps: int = 2000,
         timeout: float = 10.0,
         only_direct_routes: bool = False,
-        max_accounts: int = None
+        max_accounts: int = None,
+        priority: str = "normal"
     ) -> Dict[str, Any]:
         """
         Get swap quote from Jupiter
@@ -354,9 +521,13 @@ class JupiterClient:
         if max_accounts is not None:
             params["maxAccounts"] = str(max_accounts)
         
-        logger.debug(f"Getting Jupiter quote: {input_mint[:8]}... → {output_mint[:8]}... ({amount} units, {slippage_bps} BPS slippage, direct={only_direct_routes}, maxAccounts={max_accounts})")
+        logger.debug(f"Getting Jupiter quote: {input_mint[:8]}... -> {output_mint[:8]}... ({amount} units, {slippage_bps} BPS slippage, direct={only_direct_routes}, maxAccounts={max_accounts})")
         
-        result = self._make_request("GET", "/v6/quote", params=params, timeout=timeout)
+        if self.api_version == "swap-v1":
+            path = "/swap/v1/quote"
+        else:
+            path = "/v6/quote"
+        result = self._make_request("GET", path, params=params, timeout=timeout, priority=priority)
         
         if result["status_code"] == 200:
             logger.info(f"✅ Jupiter quote received: {result['json'].get('outAmount')} units")
@@ -371,7 +542,8 @@ class JupiterClient:
         user_public_key: str,
         wrap_unwrap_sol: bool = True,
         priority_fee: int = 100000,
-        timeout: float = 15.0
+        timeout: float = 15.0,
+        priority: str = "normal"
     ) -> Dict[str, Any]:
         """
         Get swap transaction from Jupiter
@@ -397,7 +569,11 @@ class JupiterClient:
         
         logger.debug(f"Getting Jupiter swap transaction for {user_public_key[:8]}...")
         
-        result = self._make_request("POST", "/v6/swap", json=payload, timeout=timeout)
+        if self.api_version == "swap-v1":
+            path = "/swap/v1/swap"
+        else:
+            path = "/v6/swap"
+        result = self._make_request("POST", path, json=payload, timeout=timeout, priority=priority)
         
         if result["status_code"] == 200:
             logger.info("✅ Jupiter swap transaction received")
@@ -417,7 +593,8 @@ class JupiterClient:
                 output_mint="EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",  # USDC
                 amount=1000000000,  # 1 SOL
                 slippage_bps=50,
-                timeout=5.0
+                timeout=5.0,
+                priority="low"
             )
             
             return result["status_code"] == 200 and result["json"] is not None

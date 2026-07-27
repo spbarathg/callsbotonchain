@@ -1,4 +1,4 @@
-"""
+﻿"""
 Token Classifier - Identify Memecoin Behavior Patterns
 Classifies tokens as: FAST_MOVER, SLOW_GROWER, SUSTAINED, PUMP_DUMP
 Adjusts exit strategy based on classification.
@@ -97,10 +97,10 @@ class TokenClassifier:
     Classify tokens by behavior pattern to optimize exit strategy
     
     Categories:
-    - PUMP_DUMP: Fast pump, erratic volume → tight trailing stops
-    - FAST_MOVER: Rapid gains, moderate volume → standard strategy
-    - SLOW_GROWER: Steady growth, consistent volume → loose trailing stops
-    - SUSTAINED: Strong momentum + consistent volume → hold longer
+    - PUMP_DUMP: Fast pump, erratic volume ΓåÆ tight trailing stops
+    - FAST_MOVER: Rapid gains, moderate volume ΓåÆ standard strategy
+    - SLOW_GROWER: Steady growth, consistent volume ΓåÆ loose trailing stops
+    - SUSTAINED: Strong momentum + consistent volume ΓåÆ hold longer
     """
     
     def __init__(self):

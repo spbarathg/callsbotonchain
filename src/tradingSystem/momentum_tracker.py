@@ -1,4 +1,4 @@
-"""
+﻿"""
 MOMENTUM INTELLIGENCE SYSTEM
 Tracks token velocity and strength in first 5 minutes to predict winners vs losers
 """
@@ -14,7 +14,7 @@ class MomentumTracker:
         self._momentum_data: Dict[str, Dict] = {}
         
         # Momentum thresholds (calibrated from real trading data)
-        self.SCAM_THRESHOLD_60S = -15.0  # If -15% in 60s → instant exit
+        self.SCAM_THRESHOLD_60S = -15.0  # If -15% in 60s ΓåÆ instant exit
         self.STRONG_MOMENTUM_5MIN = 20.0  # +20% in 5min = strong token
         self.MODERATE_MOMENTUM_5MIN = 5.0  # +5% in 5min = moderate
         # Anything below = weak token
@@ -138,8 +138,8 @@ class MomentumTracker:
         Get adaptive trailing stop percentage based on momentum
         
         FIXED NOV 2 2025: Reversed inverted logic (was widening for strong, tightening for weak)
-        CORRECT STRATEGY: Strong momentum → TIGHT trail (protect gains)
-                         Weak momentum → WIDE trail (give room to develop)
+        CORRECT STRATEGY: Strong momentum ΓåÆ TIGHT trail (protect gains)
+                         Weak momentum ΓåÆ WIDE trail (give room to develop)
         """
         if token not in self._momentum_data:
             return None

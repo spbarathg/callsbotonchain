@@ -62,31 +62,188 @@ def init() -> None:
 	)
 	c.execute("CREATE INDEX IF NOT EXISTS idx_position_snapshots_position ON position_price_snapshots(position_id)")
 	c.execute("CREATE INDEX IF NOT EXISTS idx_position_snapshots_time ON position_price_snapshots(snapshot_at)")
+	
+	# Migrations for new fields
+	try:
+		c.execute("ALTER TABLE positions ADD COLUMN signal_source TEXT DEFAULT 'unknown'")
+	except sqlite3.OperationalError:
+		pass
+	try:
+		c.execute("ALTER TABLE positions ADD COLUMN entry_score INTEGER DEFAULT 0")
+	except sqlite3.OperationalError:
+		pass
+	try:
+		c.execute("ALTER TABLE positions ADD COLUMN token_age_mins REAL DEFAULT 0.0")
+	except sqlite3.OperationalError:
+		pass
+	try:
+		c.execute("ALTER TABLE positions ADD COLUMN market_cap REAL DEFAULT 0.0")
+	except sqlite3.OperationalError:
+		pass
+		
+	# New attribution columns
+	try:
+		c.execute("ALTER TABLE positions ADD COLUMN signal_channel_id TEXT DEFAULT 'unknown'")
+	except sqlite3.OperationalError:
+		pass
+	try:
+		c.execute("ALTER TABLE positions ADD COLUMN signal_channel_name TEXT DEFAULT 'unknown'")
+	except sqlite3.OperationalError:
+		pass
+	try:
+		c.execute("ALTER TABLE positions ADD COLUMN first_seen_source TEXT DEFAULT 'unknown'")
+	except sqlite3.OperationalError:
+		pass
+	try:
+		c.execute("ALTER TABLE positions ADD COLUMN signal_confidence INTEGER DEFAULT 0")
+	except sqlite3.OperationalError:
+		pass
+	try:
+		c.execute("ALTER TABLE positions ADD COLUMN pnl_usd REAL DEFAULT NULL")
+	except sqlite3.OperationalError:
+		pass
+	try:
+		c.execute("ALTER TABLE positions ADD COLUMN pnl_pct REAL DEFAULT NULL")
+	except sqlite3.OperationalError:
+		pass
+	try:
+		c.execute("ALTER TABLE positions ADD COLUMN signal_liquidity REAL DEFAULT 0.0")
+	except sqlite3.OperationalError:
+		pass
+
+	try:
+		c.execute("ALTER TABLE positions ADD COLUMN entry_source TEXT DEFAULT 'unknown'")
+	except sqlite3.OperationalError:
+		pass
+	try:
+		c.execute("ALTER TABLE positions ADD COLUMN all_sources TEXT DEFAULT '[]'")
+	except sqlite3.OperationalError:
+		pass
+	try:
+		c.execute("ALTER TABLE positions ADD COLUMN signal_time_first REAL DEFAULT 0.0")
+	except sqlite3.OperationalError:
+		pass
+	try:
+		c.execute("ALTER TABLE positions ADD COLUMN signal_time_entry REAL DEFAULT 0.0")
+	except sqlite3.OperationalError:
+		pass
+	try:
+		c.execute("ALTER TABLE positions ADD COLUMN time_to_entry_mins REAL DEFAULT 0.0")
+	except sqlite3.OperationalError:
+		pass
+	try:
+		c.execute("ALTER TABLE positions ADD COLUMN initial_risk_usd REAL DEFAULT 0.0")
+	except sqlite3.OperationalError:
+		pass
+
+	# Signals funnel table
+	c.execute(
+		"""
+		CREATE TABLE IF NOT EXISTS signals (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			token_address TEXT,
+			source_id TEXT,
+			source_name TEXT,
+			timestamp REAL,
+			market_cap REAL,
+			score INTEGER,
+			entered_trade BOOLEAN DEFAULT 0,
+			peak_return_24h REAL DEFAULT NULL,
+			peak_return_7d REAL DEFAULT NULL,
+			drawdown_24h REAL DEFAULT NULL,
+			drawdown_7d REAL DEFAULT NULL,
+			time_to_peak REAL DEFAULT NULL,
+			sol_price REAL DEFAULT NULL,
+			sol_trend TEXT DEFAULT NULL,
+			btc_trend TEXT DEFAULT NULL,
+			market_regime TEXT DEFAULT NULL
+		)
+		"""
+	)
+	c.execute("CREATE INDEX IF NOT EXISTS idx_signals_token ON signals(token_address)")
+	
+	# Signal price snapshots for opportunity cost tracking
+	c.execute(
+		"""
+		CREATE TABLE IF NOT EXISTS signal_price_snapshots (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			signal_id INTEGER,
+			timestamp REAL,
+			price_usd REAL,
+			market_cap_usd REAL,
+			liquidity_usd REAL,
+			FOREIGN KEY(signal_id) REFERENCES signals(id)
+		)
+		"""
+	)
+	c.execute("CREATE INDEX IF NOT EXISTS idx_signal_snapshots_signal ON signal_price_snapshots(signal_id)")
+
 	conn.commit()
 	conn.close()
 
 
-def create_position(token: str, strategy: str, entry_price: float, qty: float, usd_size: float, trail_pct: float) -> int:
+def create_position(token: str, strategy: str, entry_price: float, qty: float, usd_size: float, trail_pct: float, 
+                    signal_source: str = "unknown", entry_score: int = 0, token_age_mins: float = 0.0, market_cap: float = 0.0,
+                    signal_channel_id: str = "unknown", signal_channel_name: str = "unknown", 
+                    first_seen_source: str = "unknown", signal_confidence: int = 0, signal_liquidity: float = 0.0) -> int:
 	"""Create position with retry logic to prevent orphaned positions"""
+	
+	# Extract advanced source attribution from signals table
+	all_sources_json = '[]'
+	signal_time_first = 0.0
+	signal_time_entry = 0.0
+	time_to_entry_mins = 0.0
+	try:
+		from datetime import datetime
+		import json
+		conn_tmp = _conn()
+		c_tmp = conn_tmp.cursor()
+		c_tmp.execute("SELECT source_name, timestamp FROM signals WHERE token_address=? ORDER BY timestamp ASC", (token,))
+		rows = c_tmp.fetchall()
+		if rows:
+			sources_list = []
+			for row in rows:
+				if row[0] not in sources_list:
+					sources_list.append(row[0])
+			all_sources_json = json.dumps(sources_list)
+			signal_time_first = rows[0][1]
+			signal_time_entry = rows[-1][1]  # The latest signal before entry
+			time_to_entry_mins = (datetime.now().timestamp() - signal_time_first) / 60.0
+		conn_tmp.close()
+	except Exception as e:
+		print(f"[DB] Error extracting advanced attribution: {e}")
+	
+	initial_risk_usd = usd_size * (trail_pct / 100.0) if trail_pct else 0.0
+
 	max_retries = 3
 	for attempt in range(max_retries):
 		try:
 			conn = _conn()
 			c = conn.cursor()
 			c.execute(
-				"INSERT INTO positions(token_address,strategy,entry_price,qty,usd_size,peak_price,trail_pct,status) VALUES (?,?,?,?,?,?,?,?)",
-				(token, strategy, entry_price, qty, usd_size, entry_price, trail_pct, "open"),
+				"""
+				INSERT INTO positions(
+					token_address, strategy, entry_price, qty, usd_size, peak_price, trail_pct, status,
+					signal_source, entry_score, token_age_mins, market_cap,
+					signal_channel_id, signal_channel_name, first_seen_source, signal_confidence, signal_liquidity,
+					entry_source, all_sources, signal_time_first, signal_time_entry, time_to_entry_mins, initial_risk_usd
+				) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+				""",
+				(token, strategy, entry_price, qty, usd_size, entry_price, trail_pct, "open", 
+				 signal_source, entry_score, token_age_mins, market_cap,
+				 signal_channel_id, signal_channel_name, first_seen_source, signal_confidence, signal_liquidity,
+				 signal_source, all_sources_json, signal_time_first, signal_time_entry, time_to_entry_mins, initial_risk_usd),
 			)
 			pid = c.lastrowid
 			conn.commit()
 			conn.close()
-			print(f"[DB] ✅ Position #{pid} created for {token[:8]}...", flush=True)
+			print(f"[DB] Γ£à Position #{pid} created for {token[:8]}...", flush=True)
 			return pid
 		except Exception as e:
-			print(f"[DB] ⚠️ Attempt {attempt+1}/{max_retries} failed to create position: {e}", flush=True)
+			print(f"[DB] ΓÜá∩╕Å Attempt {attempt+1}/{max_retries} failed to create position: {e}", flush=True)
 			if attempt == max_retries - 1:
 				# Last attempt failed - this is critical!
-				print(f"[DB] 🚨 CRITICAL: Failed to create position after {max_retries} attempts!", flush=True)
+				print(f"[DB] ≡ƒÜ¿ CRITICAL: Failed to create position after {max_retries} attempts!", flush=True)
 				raise  # Re-raise to ensure caller knows it failed
 			import time
 			time.sleep(0.5)  # Wait before retry
@@ -107,9 +264,9 @@ def add_fill(position_id: int, side: str, price: float, qty: float, usd: float) 
 			conn.close()
 			return
 		except Exception as e:
-			print(f"[DB] ⚠️ Attempt {attempt+1}/{max_retries} failed to add fill: {e}", flush=True)
+			print(f"[DB] ΓÜá∩╕Å Attempt {attempt+1}/{max_retries} failed to add fill: {e}", flush=True)
 			if attempt == max_retries - 1:
-				print(f"[DB] 🚨 CRITICAL: Failed to add fill after {max_retries} attempts!", flush=True)
+				print(f"[DB] ≡ƒÜ¿ CRITICAL: Failed to add fill after {max_retries} attempts!", flush=True)
 				raise
 			import time
 			time.sleep(0.5)
@@ -121,7 +278,7 @@ def update_peak_and_trail(position_id: int, price: float, entry_price: float = 0
 	
 	ULTRA AGGRESSIVE MOONSHOT MODE: Allow 35-50% drawdowns for dip-and-rip!
 	OCT 25 2025 V3: Memecoins dip 20-30% then rebound to 10x - don't exit on pullbacks!
-	Example: +80% → dips to +50% (-37% from peak) → rips to +500%
+	Example: +80% ΓåÆ dips to +50% (-37% from peak) ΓåÆ rips to +500%
 	- 0-50% profit: 35% trail (survive shakeouts!)
 	- 50-100% profit: 38% trail (let dips play out)
 	- 100-200% profit: 42% trail (dip-then-rip pattern)
@@ -167,7 +324,7 @@ def update_peak_and_trail(position_id: int, price: float, entry_price: float = 0
 		# Strategy: Ultra-wide trails for 100x+ to survive massive volatility
 		# 
 		# Example: Token at 100x (+9900%) dips to 60x (-40% from peak = within 60% trail)
-		# → DON'T exit! It can rebound to 800x. Only exit if drops below 40x (-60% from 100x peak)
+		# ΓåÆ DON'T exit! It can rebound to 800x. Only exit if drops below 40x (-60% from 100x peak)
 		if profit_pct < PROFIT_TIER_1:  # 0-50% profit
 			trail = TRAIL_TIER_0  # 35% trail (survive shakeouts!)
 		elif profit_pct < PROFIT_TIER_2:  # 50-100% profit
@@ -204,27 +361,30 @@ def update_position_qty(position_id: int, new_qty: float, avg_entry_price: float
 				# Update both qty and entry price (for pyramiding)
 				c.execute("UPDATE positions SET qty=?, entry_price=? WHERE id=?", 
 						 (new_qty, avg_entry_price, position_id))
-				print(f"[DB] ✅ Updated position #{position_id} qty to {new_qty:.4f}, avg entry to {avg_entry_price:.8f}", flush=True)
+				print(f"[DB] Γ£à Updated position #{position_id} qty to {new_qty:.4f}, avg entry to {avg_entry_price:.8f}", flush=True)
 			else:
 				# Only update qty (for partial sells)
 				c.execute("UPDATE positions SET qty=? WHERE id=?", (new_qty, position_id))
-				print(f"[DB] ✅ Updated position #{position_id} qty to {new_qty:.4f}", flush=True)
+				print(f"[DB] Γ£à Updated position #{position_id} qty to {new_qty:.4f}", flush=True)
 			conn.commit()
 			conn.close()
 			return
 		except Exception as e:
-			print(f"[DB] ⚠️ Attempt {attempt+1}/{max_retries} failed to update qty: {e}", flush=True)
+			print(f"[DB] ΓÜá∩╕Å Attempt {attempt+1}/{max_retries} failed to update qty: {e}", flush=True)
 			if attempt == max_retries - 1:
-				print(f"[DB] 🚨 CRITICAL: Failed to update qty after {max_retries} attempts!", flush=True)
+				print(f"[DB] ≡ƒÜ¿ CRITICAL: Failed to update qty after {max_retries} attempts!", flush=True)
 				raise
 			import time
 			time.sleep(0.5)
 
 
-def close_position(position_id: int) -> None:
+def close_position(position_id: int, pnl_usd: float = None, pnl_pct: float = None) -> None:
 	conn = _conn()
 	c = conn.cursor()
-	c.execute("UPDATE positions SET status='closed' WHERE id=?", (position_id,))
+	if pnl_usd is not None and pnl_pct is not None:
+		c.execute("UPDATE positions SET status='closed', pnl_usd=?, pnl_pct=? WHERE id=?", (pnl_usd, pnl_pct, position_id))
+	else:
+		c.execute("UPDATE positions SET status='closed' WHERE id=?", (position_id,))
 	conn.commit()
 	conn.close()
 
@@ -335,6 +495,60 @@ def record_position_price_snapshot(
 			(position_id, token_address, price_usd, qty, position_value, unrealized_pct, source),
 		)
 		conn.commit()
+	finally:
+		conn.close()
+
+
+def log_signal(token: str, source_id: str, source_name: str, market_cap: float, score: int, 
+               sol_price: float = None, sol_trend: str = None, btc_trend: str = None, market_regime: str = None) -> None:
+	"""Log every processed signal to measure top-of-funnel conversion"""
+	conn = _conn()
+	c = conn.cursor()
+	try:
+		c.execute(
+			"""
+			INSERT INTO signals (token_address, source_id, source_name, timestamp, market_cap, score, sol_price, sol_trend, btc_trend, market_regime)
+			VALUES (?, ?, ?, strftime('%s','now'), ?, ?, ?, ?, ?, ?)
+			""",
+			(token, source_id, source_name, market_cap, score, sol_price, sol_trend, btc_trend, market_regime)
+		)
+		conn.commit()
+	except Exception as e:
+		print(f"[DB] Error logging signal: {e}")
+	finally:
+		conn.close()
+
+
+def get_first_seen_source(token: str) -> str:
+	"""Get the first source that ever mentioned this token"""
+	conn = _conn()
+	c = conn.cursor()
+	try:
+		c.execute("SELECT source_name FROM signals WHERE token_address=? ORDER BY timestamp ASC LIMIT 1", (token,))
+		row = c.fetchone()
+		return row[0] if row else "unknown"
+	except Exception:
+		return "unknown"
+	finally:
+		conn.close()
+
+
+def mark_signal_entered_trade(token: str) -> None:
+	"""Mark that a signal resulted in a trade"""
+	conn = _conn()
+	c = conn.cursor()
+	try:
+		# Mark the most recent signal for this token as having entered a trade
+		c.execute(
+			"""
+			UPDATE signals SET entered_trade=1 
+			WHERE id = (SELECT id FROM signals WHERE token_address=? ORDER BY timestamp DESC LIMIT 1)
+			""", 
+			(token,)
+		)
+		conn.commit()
+	except Exception:
+		pass
 	finally:
 		conn.close()
 

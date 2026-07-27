@@ -175,6 +175,11 @@ def log_error(event: Dict[str, Any]) -> None:
     write_jsonl("errors.jsonl", evt)
 
 
+def log_rejection(event: Dict[str, Any]) -> None:
+    """Log a rejected signal for winner tracking."""
+    write_jsonl("rejections.jsonl", event)
+
+
 # Monitoring helpers
 def log_process(event: Dict[str, Any]) -> None:
     """

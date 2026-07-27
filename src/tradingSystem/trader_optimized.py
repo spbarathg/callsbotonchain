@@ -19,16 +19,35 @@ from .db import (
     close_position, get_open_qty, update_position_qty
 )
 from .config_optimized import (
-    STOP_LOSS_PCT, LOG_JSON_PATH, LOG_TEXT_PATH,
-    MAX_CONCURRENT, BANKROLL_USD, DB_PATH, MAX_HOLD_TIME_SECONDS,
-    EMERGENCY_HARD_STOP_PCT
+    LOG_JSON_PATH, LOG_TEXT_PATH,
+    MAX_CONCURRENT, DB_PATH, MAX_HOLD_TIME_SECONDS,
+    EMERGENCY_HARD_STOP_PCT, get_current_bankroll,
+    SCAM_DETECTION_ENABLED, MIN_HOLD_SECONDS, TRAIL_ONLY_IN_PROFIT
 )
 from .broker_optimized import Broker
 from .portfolio_manager import get_portfolio_manager, should_use_portfolio_manager
 from .inactivity_monitor import InactivityMonitor
 from .momentum_tracker import MomentumTracker
+from .risk_phases import get_risk_manager, RiskPhase
 from .token_classifier import get_classifier
 from .circuit_breaker import get_circuit_breaker
+from app.notify import send_telegram_alert
+from app.config_unified import (
+    TRADING_TELEGRAM_ALERTS,
+    TRADING_MAX_TRADES_PER_DAY,
+    TRADING_MAX_DAILY_USD,
+    TRADING_MAX_POSITION_PCT,
+    TRADING_MIN_COOLDOWN_SEC,
+    TRADING_LIMITS_STATE_FILE,
+    TRADING_VOLATILITY_TRAIL_ENABLED,
+    TRADING_VOLATILITY_WINDOW_SEC,
+    TRADING_VOLATILITY_MIN_SAMPLES,
+    TRADING_VOLATILITY_BASE_TRAIL_PCT,
+    TRADING_VOLATILITY_MULTIPLIER,
+    TRADING_VOLATILITY_MAX_TRAIL_PCT,
+    TRADING_MAX_HOLD_SEC,
+    TRADING_FORCE_MAX_HOLD,
+)
 
 
 class PositionLock:
@@ -66,14 +85,97 @@ class TradeEngine:
         self.circuit_breaker = get_circuit_breaker()
         
         # Token cooldown: Prevent immediate rebuy after selling (stops buy-sell-rebuy loops)
+        # REDUCED from 4 hours to 15 minutes - allows re-entry on same pump wave
         self._token_cooldowns: Dict[str, float] = {}  # token -> timestamp when sold
         self._cooldown_lock = threading.Lock()
-        self._cooldown_seconds = float(os.getenv("TS_REBUY_COOLDOWN_SEC", "14400"))  # Default: 4 hours
+        self._cooldown_seconds = float(os.getenv("TS_REBUY_COOLDOWN_SEC", "900"))  # Default: 15 minutes (was 4 hours)
+
+        self._trade_limits_path = TRADING_LIMITS_STATE_FILE
+        self._trade_limits_state = self._load_trade_limits_state()
         
         os.makedirs(os.path.dirname(LOG_JSON_PATH), exist_ok=True)
         os.makedirs(os.path.dirname(LOG_TEXT_PATH), exist_ok=True)
         
         self._recover_positions()
+
+    def _default_trade_limits_state(self) -> Dict[str, object]:
+        return {
+            "date": date.today().isoformat(),
+            "trade_count": 0,
+            "usd_spent": 0.0,
+            "last_trade_ts": 0.0,
+        }
+
+    def _load_trade_limits_state(self) -> Dict[str, object]:
+        try:
+            if not self._trade_limits_path:
+                return self._default_trade_limits_state()
+            if not os.path.exists(self._trade_limits_path):
+                return self._default_trade_limits_state()
+            with open(self._trade_limits_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if not isinstance(data, dict):
+                return self._default_trade_limits_state()
+            return data
+        except Exception:
+            return self._default_trade_limits_state()
+
+    def _save_trade_limits_state(self) -> None:
+        try:
+            if not self._trade_limits_path:
+                return
+            os.makedirs(os.path.dirname(self._trade_limits_path), exist_ok=True)
+            with open(self._trade_limits_path, "w", encoding="utf-8") as f:
+                json.dump(self._trade_limits_state, f)
+        except Exception:
+            pass
+
+    def _refresh_trade_limits_state(self) -> None:
+        today = date.today().isoformat()
+        if self._trade_limits_state.get("date") != today:
+            self._trade_limits_state = self._default_trade_limits_state()
+            self._save_trade_limits_state()
+
+    def _check_trade_limits(self, usd: float) -> Optional[str]:
+        self._refresh_trade_limits_state()
+        now = time.time()
+        trade_count = int(self._trade_limits_state.get("trade_count", 0) or 0)
+        usd_spent = float(self._trade_limits_state.get("usd_spent", 0.0) or 0.0)
+        last_trade_ts = float(self._trade_limits_state.get("last_trade_ts", 0.0) or 0.0)
+
+        if TRADING_MAX_TRADES_PER_DAY > 0 and trade_count >= TRADING_MAX_TRADES_PER_DAY:
+            return f"max trades per day reached ({trade_count}/{TRADING_MAX_TRADES_PER_DAY})"
+
+        if TRADING_MIN_COOLDOWN_SEC > 0 and last_trade_ts > 0:
+            remaining = TRADING_MIN_COOLDOWN_SEC - (now - last_trade_ts)
+            if remaining > 0:
+                return f"cooldown active ({int(remaining)}s remaining)"
+
+        if TRADING_MAX_DAILY_USD > 0 and (usd_spent + usd) > TRADING_MAX_DAILY_USD:
+            return f"daily usd cap reached (${usd_spent:.2f} + ${usd:.2f} > ${TRADING_MAX_DAILY_USD:.2f})"
+
+        if TRADING_MAX_POSITION_PCT > 0:
+            bankroll_usd = get_current_bankroll()
+            max_usd = bankroll_usd * (TRADING_MAX_POSITION_PCT / 100.0)
+            if usd > max_usd:
+                return f"position size cap exceeded (${usd:.2f} > ${max_usd:.2f})"
+
+        return None
+
+    def _record_trade_limits(self, usd: float) -> None:
+        self._refresh_trade_limits_state()
+        self._trade_limits_state["trade_count"] = int(self._trade_limits_state.get("trade_count", 0) or 0) + 1
+        self._trade_limits_state["usd_spent"] = float(self._trade_limits_state.get("usd_spent", 0.0) or 0.0) + float(usd)
+        self._trade_limits_state["last_trade_ts"] = time.time()
+        self._save_trade_limits_state()
+
+    def _send_trade_alert(self, message: str) -> None:
+        if not TRADING_TELEGRAM_ALERTS:
+            return
+        try:
+            send_telegram_alert(message)
+        except Exception:
+            pass
     
     def _recover_positions(self):
         """Recover open positions from database"""
@@ -135,6 +237,7 @@ class TradeEngine:
         trade_id = str(uuid.uuid4())[:8]  # Short ID for readability
         
         try:
+            usd = float(plan.get("usd_size", 0.0))
             self._log("trade_lifecycle", trade_id=trade_id, stage="signal_received", 
                      token=token, plan=plan)
             print(f"[TRADE:{trade_id}] Signal received for {token[:8]}...", flush=True)
@@ -145,6 +248,13 @@ class TradeEngine:
                 self._log("open_skipped_circuit_breaker", trade_id=trade_id, token=token, reason=reason)
                 print(f"[TRADE:{trade_id}] ❌ Circuit breaker triggered: {reason}", flush=True)
                 return None
+
+            # Trade caps (daily count, cooldown, daily USD, position pct)
+            cap_reason = self._check_trade_limits(usd)
+            if cap_reason:
+                self._log("trade_blocked_caps", trade_id=trade_id, token=token, reason=cap_reason, usd=usd)
+                print(f"[TRADE:{trade_id}] ❌ Trade blocked: {cap_reason}", flush=True)
+                return None
             
             # Concurrency limit
             print(f"[TRADER] Checking concurrency: {len(self.live)} / {int(MAX_CONCURRENT)}", flush=True)
@@ -152,6 +262,16 @@ class TradeEngine:
                 self._log("open_skipped_max_concurrent", token=token, max_concurrent=int(MAX_CONCURRENT))
                 print(f"[TRADER] ❌ Max concurrent positions reached", flush=True)
                 return None
+            
+            # Fix #2: TRADABILITY CHECK - Verify Jupiter can route BEFORE buying
+            # Investigation showed 29 ghost trades ($147 lost) couldn't be sold
+            print(f"[TRADE:{trade_id}] Checking tradability before buy...", flush=True)
+            is_tradable, tradability_reason = self.broker.check_tradability(token, min_usd_check=5.0)
+            if not is_tradable:
+                self._log("trade_blocked_untradable", trade_id=trade_id, token=token, reason=tradability_reason)
+                print(f"[TRADE:{trade_id}] ❌ Token NOT TRADABLE: {tradability_reason}", flush=True)
+                return None
+            print(f"[TRADE:{trade_id}] ✅ Token is tradable", flush=True)
             
             # Acquire lock
             print(f"[TRADER] Acquiring position lock for {token[:8]}...", flush=True)
@@ -163,7 +283,6 @@ class TradeEngine:
                     print(f"[TRADER] ❌ Already have position for {token[:8]}", flush=True)
                     return None
                 
-                usd = float(plan["usd_size"])
                 trail_pct = float(plan["trail_pct"])
                 strategy = plan.get("strategy", "unknown")
                 
@@ -179,21 +298,58 @@ class TradeEngine:
                              token=token, error=fill.error)
                     print(f"[TRADE:{trade_id}] ❌ Buy failed: {fill.error}", flush=True)
                     return None
+
+                self._record_trade_limits(usd)
                 
                 self._log("trade_lifecycle", trade_id=trade_id, stage="buy_success", 
                          token=token, price=fill.price, qty=fill.qty, tx=fill.tx)
                 print(f"[TRADE:{trade_id}] ✅ Buy successful at ${fill.price:.8f}", flush=True)
+                tx_link = f"https://solscan.io/tx/{fill.tx}" if fill.tx else "pending"
+                buy_message = (
+                    "✅ BUY executed\n"
+                    f"Token: {token}\n"
+                    f"USD: ${fill.usd:.2f}\n"
+                    f"Qty: {fill.qty:.4f}\n"
+                    f"Price: ${fill.price:.8f}\n"
+                    f"Strategy: {strategy}\n"
+                    f"Trade ID: {trade_id}\n"
+                    f"Tx: {tx_link}"
+                )
+                self._send_trade_alert(buy_message)
                 
+                # Extract metadata for DB
+                signal_source = str(plan.get("signal_source", "unknown"))
+                try:
+                    score_val = int(plan.get("score")) if plan.get("score") is not None else 0
+                except (ValueError, TypeError):
+                    score_val = 0
+                try:
+                    age_val = float(plan.get("token_age")) if plan.get("token_age") is not None else 0.0
+                except (ValueError, TypeError):
+                    age_val = 0.0
+                try:
+                    mc_val = float(plan.get("market_cap")) if plan.get("market_cap") is not None else 0.0
+                except (ValueError, TypeError):
+                    mc_val = 0.0
+
                 # CRITICAL FIX: Ensure position is ALWAYS recorded after successful buy
                 # If DB write fails, we log it prominently but the transaction already happened
                 try:
                     print(f"[TRADER] Creating position record in database...", flush=True)
-                    pid = create_position(token, strategy, fill.price, fill.qty, usd, trail_pct)
+                    pid = create_position(token, strategy, fill.price, fill.qty, usd, trail_pct, signal_source, score_val, age_val, mc_val)
                     print(f"[TRADER] ✅ Position #{pid} created", flush=True)
                     
                     print(f"[TRADER] Adding fill record...", flush=True)
                     add_fill(pid, "buy", fill.price, fill.qty, fill.usd)
                     print(f"[TRADER] ✅ Fill recorded", flush=True)
+                    
+                    # Mark the signal as having entered a trade
+                    try:
+                        from .db import mark_signal_entered_trade
+                        mark_signal_entered_trade(token)
+                    except Exception as e:
+                        print(f"[TRADER] ⚠️ Failed to mark signal entered trade: {e}")
+                    
                     
                 except Exception as db_error:
                     # CRITICAL: Buy succeeded but DB failed - this is a SEVERE issue!
@@ -225,8 +381,17 @@ class TradeEngine:
                 # Initialize momentum tracking for intelligent exits
                 self.momentum_tracker.init_position(token, fill.price, entry_time)
                 
+                # Extract extended metadata for logging
+                score = plan.get("score")
+                token_age = plan.get("token_age")
+                market_cap = plan.get("market_cap")
+                entry_strategy_logic = plan.get("entry_strategy")
+                time_to_entry = plan.get("time_to_entry")
+                
                 self._log("trade_lifecycle", trade_id=trade_id, stage="position_opened", 
-                         token=token, pid=pid, strategy=strategy, entry_price=fill.price)
+                         token=token, pid=pid, strategy=strategy, entry_price=fill.price,
+                         score=score, token_age=token_age, market_cap=market_cap,
+                         entry_strategy=entry_strategy_logic, time_to_entry=time_to_entry)
                 print(f"[TRADE:{trade_id}] ✅ Position #{pid} opened and tracked", flush=True)
                 return pid
                 
@@ -432,8 +597,9 @@ class TradeEngine:
                 if token not in self.live:
                     return False
                 
-                # DUST POSITION CHECK: Auto-close if position value < $1 (not worth monitoring)
+                # DUST POSITION CHECK: Auto-close if position value < $0.05 (not worth monitoring)
                 # Use ACTUAL on-chain balance, not database (which may be stale after partial sells)
+                # UPDATED: Lower threshold for small capital trading ($0.05 instead of $1)
                 try:
                     from .token_balance import get_token_balance_simple
                     wallet_address = self.broker._pubkey
@@ -442,7 +608,7 @@ class TradeEngine:
                         actual_holdings = get_token_balance_simple(self.broker._rpc, wallet_address, token)
                     if actual_holdings is not None and actual_holdings > 0:
                         position_value_usd = actual_holdings * price if price > 0 else 0
-                        if position_value_usd < 1.0:
+                        if position_value_usd < 0.05:  # Lowered from $1 to $0.05 for small capital
                             print(f"[TRADER] 🗑️ DUST POSITION: {token[:8]} worth ${position_value_usd:.4f} (on-chain: {actual_holdings:.4f} tokens) - auto-closing", flush=True)
                             # Close in database, remove from tracking
                             # CRITICAL: Use module-level import (already imported at top of file)
@@ -458,7 +624,7 @@ class TradeEngine:
                         holdings = get_open_qty(int(pid))
                     
                     position_value_usd = holdings * price if (holdings > 0 and price > 0) else 0
-                    if position_value_usd < 1.0 and position_value_usd > 0:
+                    if position_value_usd < 0.05 and position_value_usd > 0:  # Lowered from $1 to $0.05
                         print(f"[TRADER] 🗑️ DUST POSITION: {token[:8]} worth ${position_value_usd:.4f} (fallback) - auto-closing", flush=True)
                         # CRITICAL: Use module-level import (already imported at top of file)
                         close_position(int(pid))
@@ -499,8 +665,8 @@ class TradeEngine:
                 # Track price for momentum intelligence
                 self.momentum_tracker.add_price_sample(token, price)
                 
-                # FIXED: Stop loss relative to ENTRY price!
-                stop_price = entry_price * (1.0 - STOP_LOSS_PCT / 100.0)
+                # REFACTOR (2026-05-17): stop_price removed. Replaced by phase_stop_price
+                # from RiskManager which uses phase-aware thresholds.
                 
                 # Trail stop relative to peak (may be overridden by momentum-based adaptive trail)
                 trail_price = peak * (1.0 - trail / 100.0) if peak > 0 else 0
@@ -509,14 +675,32 @@ class TradeEngine:
                 exit_type = None
                 exit_reason = ""
                 
+                # ========== DIAMOND HANDS MODE 💎🙌 ==========
+                # Check minimum hold time - don't exit too early!
+                hold_time = time.time() - data.get("open_at", 0)
+                min_hold_active = hold_time < MIN_HOLD_SECONDS
+                
+                # RISK PHASE: Determine current risk phase for phased stop-loss
+                risk_mgr = get_risk_manager()
+                risk_phase = risk_mgr.get_phase(hold_time)
+                phase_stop_pct = risk_mgr.get_stop_loss_pct(risk_phase)
+                
+                if min_hold_active and not data.get("min_hold_logged", False):
+                    remaining = int(MIN_HOLD_SECONDS - hold_time)
+                    print(f"[TRADER] 💎 {token[:8]} Diamond hands: {remaining}s until exits allowed", flush=True)
+                    data["min_hold_logged"] = True
+                
                 # ========== BREAKTHROUGH INTELLIGENCE LAYER ==========
-                # Phase 1: 60-Second Scam Detector
-                is_scam, scam_reason = self.momentum_tracker.check_scam(token, price)
-                if is_scam:
-                    exit_type = "scam_detected"
-                    exit_reason = f"🚨 SCAM DETECTED: {scam_reason}"
-                    print(f"[TRADER] {exit_reason}", flush=True)
-                    print(f"[TRADER] Executing instant exit to prevent heavy loss", flush=True)
+                # Phase 1: 60-Second Scam Detector (DISABLED by default - lost $243!)
+                is_scam = False
+                scam_reason = ""
+                if SCAM_DETECTION_ENABLED:
+                    is_scam, scam_reason = self.momentum_tracker.check_scam(token, price)
+                    if is_scam and not min_hold_active:  # Respect min hold even for scam
+                        exit_type = "scam_detected"
+                        exit_reason = f"🚨 SCAM DETECTED: {scam_reason}"
+                        print(f"[TRADER] {exit_reason}", flush=True)
+                        print(f"[TRADER] Executing instant exit to prevent heavy loss", flush=True)
                 
                 # Phase 2: Momentum Calculation & Adaptive Exits
                 if not exit_type:
@@ -542,10 +726,32 @@ class TradeEngine:
                         adaptive_trail = self.momentum_tracker.get_adaptive_trailing_stop(token)
                         if adaptive_trail and not data.get("adaptive_trail_set", False):
                             # Recalculate trail_price with adaptive percentage
-                            trail_price = peak * (1.0 - adaptive_trail / 100.0) if peak > 0 else 0
+                            trail = float(adaptive_trail)
+                            trail_price = peak * (1.0 - trail / 100.0) if peak > 0 else 0
                             print(f"[TRADER] 🔧 {token[:8]} adaptive trail: {adaptive_trail}% (momentum: {momentum})", flush=True)
                             data["adaptive_trail_set"] = True
                 # ========== END INTELLIGENCE LAYER ==========
+
+                # Volatility-based trailing (mechanical)
+                if TRADING_VOLATILITY_TRAIL_ENABLED and peak > 0:
+                    vol_pct = self.inactivity_monitor.get_volatility_pct(
+                        token,
+                        TRADING_VOLATILITY_WINDOW_SEC,
+                        TRADING_VOLATILITY_MIN_SAMPLES,
+                    )
+                    if vol_pct is not None:
+                        vol_trail = TRADING_VOLATILITY_BASE_TRAIL_PCT + (vol_pct * TRADING_VOLATILITY_MULTIPLIER)
+                        vol_trail = min(TRADING_VOLATILITY_MAX_TRAIL_PCT, max(vol_trail, trail))
+                        if vol_trail != trail:
+                            trail = float(vol_trail)
+                            trail_price = peak * (1.0 - trail / 100.0)
+                            if data.get("last_vol_trail_log", 0) < time.time() - 300:
+                                print(
+                                    f"[TRADER] 📉 {token[:8]} volatility trail: {trail:.1f}% "
+                                    f"(vol={vol_pct:.1f}%/{TRADING_VOLATILITY_WINDOW_SEC}s)",
+                                    flush=True,
+                                )
+                                data["last_vol_trail_log"] = time.time()
                 
                 # Check inactivity-based exit (6+ hours of <5% movement)
                 # KEY INSIGHT: Some tokens pump for 8-10 days to 800x
@@ -582,101 +788,134 @@ class TradeEngine:
                             # Problem: 24h limit kills positions during multi-day 50x-500x runs
                             # Solution: Only apply timeout to flat/losing positions
                             hold_time = time.time() - open_at
-                            if hold_time >= MAX_HOLD_TIME_SECONDS:
-                                # Check if this is a moonshot (ignore time limit)
-                                if profit_pct > 200:
-                                    # MOONSHOT MODE: Ignore time limit, let trailing stop manage exit
-                                    if data.get("last_moonshot_log", 0) < time.time() - 3600:  # Log hourly
-                                        print(f"[TRADER] 🌙 {token[:8]} MOONSHOT MODE: Ignoring {hold_time/3600:.1f}h hold (profit: +{profit_pct:.1f}%)", flush=True)
-                                        data["last_moonshot_log"] = time.time()
-                                else:
-                                    # Flat/small-gain position → apply timeout
+                            max_hold_seconds = TRADING_MAX_HOLD_SEC if TRADING_MAX_HOLD_SEC > 0 else MAX_HOLD_TIME_SECONDS
+                            if hold_time >= max_hold_seconds:
+                                if TRADING_FORCE_MAX_HOLD:
                                     exit_type = "timeout"
                                     hold_hours = hold_time / 3600
-                                    exit_reason = f"Max hold time: {hold_hours:.1f}h (profit: +{profit_pct:.1f}%) - {inactivity_reason}"
+                                    exit_reason = f"Max hold time enforced: {hold_hours:.1f}h (profit: +{profit_pct:.1f}%)"
+                                else:
+                                    # Check if this is a moonshot (ignore time limit)
+                                    if profit_pct > 200:
+                                        # MOONSHOT MODE: Ignore time limit, let trailing stop manage exit
+                                        if data.get("last_moonshot_log", 0) < time.time() - 3600:  # Log hourly
+                                            print(f"[TRADER] 🌙 {token[:8]} MOONSHOT MODE: Ignoring {hold_time/3600:.1f}h hold (profit: +{profit_pct:.1f}%)", flush=True)
+                                            data["last_moonshot_log"] = time.time()
+                                    else:
+                                        # Flat/small-gain position -> apply timeout
+                                        exit_type = "timeout"
+                                        hold_hours = hold_time / 3600
+                                        exit_reason = f"Max hold time: {hold_hours:.1f}h (profit: +{profit_pct:.1f}%) - {inactivity_reason}"
                 
-                # SMART TIERED PROFIT-TAKING (OCT 31 2025 V3 - OPTIMIZED FOR 10x RUNNERS)
-                # CRITICAL FIX: Minimal selling before 10x - let winners make you rich!
+                # SMART TIERED PROFIT-TAKING - Uses ENV VAR thresholds!
+                # Tiers configured in .env: TS_PT_TIER_1_PCT, TS_PT_TIER_2_PCT, etc.
                 # 
-                # TIER 1 (+150% / 2.5x): Sell 10% - insurance only
-                # TIER 2 (+400% / 5x): Sell 10% more (20% total) - approaching 10x
-                # TIER 3 (+900% / 10x): Sell 10% more (30% total) - TARGET HIT! Lock some gains
-                # TIER 4 (+2000% / 21x): Sell 15% more (45% total) - mega moonshot
-                # REMAINING (70-80%): Rides through the 10x move with wide trailing stops!
-                # 
-                # Philosophy: Stop loss protects downside (-12%), wide trails + minimal selling catch 10x
-                # At 10x: Still have 80% of position! $183 entry → $1830 profit achieved!
-                if not exit_type and profit_pct >= 150:
-                    from .config_optimized import (
-                        TIERED_PROFIT_TAKING_ENABLED,
-                        PROFIT_TAKE_TIER_1_PCT, PROFIT_TAKE_TIER_1_SELL,
-                        PROFIT_TAKE_TIER_2_PCT, PROFIT_TAKE_TIER_2_SELL,
-                        PROFIT_TAKE_TIER_3_PCT, PROFIT_TAKE_TIER_3_SELL,
-                        PROFIT_TAKE_TIER_4_PCT, PROFIT_TAKE_TIER_4_SELL
-                    )
+                # Import first to get the minimum threshold
+                from .config_optimized import (
+                    TIERED_PROFIT_TAKING_ENABLED,
+                    PROFIT_TAKE_TIER_1_PCT, PROFIT_TAKE_TIER_1_SELL,
+                    PROFIT_TAKE_TIER_2_PCT, PROFIT_TAKE_TIER_2_SELL,
+                    PROFIT_TAKE_TIER_3_PCT, PROFIT_TAKE_TIER_3_SELL,
+                    PROFIT_TAKE_TIER_4_PCT, PROFIT_TAKE_TIER_4_SELL
+                )
+                
+                # Check if profit exceeds the LOWEST tier threshold (from env var, not hardcoded!)
+                min_profit_threshold = min(PROFIT_TAKE_TIER_1_PCT, PROFIT_TAKE_TIER_2_PCT, PROFIT_TAKE_TIER_3_PCT, PROFIT_TAKE_TIER_4_PCT)
+                
+                # DEBUG: Log profit taking check
+                current_profit_pct = ((price - entry_price) / entry_price) * 100 if entry_price > 0 else 0
+                if current_profit_pct >= min_profit_threshold and not data.get("pt_debug_logged", False):
+                    print(f"[PROFIT_TAKE_DEBUG] {token[:8]} current_profit={current_profit_pct:.1f}%, peak_profit={profit_pct:.1f}%, min_threshold={min_profit_threshold}%", flush=True)
+                    print(f"[PROFIT_TAKE_DEBUG] Tiers: T1={PROFIT_TAKE_TIER_1_PCT}%, T2={PROFIT_TAKE_TIER_2_PCT}%, T3={PROFIT_TAKE_TIER_3_PCT}%, T4={PROFIT_TAKE_TIER_4_PCT}%", flush=True)
+                    print(f"[PROFIT_TAKE_DEBUG] Flags: T1={data.get('profit_take_tier_1', False)}, T2={data.get('profit_take_tier_2', False)}, T3={data.get('profit_take_tier_3', False)}, T4={data.get('profit_take_tier_4', False)}", flush=True)
+                    print(f"[PROFIT_TAKE_DEBUG] exit_type={exit_type}, ENABLED={TIERED_PROFIT_TAKING_ENABLED}", flush=True)
+                    data["pt_debug_logged"] = True
+                
+                # Use CURRENT profit for profit taking (not peak)
+                if not exit_type and current_profit_pct >= min_profit_threshold and TIERED_PROFIT_TAKING_ENABLED:
+                    # TIER 4: MEGA MOONSHOT
+                    if current_profit_pct >= PROFIT_TAKE_TIER_4_PCT and not data.get("profit_take_tier_4", False):
+                        sell_pct = PROFIT_TAKE_TIER_4_SELL
+                        data["sell_percentage"] = sell_pct
+                        data["profit_take_tier_4"] = True
+                        exit_type = "partial_profit_take"
+                        exit_reason = f"🏆 TIER 4: Selling {sell_pct}% at +{current_profit_pct:.1f}%"
+                        print(f"[TRADER] 🏆🏆🏆 {token[:8]} TIER 4: Selling {sell_pct}% at +{current_profit_pct:.1f}%", flush=True)
                     
-                    if TIERED_PROFIT_TAKING_ENABLED:
-                        # TIER 4: MEGA MOONSHOT (+2000% = 21x)
-                        if profit_pct >= PROFIT_TAKE_TIER_4_PCT and not data.get("profit_take_tier_4", False):
-                            # At 21x! Sell 15% more
-                            # If all tiers hit: 30% sold, remaining 70%
-                            # Sell 15% of original = 21.4% of remaining 70%
-                            data["sell_percentage"] = 21.4
-                            data["profit_take_tier_4"] = True
-                            exit_type = "partial_profit_take"
-                            exit_reason = f"🏆🏆🏆 MEGA 21x: Selling 15% at +{profit_pct:.1f}%, 45% total sold"
-                            print(f"[TRADER] 🏆🏆🏆 {token[:8]} TIER 4 (21x): Selling 15% at +{profit_pct:.1f}%", flush=True)
-                            print(f"[TRADER] 💎💎💎 Total sold: 45% | Keeping 55% for 50x-100x potential", flush=True)
-                        
-                        # TIER 3: TARGET HIT! (+900% = 10x)
-                        elif profit_pct >= PROFIT_TAKE_TIER_3_PCT and not data.get("profit_take_tier_3", False):
-                            # At 10x!! Sell 10% more (still have 80% riding!)
-                            # If tier 1-2 hit: 20% sold, remaining 80%
-                            # Sell 10% of original = 12.5% of remaining 80%
-                            data["sell_percentage"] = 12.5
-                            data["profit_take_tier_3"] = True
-                            exit_type = "partial_profit_take"
-                            exit_reason = f"🎯🎯 10x TARGET HIT: Selling 10% at +{profit_pct:.1f}%, 30% total sold"
-                            print(f"[TRADER] 🎯🎯 {token[:8]} TIER 3 (10x): Selling 10% at +{profit_pct:.1f}%", flush=True)
-                            print(f"[TRADER] 💎💎💎 HUGE WIN! Total sold: 30% | Keeping 70% for 20x+ potential", flush=True)
-                        
-                        # TIER 2: APPROACHING 10x (+400% = 5x)
-                        elif profit_pct >= PROFIT_TAKE_TIER_2_PCT and not data.get("profit_take_tier_2", False):
-                            # At 5x! Sell 10% more
-                            # If tier 1 hit: 10% sold, remaining 90%
-                            # Sell 10% of original = 11.1% of remaining 90%
-                            data["sell_percentage"] = 11.1
-                            data["profit_take_tier_2"] = True
-                            exit_type = "partial_profit_take"
-                            exit_reason = f"🌙 STRONG 5x: Selling 10% at +{profit_pct:.1f}%, 20% total sold"
-                            print(f"[TRADER] 🌙 {token[:8]} TIER 2 (5x): Selling 10% at +{profit_pct:.1f}%", flush=True)
-                            print(f"[TRADER] 💎💎 Total sold: 20% | Keeping 80% for 10x potential!", flush=True)
-                        
-                        # TIER 1: INSURANCE ONLY (+150% = 2.5x)
-                        elif profit_pct >= PROFIT_TAKE_TIER_1_PCT and not data.get("profit_take_tier_1", False):
-                            # At 2.5x! Sell 10% as insurance only
-                            data["sell_percentage"] = 10.0
-                            data["profit_take_tier_1"] = True
-                            exit_type = "partial_profit_take"
-                            exit_reason = f"🚀 INSURANCE: Selling 10% at +{profit_pct:.1f}%, 90% riding"
-                            print(f"[TRADER] 🚀 {token[:8]} TIER 1 (+150%): Selling 10% (insurance)", flush=True)
-                            print(f"[TRADER] 💎💎💎💎 Keeping 90% for 5x-10x+ potential!", flush=True)
+                    # TIER 3
+                    elif current_profit_pct >= PROFIT_TAKE_TIER_3_PCT and not data.get("profit_take_tier_3", False):
+                        sell_pct = PROFIT_TAKE_TIER_3_SELL
+                        data["sell_percentage"] = sell_pct
+                        data["profit_take_tier_3"] = True
+                        exit_type = "partial_profit_take"
+                        exit_reason = f"🎯 TIER 3: Selling {sell_pct}% at +{current_profit_pct:.1f}%"
+                        print(f"[TRADER] 🎯🎯 {token[:8]} TIER 3: Selling {sell_pct}% at +{current_profit_pct:.1f}%", flush=True)
+                    
+                    # TIER 2
+                    elif current_profit_pct >= PROFIT_TAKE_TIER_2_PCT and not data.get("profit_take_tier_2", False):
+                        sell_pct = PROFIT_TAKE_TIER_2_SELL
+                        data["sell_percentage"] = sell_pct
+                        data["profit_take_tier_2"] = True
+                        exit_type = "partial_profit_take"
+                        exit_reason = f"🌙 TIER 2: Selling {sell_pct}% at +{current_profit_pct:.1f}%"
+                        print(f"[TRADER] 🌙 {token[:8]} TIER 2: Selling {sell_pct}% at +{current_profit_pct:.1f}%", flush=True)
+                    
+                    # TIER 1
+                    elif current_profit_pct >= PROFIT_TAKE_TIER_1_PCT and not data.get("profit_take_tier_1", False):
+                        sell_pct = PROFIT_TAKE_TIER_1_SELL
+                        data["sell_percentage"] = sell_pct
+                        data["profit_take_tier_1"] = True
+                        exit_type = "partial_profit_take"
+                        exit_reason = f"🚀 TIER 1: Selling {sell_pct}% at +{current_profit_pct:.1f}%"
+                        print(f"[TRADER] 🚀 {token[:8]} TIER 1: Selling {sell_pct}% at +{current_profit_pct:.1f}%", flush=True)
                 
-                # Check hard stop loss (from entry)
-                if not exit_type and price <= stop_price:
+                # Check hard stop loss (PHASE-AWARE)
+                # BUG FIX (2026-05-17): Previously fired regardless of min_hold_active,
+                # nullifying Diamond Hands logic. Now uses risk_phases system.
+                # During EARLY phase: only emergency_stop_pct threshold (very loose).
+                # During MID/LATE: normal stop_loss threshold applies.
+                phase_stop_price = entry_price * (1.0 - phase_stop_pct / 100.0)
+                if not exit_type and price <= phase_stop_price and not min_hold_active:
                     exit_type = "stop"
-                    exit_reason = f"Hit stop loss: {price:.8f} <= {stop_price:.8f} (entry: {entry_price:.8f})"
+                    exit_reason = (
+                        f"Hit {risk_phase.value}-phase stop loss: {price:.8f} <= {phase_stop_price:.8f} "
+                        f"(entry: {entry_price:.8f}, threshold: -{phase_stop_pct:.0f}%, held {hold_time:.0f}s)"
+                    )
+                elif not exit_type and price <= phase_stop_price and min_hold_active:
+                    # Log that stop WOULD have fired but min_hold protected us
+                    if not data.get("stop_suppressed_logged", False):
+                        print(
+                            f"[TRADER] 💎 {token[:8]} Stop SUPPRESSED by min_hold "
+                            f"(price: {price:.8f}, stop: {phase_stop_price:.8f}, "
+                            f"phase: {risk_phase.value}, hold: {hold_time:.0f}s)",
+                            flush=True,
+                        )
+                        data["stop_suppressed_logged"] = True
                 
-                # EMERGENCY HARD STOP - Last resort if normal stop failed
+                # EMERGENCY HARD STOP - Last resort for catastrophic loss
+                # This fires REGARDLESS of min_hold (genuine rug protection)
                 emergency_stop_price = entry_price * (1.0 - EMERGENCY_HARD_STOP_PCT / 100.0)
                 if not exit_type and price <= emergency_stop_price:
                     exit_type = "emergency_stop"
                     loss_pct = ((price - entry_price) / entry_price) * 100
-                    exit_reason = f"EMERGENCY HARD STOP: {loss_pct:.1f}% loss (price: {price:.8f}, entry: {entry_price:.8f})"
+                    exit_reason = (
+                        f"EMERGENCY HARD STOP: {loss_pct:.1f}% loss "
+                        f"(price: {price:.8f}, entry: {entry_price:.8f}, "
+                        f"phase: {risk_phase.value})"
+                    )
                     print(f"[TRADER] 🚨 {exit_reason}", flush=True)
                 
                 # Check trailing stop (from peak)
-                elif not exit_type and peak > 0 and price <= trail_price:
+                # DIAMOND HANDS: Only trail if not in min hold period
+                # DIAMOND HANDS: Only trail if in profit (when TRAIL_ONLY_IN_PROFIT enabled)
+                trail_allowed = not min_hold_active
+                if TRAIL_ONLY_IN_PROFIT and profit_pct <= 0:
+                    trail_allowed = False
+                    if not data.get("trail_profit_only_logged", False):
+                        print(f"[TRADER] 💎 {token[:8]} Trail disabled: position not in profit ({profit_pct:+.1f}%)", flush=True)
+                        data["trail_profit_only_logged"] = True
+                
+                elif not exit_type and peak > 0 and price <= trail_price and trail_allowed:
                     exit_type = "trail"
                     exit_reason = f"Hit trailing stop: {price:.8f} <= {trail_price:.8f} (peak: {peak:.8f}, trail: {trail}%)"
                 
@@ -684,7 +923,8 @@ class TradeEngine:
                 # Problem: At 3s intervals, price can crash 60% before we poll again
                 # Solution: If price drops MORE than trailing stop threshold, immediate sell
                 # Example: Trail stop at $10, but price is $8 (20% below stop) = PANIC
-                elif not exit_type and peak > 0 and trail_price > 0:
+                # DIAMOND HANDS: Respect min hold time unless emergency
+                elif not exit_type and peak > 0 and trail_price > 0 and trail_allowed:
                     panic_threshold = trail_price * 0.8  # 20% below trailing stop = panic
                     if price < panic_threshold:
                         # Flash dump detected!
@@ -770,6 +1010,29 @@ class TradeEngine:
                     print(f"[TRADER] ❌ Sell failed for {token[:8]}: {fill.error[:100]}", flush=True)
                     
                     if "zero balance on-chain" in error_str:
+                        # CRITICAL FIX: Don't immediately mark new positions as ghost
+                        # Problem: Solana public RPC is load-balanced and returns inconsistent results
+                        # Token account may not have propagated to all RPC nodes yet
+                        # Solution: Add 60-second grace period for new positions
+                        open_at = data.get("open_at", 0)
+                        position_age_seconds = time.time() - open_at if open_at > 0 else 999
+                        
+                        if position_age_seconds < 60:
+                            # Position is new - don't mark as ghost yet
+                            print(f"[TRADER] ⏳ New position ({position_age_seconds:.0f}s old) - waiting for RPC propagation", flush=True)
+                            print(f"[TRADER] Will retry balance check (not marking as ghost yet)", flush=True)
+                            # Increment a retry counter instead of closing
+                            ghost_retries = data.get("ghost_retries", 0) + 1
+                            data["ghost_retries"] = ghost_retries
+                            if ghost_retries >= 5:
+                                # After 5 retries within grace period, still mark as ghost
+                                print(f"[TRADER] 👻 GHOST after {ghost_retries} retries - closing", flush=True)
+                                close_position(pid)
+                                self.live.pop(token, None)
+                                self._log("ghost_position_closed", token=token, pid=pid, error=fill.error, retries=ghost_retries)
+                                return True
+                            return False  # Don't close yet, will retry
+                        
                         print(f"[TRADER] 👻 GHOST POSITION DETECTED: {token[:8]} - auto-closing in database", flush=True)
                         print(f"[TRADER] Database shows position but wallet has ZERO tokens", flush=True)
                         # Close position in DB (can't sell - tokens don't exist in wallet)
@@ -858,6 +1121,26 @@ class TradeEngine:
                 exit_usd = fill.usd
                 pnl_usd = exit_usd - entry_usd
                 pnl_pct = (pnl_usd / entry_usd * 100) if entry_usd > 0 else 0
+                sell_kind = "PARTIAL SELL" if is_partial else "SELL"
+                remaining_line = ""
+                if is_partial:
+                    try:
+                        remaining_line = f"\nRemaining: {qty_remaining:.4f}"
+                    except Exception:
+                        remaining_line = ""
+                tx_link = f"https://solscan.io/tx/{fill.tx}" if fill.tx else "n/a"
+                sell_message = (
+                    f"✅ {sell_kind} executed\n"
+                    f"Token: {token}\n"
+                    f"USD: ${fill.usd:.2f}\n"
+                    f"Qty: {fill.qty:.4f}\n"
+                    f"Price: ${fill.price:.8f}\n"
+                    f"PnL: ${pnl_usd:+.2f} ({pnl_pct:+.1f}%)"
+                    f"{remaining_line}\n"
+                    f"Trade ID: {trade_id}\n"
+                    f"Tx: {tx_link}"
+                )
+                self._send_trade_alert(sell_message)
                 
                 # Record trade in circuit breaker
                 # CRITICAL FIX: effective_slippage_bps may not exist for all fills
@@ -889,7 +1172,7 @@ class TradeEngine:
                     else:
                         # Dust amount, close position
                         print(f"[TRADER] 🧹 Dust remaining ({actual_remaining:.4f}), closing position", flush=True)
-                        close_position(pid)
+                        close_position(pid, pnl_usd=pnl_usd, pnl_pct=pnl_pct)
                         self.live.pop(token, None)
                         self.inactivity_monitor.reset_position(token)
                         self.momentum_tracker.cleanup(token)
@@ -910,7 +1193,7 @@ class TradeEngine:
                     return False
                 else:
                     # Full exit: Close position completely
-                    close_position(pid)
+                    close_position(pid, pnl_usd=pnl_usd, pnl_pct=pnl_pct)
                     # Remove from live and clean up monitors
                     self.live.pop(token, None)
                     self.inactivity_monitor.reset_position(token)
@@ -940,7 +1223,7 @@ class TradeEngine:
                     self._log(f"exit_{exit_type}", 
                              token=token, pid=pid, strategy=strategy,
                              entry_price=entry_price, exit_price=price, peak=peak,
-                             stop_pct=STOP_LOSS_PCT, trail_pct=trail, 
+                             stop_pct=phase_stop_pct, stop_phase=risk_phase.value, trail_pct=trail, 
                              pnl_usd=pnl_usd, pnl_pct=pnl_pct,
                              reason=exit_reason, tx=fill.tx, trade_id=trade_id)
                     
@@ -1078,18 +1361,17 @@ class TradeEngine:
                     self._log("rebalance_failed", reason="sell_failed", token=token_to_sell, error=fill.error)
                     return False
                 
-                # Update database
-                add_fill(int(pid), "sell", float(fill.price), float(fill.qty), float(fill.usd))
-                close_position(pid)
-                
-                # Remove from live
-                self.live.pop(token_to_sell, None)
-                
                 # Log the forced exit
                 entry_price = float(sell_data.get("entry_price", 0))
                 entry_usd = entry_price * qty_open if entry_price > 0 else 0
                 pnl_usd = fill.usd - entry_usd
                 pnl_pct = (pnl_usd / entry_usd * 100) if entry_usd > 0 else 0
+                
+                # Update database
+                add_fill(int(pid), "sell", float(fill.price), float(fill.qty), float(fill.usd))
+                close_position(pid, pnl_usd=pnl_usd, pnl_pct=pnl_pct)
+                
+                # Remove from live
                 
                 self._log("rebalance_forced_exit", token=token_to_sell, pid=pid,
                          pnl_usd=pnl_usd, pnl_pct=pnl_pct, reason="rebalance_override")

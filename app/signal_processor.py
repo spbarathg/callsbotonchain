@@ -29,6 +29,8 @@ from app.storage import (
 from app.notify import send_telegram_alert, push_signal_to_redis
 from app.telethon_notifier import send_group_message
 from app.logger_utils import log_alert, log_process
+from src.tradingSystem.db import log_signal, get_first_seen_source
+from app.market_regime import get_market_regime
 
 
 class SignalProcessor:
@@ -115,6 +117,15 @@ class SignalProcessor:
         
         # Calculate preliminary score (EARLY GATE: Skip expensive operations)
         preliminary_score = calculate_preliminary_score(tx, smart_money_detected=feed_tx.smart_money)
+        
+        # Log top-of-funnel conversion for feed signals (ATM already logs earlier)
+        signal_source = tx.get("source")
+        if signal_source and signal_source.startswith("dexscreener") or signal_source and signal_source.startswith("gecko"):
+            channel_name = tx.get("channel_name", signal_source)
+            regime = get_market_regime()
+            log_signal(token_address, signal_source, channel_name, usd_value, preliminary_score,
+                       sol_price=regime["sol_price"], sol_trend=regime["sol_trend"], 
+                       btc_trend=regime["btc_trend"], market_regime=regime["market_regime"])
         
         if DEBUG_PRELIM:
             self._log_prelim_debug(tx)
@@ -229,7 +240,7 @@ class SignalProcessor:
             )
         
         # RECOVERY PATTERN TRACKING: Feed price data to detector
-        # This tracks "dip and rip" patterns (ATH → -30% → recovery to ATH+10%)
+        # This tracks "dip and rip" patterns (ATH ΓåÆ -30% ΓåÆ recovery to ATH+10%)
         try:
             from app.recovery_pattern_detector import add_token_data
             
@@ -242,12 +253,12 @@ class SignalProcessor:
                 pattern = add_token_data(token_address, market_cap, price, volume)
                 
                 if pattern:
-                    self._log(f"🎯 RECOVERY PATTERN DETECTED: {token_address[:8]}... "
-                             f"ATH ${pattern.ath_mcap:,.0f} → ${pattern.drop_mcap:,.0f} (-{pattern.drop_percent:.1f}%) → "
+                    self._log(f"≡ƒÄ» RECOVERY PATTERN DETECTED: {token_address[:8]}... "
+                             f"ATH ${pattern.ath_mcap:,.0f} ΓåÆ ${pattern.drop_mcap:,.0f} (-{pattern.drop_percent:.1f}%) ΓåÆ "
                              f"${pattern.recovery_mcap:,.0f} in {pattern.recovery_candles} candles")
         except Exception as e:
             # Don't fail processing if recovery tracking fails
-            self._log(f"⚠️ Recovery pattern tracking error: {e}")
+            self._log(f"ΓÜá∩╕Å Recovery pattern tracking error: {e}")
         
         # EARLY GATE: Liquidity pre-filter (fast rejection before expensive scoring)
         # NOTE: Also checked in junior_strict/nuanced for nuanced liquidity_factor support
@@ -390,7 +401,7 @@ class SignalProcessor:
         ml_data = self._get_ml_predictions(score, stats_raw, feed_tx.smart_money, conviction_type)
         score = ml_data['enhanced_score']
         if ml_data['score_changed']:
-            self._log(f"  🤖 ML Adjustment: {ml_data['original_score']} → {score} ({ml_data['reason']})")
+            self._log(f"  ≡ƒñû ML Adjustment: {ml_data['original_score']} ΓåÆ {score} ({ml_data['reason']})")
             scoring_details.append(f"ML: {ml_data['reason']}")
         
         # Generate and send alert
@@ -475,32 +486,32 @@ class SignalProcessor:
 
         # CRITICAL FIX: Handle NaN/inf values (NaN comparisons always False!)
         if not (liquidity == liquidity):  # NaN check
-            self._log(f"❌ REJECTED (INVALID LIQUIDITY - NaN): {stats.token_address}")
+            self._log(f"Γ¥î REJECTED (INVALID LIQUIDITY - NaN): {stats.token_address}")
             return False
         if liquidity == float('inf') or liquidity == float('-inf'):
-            self._log(f"❌ REJECTED (INVALID LIQUIDITY - inf): {stats.token_address}")
+            self._log(f"Γ¥î REJECTED (INVALID LIQUIDITY - inf): {stats.token_address}")
             return False
 
         if liquidity <= 0:
-            self._log(f"❌ REJECTED (ZERO LIQUIDITY): {stats.token_address}")
+            self._log(f"Γ¥î REJECTED (ZERO LIQUIDITY): {stats.token_address}")
             return False
 
         if liquidity < min_liq:
-            self._log(f"❌ REJECTED (LOW LIQUIDITY): {stats.token_address} - ${liquidity:,.0f} < ${min_liq:,.0f}")
+            self._log(f"Γ¥î REJECTED (LOW LIQUIDITY): {stats.token_address} - ${liquidity:,.0f} < ${min_liq:,.0f}")
             return False
         
         # Check maximum liquidity (counter-intuitive but data-driven!)
         max_liq = MAX_LIQUIDITY_USD or 0
         if max_liq > 0 and liquidity > max_liq:
-            self._log(f"❌ REJECTED (LIQUIDITY TOO HIGH): {stats.token_address} - ${liquidity:,.0f} > ${max_liq:,.0f} (data shows 65% rug rate!)")
+            self._log(f"Γ¥î REJECTED (LIQUIDITY TOO HIGH): {stats.token_address} - ${liquidity:,.0f} > ${max_liq:,.0f} (data shows 65% rug rate!)")
             return False
 
         # Log liquidity sweet spot
         if 30000 <= liquidity <= 50000:
-            self._log(f"✅ LIQUIDITY SWEET SPOT: {stats.token_address} - ${liquidity:,.0f} ($30k-$50k zone - 26.5% 2x+ rate, 335% avg gain!)")
+            self._log(f"Γ£à LIQUIDITY SWEET SPOT: {stats.token_address} - ${liquidity:,.0f} ($30k-$50k zone - 26.5% 2x+ rate, 335% avg gain!)")
         else:
             quality = "EXCELLENT" if liquidity >= excellent_liq else "GOOD"
-            self._log(f"✅ LIQUIDITY CHECK PASSED: {stats.token_address} - ${liquidity:,.0f} ({quality})")
+            self._log(f"Γ£à LIQUIDITY CHECK PASSED: {stats.token_address} - ${liquidity:,.0f} ({quality})")
         return True
     
     def _check_fomo_filter(self, stats: TokenStats, token_address: str) -> bool:
@@ -518,7 +529,7 @@ class SignalProcessor:
         change_24h = stats.change_24h or 0
         
         # DEBUG: Log actual values to diagnose FOMO filter
-        self._log(f"🔍 FOMO CHECK: {token_address[:8]}... → 1h:{change_1h:.1f}%, 24h:{change_24h:.1f}% (threshold: {MAX_24H_CHANGE_FOR_ALERT:.0f}%)")
+        self._log(f"≡ƒöì FOMO CHECK: {token_address[:8]}... ΓåÆ 1h:{change_1h:.1f}%, 24h:{change_24h:.1f}% (threshold: {MAX_24H_CHANGE_FOR_ALERT:.0f}%)")
         
         # Handle NaN values
         if not (change_1h == change_1h):
@@ -530,30 +541,30 @@ class SignalProcessor:
         # FIXED: Use DRAW_24H_MAJOR config instead of hardcoded -30%
         from app.config_unified import DRAW_24H_MAJOR
         if change_24h < DRAW_24H_MAJOR:
-            self._log(f"❌ REJECTED (MAJOR DUMP): {token_address} - {change_24h:.1f}% in 24h (already crashed!)")
+            self._log(f"Γ¥î REJECTED (MAJOR DUMP): {token_address} - {change_24h:.1f}% in 24h (already crashed!)")
             return False
 
         # Reject if already pumped >150% in 24h (late entry!)
         if change_24h > MAX_24H_CHANGE_FOR_ALERT:
-            self._log(f"❌ REJECTED (LATE ENTRY - 24H PUMP): {token_address} - {change_24h:.1f}% > {MAX_24H_CHANGE_FOR_ALERT:.0f}% (already mooned!)")
+            self._log(f"Γ¥î REJECTED (LATE ENTRY - 24H PUMP): {token_address} - {change_24h:.1f}% > {MAX_24H_CHANGE_FOR_ALERT:.0f}% (already mooned!)")
             return False
 
         # Reject if already pumped >300% in 1h (extreme late entry!)
         if change_1h > MAX_1H_CHANGE_FOR_ALERT:
-            self._log(f"❌ REJECTED (LATE ENTRY - 1H PUMP): {token_address} - {change_1h:.1f}% > {MAX_1H_CHANGE_FOR_ALERT:.0f}% (extreme pump!)")
+            self._log(f"Γ¥î REJECTED (LATE ENTRY - 1H PUMP): {token_address} - {change_1h:.1f}% > {MAX_1H_CHANGE_FOR_ALERT:.0f}% (extreme pump!)")
             return False
         
         # Log entry type for monitoring (CRITICAL: Must log for debugging!)
         try:
             if 5 <= change_24h <= 50:
-                self._log(f"✅ EARLY MOMENTUM: {token_address} - {change_24h:.1f}% (ideal entry zone!)")
+                self._log(f"Γ£à EARLY MOMENTUM: {token_address} - {change_24h:.1f}% (ideal entry zone!)")
             elif change_24h > 50:
-                self._log(f"⚠️  MODERATE PUMP: {token_address} - {change_24h:.1f}% (getting late, but within limits)")
+                self._log(f"ΓÜá∩╕Å  MODERATE PUMP: {token_address} - {change_24h:.1f}% (getting late, but within limits)")
             else:
-                self._log(f"✅ FOMO CHECK PASSED: {token_address} - {change_24h:.1f}% in 24h")
+                self._log(f"Γ£à FOMO CHECK PASSED: {token_address} - {change_24h:.1f}% in 24h")
         except Exception as e:
             # Log the error to debug formatting issues
-            self._log(f"⚠️  ERROR in FOMO log formatting: {e} (change_24h={change_24h})")
+            self._log(f"ΓÜá∩╕Å  ERROR in FOMO log formatting: {e} (change_24h={change_24h})")
         
         return True
     
@@ -567,24 +578,24 @@ class SignalProcessor:
         market_cap = stats.market_cap_usd or 0
         
         if market_cap <= 0:
-            self._log(f"❌ REJECTED (NO MARKET CAP DATA): {token_address}")
+            self._log(f"Γ¥î REJECTED (NO MARKET CAP DATA): {token_address}")
             return False
         
         # Reject if below minimum (avoid <$50k death zone with 63.9% rug rate)
         if market_cap < MIN_MARKET_CAP_USD:
-            self._log(f"❌ REJECTED (MARKET CAP TOO LOW): {token_address} - ${market_cap:,.0f} < ${MIN_MARKET_CAP_USD:,.0f} (death zone - 63.9% rug rate!)")
+            self._log(f"Γ¥î REJECTED (MARKET CAP TOO LOW): {token_address} - ${market_cap:,.0f} < ${MIN_MARKET_CAP_USD:,.0f} (death zone - 63.9% rug rate!)")
             return False
         
         # Reject if above maximum (stay in sweet spot)
         if market_cap > MAX_MARKET_CAP_FOR_DEFAULT_ALERT:
-            self._log(f"❌ REJECTED (MARKET CAP TOO HIGH): {token_address} - ${market_cap:,.0f} > ${MAX_MARKET_CAP_FOR_DEFAULT_ALERT:,.0f}")
+            self._log(f"Γ¥î REJECTED (MARKET CAP TOO HIGH): {token_address} - ${market_cap:,.0f} > ${MAX_MARKET_CAP_FOR_DEFAULT_ALERT:,.0f}")
             return False
         
         # Log entry in sweet spot
         if MIN_MARKET_CAP_USD <= market_cap <= 100000:
-            self._log(f"✅ MARKET CAP SWEET SPOT: {token_address} - ${market_cap:,.0f} ($50k-$100k zone - 28.8% 2x+ rate!)")
+            self._log(f"Γ£à MARKET CAP SWEET SPOT: {token_address} - ${market_cap:,.0f} ($50k-$100k zone - 28.8% 2x+ rate!)")
         else:
-            self._log(f"✅ MARKET CAP OK: {token_address} - ${market_cap:,.0f}")
+            self._log(f"Γ£à MARKET CAP OK: {token_address} - ${market_cap:,.0f}")
         
         return True
     
@@ -635,7 +646,7 @@ class SignalProcessor:
                     'ml_enhanced': True
                 })
         except Exception as e:
-            self._log(f"⚠️  ML prediction failed: {e}")
+            self._log(f"ΓÜá∩╕Å  ML prediction failed: {e}")
         
         return ml_data
     
@@ -696,7 +707,7 @@ class SignalProcessor:
         try:
             mark_alerted(token_address, score, feed_tx.smart_money, conviction)
         except Exception as e:
-            self._log(f"❌ CRITICAL ERROR: Failed to mark token as alerted in database: {e}")
+            self._log(f"Γ¥î CRITICAL ERROR: Failed to mark token as alerted in database: {e}")
             log_process({
                 "type": "database_error",
                 "function": "mark_alerted",
@@ -745,40 +756,40 @@ class SignalProcessor:
         # Build badges
         badges = []
         if stats.is_mint_revoked is True:
-            badges.append("✅ Mint Revoked")
+            badges.append("Γ£à Mint Revoked")
         elif stats.is_mint_revoked is False:
-            badges.append("⚠️ Mintable")
+            badges.append("ΓÜá∩╕Å Mintable")
         if stats.is_lp_locked is True:
-            badges.append("✅ LP Locked/Burned")
+            badges.append("Γ£à LP Locked/Burned")
         elif stats.is_lp_locked is False:
-            badges.append("⚠️ LP Unlocked")
+            badges.append("ΓÜá∩╕Å LP Unlocked")
         top10 = stats.top_10_concentration_percent or 0
         if top10:
-            badges.append(f"{'⚠️ ' if top10 > 40 else ''}Top10 {top10:.1f}%")
+            badges.append(f"{'ΓÜá∩╕Å ' if top10 > 40 else ''}Top10 {top10:.1f}%")
         badges_text = " | ".join(badges) if badges else ""
         
         parts = []
         parts.append(f"<b>{name} (${symbol})</b>\n\n")
         parts.append("Fresh signal on Solana.\n\n")
-        parts.append(f"💰 <b>MCap:</b> ${market_cap:,.0f}\n")
-        parts.append(f"💧 <b>Liquidity:</b> ${liquidity:,.0f}\n")
+        parts.append(f"≡ƒÆ░ <b>MCap:</b> ${market_cap:,.0f}\n")
+        parts.append(f"≡ƒÆº <b>Liquidity:</b> ${liquidity:,.0f}\n")
         if badges_text:
             parts.append(f"{badges_text}\n")
-        parts.append(f"📈 <b>Chart:</b> <a href='{chart_link}'>DexScreener</a>\n")
-        parts.append(f"🔁 <b>Swap:</b> <a href='{swap_link}'>Raydium</a>\n\n")
+        parts.append(f"≡ƒôê <b>Chart:</b> <a href='{chart_link}'>DexScreener</a>\n")
+        parts.append(f"≡ƒöü <b>Swap:</b> <a href='{swap_link}'>Raydium</a>\n\n")
         parts.append(f"{html.escape(token_address)}\n")
-        parts.append("━━━━━━━━━━━━━━━\n")
-        parts.append(f"📊 <b>Score:</b> {score}/10\n")
-        parts.append(f"💸 <b>24h Vol:</b> ${volume_24h:,.0f}\n")
-        parts.append(f"💰 <b>Price:</b> ${float(price):.8f}\n")
-        parts.append(f"⏱ <b>1h Change:</b> {float(change_1h):+.1f}%\n")
-        parts.append(f"📆 <b>24h Change:</b> {float(change_24h):+.1f}%\n")
-        parts.append("━━━━━━━━━━━━━━━")
+        parts.append("ΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöü\n")
+        parts.append(f"≡ƒôè <b>Score:</b> {score}/10\n")
+        parts.append(f"≡ƒÆ╕ <b>24h Vol:</b> ${volume_24h:,.0f}\n")
+        parts.append(f"≡ƒÆ░ <b>Price:</b> ${float(price):.8f}\n")
+        parts.append(f"ΓÅ▒ <b>1h Change:</b> {float(change_1h):+.1f}%\n")
+        parts.append(f"≡ƒôå <b>24h Change:</b> {float(change_24h):+.1f}%\n")
+        parts.append("ΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöü")
         message = "".join(parts)
         message += f"\n<b>Conviction:</b> {conviction}"
         message += "\n<b>Scoring Analysis:</b>\n"
         for detail in details[:4]:
-            clean_detail = detail.replace("✅ ", "").replace("⚡ ", "").replace("🟡 ", "").replace("❌ ", "")
+            clean_detail = detail.replace("Γ£à ", "").replace("ΓÜí ", "").replace("≡ƒƒí ", "").replace("Γ¥î ", "")
             message += f"  - {clean_detail}\n"
         message += f"\n<b>Alert Time:</b> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
         
@@ -788,7 +799,9 @@ class SignalProcessor:
                                stats: TokenStats, jr_strict_ok: bool, trader: Optional[str], feed_tx: FeedTransaction, ml_data: Optional[dict] = None):
         """Record comprehensive alert metadata"""
         try:
-            signal_source = feed_tx.raw_data.get("source") or "feed"
+            signal_source = get_first_seen_source(token_address)
+            if signal_source == "unknown":
+                signal_source = feed_tx.raw_data.get("source") or "feed"
             token_age_minutes = None
             try:
                 all_obs = get_recent_token_signals(token_address, 365*24*3600)
@@ -829,7 +842,7 @@ class SignalProcessor:
                 alert_metadata=alert_metadata
             )
         except Exception as e:
-            self._log(f"❌ CRITICAL ERROR: Could not record alert metadata: {e}")
+            self._log(f"Γ¥î CRITICAL ERROR: Could not record alert metadata: {e}")
             log_process({
                 "type": "database_error",
                 "function": "record_alert_with_metadata",
@@ -867,8 +880,8 @@ class SignalProcessor:
             if result["status_code"] != 200 or not result.get("json"):
                 error_msg = result.get("error", "No route found")
                 print(f"[JUPITER] Cannot route {token[:8]}... via Jupiter: {error_msg}", flush=True)
-                print(f"[JUPITER] 🚫 Rejecting signal - token not tradeable on Jupiter", flush=True)
-                self._log(f"⚠️ Signal rejected: Jupiter routing failed for {token[:8]}... ({error_msg})")
+                print(f"[JUPITER] ≡ƒÜ½ Rejecting signal - token not tradeable on Jupiter", flush=True)
+                self._log(f"ΓÜá∩╕Å Signal rejected: Jupiter routing failed for {token[:8]}... ({error_msg})")
                 return  # Don't push untradeable tokens to trader
             
             quote_data = result["json"]
@@ -876,8 +889,8 @@ class SignalProcessor:
             
             if not out_amount or int(out_amount) <= 0:
                 print(f"[JUPITER] Invalid quote for {token[:8]}... (outAmount={out_amount})", flush=True)
-                print(f"[JUPITER] 🚫 Rejecting signal - invalid Jupiter quote", flush=True)
-                self._log(f"⚠️ Signal rejected: Invalid Jupiter quote for {token[:8]}...")
+                print(f"[JUPITER] ≡ƒÜ½ Rejecting signal - invalid Jupiter quote", flush=True)
+                self._log(f"ΓÜá∩╕Å Signal rejected: Invalid Jupiter quote for {token[:8]}...")
                 return
             
             print(f"[JUPITER] Route confirmed for {token[:8]}... (outAmount={out_amount})", flush=True)
@@ -887,10 +900,15 @@ class SignalProcessor:
             # This prevents legitimate signals from being lost due to temporary API issues
             print(f"[JUPITER] Routing check error for {token[:8]}...: {e}", flush=True)
             print(f"[JUPITER] Allowing signal through despite check failure (may fail at trader)", flush=True)
-            self._log(f"⚠️ Jupiter routing check error: {e}")
+            self._log(f"ΓÜá∩╕Å Jupiter routing check error: {e}")
         
         # Jupiter routing validated - proceed with Redis push
         try:
+            # Get original source name from the database (so we don't attribute ATM execution to "dexscreener")
+            orig_source = get_first_seen_source(token)
+            if orig_source == "unknown":
+                orig_source = "atm"
+            
             signal_payload = {
                 "ca": token,
                 "token": token,
@@ -909,6 +927,8 @@ class SignalProcessor:
                 "change_24h": stats.change_24h,
                 "smart_money_detected": bool(smart),
                 "timestamp": time.time(),
+                "source": orig_source,
+                "type": "redis_alert"
             }
             result = push_signal_to_redis(signal_payload)
             if result:
@@ -917,7 +937,7 @@ class SignalProcessor:
                 print(f"[REDIS] Failed to push signal for {token[:8]}...", flush=True)
         except Exception as e:
             print(f"[REDIS] Exception pushing signal: {e}", flush=True)
-            self._log(f"⚠️ Redis signal push failed: {e}")
+            self._log(f"ΓÜá∩╕Å Redis signal push failed: {e}")
     
     def _log_alert_event(self, token: str, stats: TokenStats, score: int, prelim: int, conviction: str, feed_tx: FeedTransaction):
         """Log enriched alert event"""
@@ -949,7 +969,7 @@ class SignalProcessor:
     def _log_prelim_debug(self, tx: dict):
         """Log preliminary scoring debug info"""
         try:
-            print("    ⤷ prelim_debug: " + str({
+            print("    Γñ╖ prelim_debug: " + str({
                 'usd_value': round(tx.get('usd_value', 0) or 0, 2),
                 'token0_usd': round(tx.get('token0_amount_usd', 0) or 0, 2),
                 'token1_usd': round(tx.get('token1_amount_usd', 0) or 0, 2),

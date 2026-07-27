@@ -16,19 +16,25 @@ import threading
 import time
 from typing import Optional, Dict
 
+# Set TS_DEBUG=true in .env to enable verbose signal-processing prints.
+# In production leave unset (default: False) to reduce log noise.
+_DEBUG: bool = os.getenv("TS_DEBUG", "false").strip().lower() in ("1", "true", "yes")
+
 import requests
 import base58 as b58
 
-from .watcher import follow_decisions, follow_signals_redis
+from .watcher import follow_signals_redis
 from .strategy_optimized import decide_trade, get_expected_win_rate, get_expected_avg_gain
 from .trader_optimized import TradeEngine
 from app.toggles import trading_enabled
 from .db import get_open_position_id_by_token
 from .config_optimized import MAX_CONCURRENT, EXIT_CHECK_INTERVAL_SEC
+from .config_optimized import get_score_stage, get_active_profile
 from .portfolio_manager import get_portfolio_manager, should_use_portfolio_manager
 from .price_cache import get_price_cache
 from .watch_list_manager import get_watch_list_manager
 from .watch_list_monitor import get_watch_list_monitor
+from .entry_strategy import get_entry_strategy
 
 
 def _get_last_price_usd(token: str, use_cache: bool = True) -> float:
@@ -59,30 +65,73 @@ def _get_last_price_usd(token: str, use_cache: bool = True) -> float:
     """
     from .jupiter_price_oracle import get_jupiter_oracle
     from .db import get_open_qty_by_token
+    from .token_balance import get_token_balance_simple
+    from .config_optimized import RPC_URL, WALLET_SECRET
+    from solana.rpc.api import Client as SolanaClient
+    from solders.keypair import Keypair
+    import base58
     
     # Get current holdings for this token
+    holdings = None
     try:
         holdings = get_open_qty_by_token(token)
-        if holdings is None or holdings <= 0:
-            print(f"[PRICE] No holdings found for {token[:8]}, cannot get price", flush=True)
-            return 0.0
     except Exception as e:
-        print(f"[PRICE] Error getting holdings for {token[:8]}: {e}", flush=True)
+        print(f"[PRICE] DB lookup error for {token[:8]}: {e}", flush=True)
+    
+    # FALLBACK: If DB lookup fails, get on-chain balance directly
+    if holdings is None or holdings <= 0:
+        try:
+            rpc = SolanaClient(RPC_URL)
+            kp = Keypair.from_bytes(base58.b58decode(WALLET_SECRET))
+            wallet = str(kp.pubkey())
+            holdings = get_token_balance_simple(rpc, wallet, token)
+            if holdings and holdings > 0:
+                print(f"[PRICE] ✅ Got on-chain holdings for {token[:8]}: {holdings:.2f}", flush=True)
+        except Exception as e:
+            print(f"[PRICE] On-chain fallback error for {token[:8]}: {e}", flush=True)
+    
+    if holdings is None or holdings <= 0:
+        print(f"[PRICE] No holdings found for {token[:8]} (DB + on-chain)", flush=True)
         return 0.0
     
     # Get real sellable price from Jupiter
+    # CRITICAL FIX: Reduced cache from 60s to 10s - memecoins can crash 30% in seconds
     try:
-        oracle = get_jupiter_oracle(cache_ttl=60)  # 60s cache (rate limit protection)
+        oracle = get_jupiter_oracle(cache_ttl=10)  # 10s cache (balance between accuracy and rate limits)
         price = oracle.get_price(token, holdings)
         
         if price > 0:
             return price
         else:
             print(f"[PRICE] Jupiter oracle returned 0 for {token[:8]}", flush=True)
+            # FALLBACK: Try Dexscreener for pump.fun tokens not yet on Jupiter
+            try:
+                dex_resp = requests.get(f"https://api.dexscreener.com/latest/dex/tokens/{token}", timeout=5)
+                if dex_resp.status_code == 200:
+                    pairs = dex_resp.json().get("pairs", [])
+                    if pairs:
+                        dex_price = float(pairs[0].get("priceUsd", 0))
+                        if dex_price > 0:
+                            print(f"[PRICE] ✅ Dexscreener fallback for {token[:8]}: ${dex_price:.10f}", flush=True)
+                            return dex_price
+            except Exception as dex_err:
+                print(f"[PRICE] Dexscreener fallback failed for {token[:8]}: {dex_err}", flush=True)
             return 0.0
             
     except Exception as e:
         print(f"[PRICE] Jupiter oracle error for {token[:8]}: {e}", flush=True)
+        # FALLBACK: Try Dexscreener
+        try:
+            dex_resp = requests.get(f"https://api.dexscreener.com/latest/dex/tokens/{token}", timeout=5)
+            if dex_resp.status_code == 200:
+                pairs = dex_resp.json().get("pairs", [])
+                if pairs:
+                    dex_price = float(pairs[0].get("priceUsd", 0))
+                    if dex_price > 0:
+                        print(f"[PRICE] ✅ Dexscreener fallback for {token[:8]}: ${dex_price:.10f}", flush=True)
+                        return dex_price
+        except:
+            pass
         return 0.0
 
 
@@ -292,7 +341,7 @@ def _check_portfolio_take_profit(engine: TradeEngine) -> bool:
         
         # Log individual position details
         for detail in position_details:
-            print(f"   {detail['token']}... ${detail['entry_val']:.2f} → ${detail['current_val']:.2f} (+{detail['pnl_pct']:.1f}%)", flush=True)
+            print(f"   {detail['token']}... ${detail['entry_val']:.2f} -> ${detail['current_val']:.2f} ({detail['pnl_pct']:+.1f}%)", flush=True)
         
         print(f"{'='*60}\n", flush=True)
         
@@ -318,7 +367,7 @@ def _check_portfolio_take_profit(engine: TradeEngine) -> bool:
                     db_close_position(pid)
                     engine.live.pop(token, None)
                     closed_count += 1
-                    print(f"   ✅ Closed {token[:8]} (no holdings)", flush=True)
+                    print(f"   Closed {token[:8]} (no holdings)", flush=True)
                     continue
                 
                 # Execute market sell (FORCE SELL for portfolio take profit)
@@ -344,16 +393,16 @@ def _check_portfolio_take_profit(engine: TradeEngine) -> bool:
                     engine.circuit_breaker.record_trade(pnl_usd, fill.slippage_pct)
                     
                     closed_count += 1
-                    print(f"   ✅ Sold {token[:8]}: {qty:.4f} @ ${fill.price:.8f} | P&L: ${pnl_usd:+.2f} ({pnl_pct:+.1f}%)", flush=True)
+                    print(f"   Sold {token[:8]}: {qty:.4f} @ ${fill.price:.8f} | P&L: ${pnl_usd:+.2f} ({pnl_pct:+.1f}%)", flush=True)
                 else:
                     # Sell failed - log and skip
                     failed_count += 1
-                    print(f"   ❌ Failed to sell {token[:8]}: {fill.error}", flush=True)
+                    print(f"   Failed to sell {token[:8]}: {fill.error}", flush=True)
                     engine._log("net_take_profit_sell_failed", token=token, pid=pid, error=fill.error)
                 
             except Exception as e:
                 failed_count += 1
-                print(f"   ❌ Exception closing {token[:8]}...: {e}", flush=True)
+                print(f"   Exception closing {token[:8]}...: {e}", flush=True)
                 engine._log("net_take_profit_close_error", token=token, error=str(e))
                 import traceback
                 traceback.print_exc()
@@ -367,11 +416,11 @@ def _check_portfolio_take_profit(engine: TradeEngine) -> bool:
                    positions_failed=failed_count)
         
         if failed_count > 0:
-            print(f"\n⚠️  NET PARTIALLY CLOSED: {closed_count} succeeded, {failed_count} failed", flush=True)
+            print(f"\nNET PARTIALLY CLOSED: {closed_count} succeeded, {failed_count} failed", flush=True)
             print(f"   Successfully closed positions earned +${total_current_usd - total_entry_usd:.2f}", flush=True)
         else:
-            print(f"\n🎉 NET CLOSED: {closed_count} positions, +${total_current_usd - total_entry_usd:.2f} profit", flush=True)
-            print(f"💰 Ready to cast bigger net with ${total_current_usd:.2f} capital!\n", flush=True)
+            print(f"\nNET CLOSED: {closed_count} positions, +${total_current_usd - total_entry_usd:.2f} profit", flush=True)
+            print(f"Ready to cast bigger net with ${total_current_usd:.2f} capital!\n", flush=True)
         
         return True
     
@@ -390,22 +439,22 @@ def _exit_loop(engine: TradeEngine, stop_event: threading.Event) -> None:
     # Problem: qty=0 positions accumulate over time, spam Jupiter API
     # Solution: Close all positions with qty=0 on startup
     try:
-        from tradingSystem.db import init, _conn, close_position
+        from src.tradingSystem.db import init, _conn, close_position
         init()
         conn = _conn()
         cursor = conn.cursor()
         cursor.execute("SELECT id, token_address FROM positions WHERE status='open' AND qty <= 0")
         ghost_positions = cursor.fetchall()
         if ghost_positions:
-            print(f"[EXIT_LOOP] 🧹 Found {len(ghost_positions)} ghost positions (qty=0) on startup, cleaning up...", flush=True)
+            print(f"[EXIT_LOOP] Found {len(ghost_positions)} ghost positions (qty=0) on startup, cleaning up...", flush=True)
             for pid, token in ghost_positions:
                 close_position(pid)
                 print(f"[EXIT_LOOP] Closed ghost position #{pid} ({token[:8]}...)", flush=True)
     except Exception as e:
-        print(f"[EXIT_LOOP] ⚠️ Error cleaning ghost positions on startup: {e}", flush=True)
+        print(f"[EXIT_LOOP] Error cleaning ghost positions on startup: {e}", flush=True)
     
     # Initialize adaptive monitoring (smart intervals based on position maturity)
-    from tradingSystem.adaptive_monitor import AdaptiveMonitor
+    from src.tradingSystem.adaptive_monitor import AdaptiveMonitor
     monitor = AdaptiveMonitor()
     
     # Base check interval (for loop sleep)
@@ -414,7 +463,7 @@ def _exit_loop(engine: TradeEngine, stop_event: threading.Event) -> None:
     tier_label = "Pro (10 RPS)" if is_pro else "Free (1 RPS)"
     print(f"[EXIT_LOOP] Base interval: {check_interval}s (Jupiter {tier_label})", flush=True)
     print(f"[EXIT_LOOP] Adaptive monitoring: ENABLED", flush=True)
-    print(f"[EXIT_LOOP] Tiers: Fast(3s) → Medium(30m) → Slow(2h) → Ultra(4h)", flush=True)
+    print(f"[EXIT_LOOP] Tiers: Fast(3s) -> Medium(30m) -> Slow(2h) -> Ultra(4h)", flush=True)
     print(f"[EXIT_LOOP] Inactivity exit: 10 minutes of <5% movement (AGGRESSIVE)", flush=True)
     print(f"[EXIT_LOOP] Moonshot mode: High-profit (>200%) + active price = unlimited hold", flush=True)
     
@@ -426,7 +475,7 @@ def _exit_loop(engine: TradeEngine, stop_event: threading.Event) -> None:
             
             # NET STRATEGY: Check portfolio-level take profit FIRST (before individual exits)
             if _check_portfolio_take_profit(engine):
-                print(f"[EXIT_LOOP] 🎯 Portfolio take profit executed - all positions closed", flush=True)
+                print(f"[EXIT_LOOP] Portfolio take profit executed - all positions closed", flush=True)
                 time.sleep(30)  # Wait before next cycle
                 continue
             
@@ -464,14 +513,14 @@ def _exit_loop(engine: TradeEngine, stop_event: threading.Event) -> None:
                                 
                                 # Verify position is in exit monitoring
                                 if token not in engine.live:
-                                    print(f"[HEALTH] ⚠️ HIGH PROFIT POSITION {token[:8]} NOT IN LIVE TRACKING!", flush=True)
+                                    print(f"[HEALTH] HIGH PROFIT POSITION {token[:8]} NOT IN LIVE TRACKING!", flush=True)
                                     continue
                                 
                                 # Check if we've attempted profit-take
                                 profit_level = int(peak_profit_pct // 100) * 100
                                 profit_take_key = f"profit_take_attempted_{profit_level}"
                                 if not pos_data.get(profit_take_key, False):
-                                    print(f"[HEALTH] 🚨 ALERT: {token[:8]} at +{peak_profit_pct:.1f}% but NO PROFIT-TAKE ATTEMPTED!", flush=True)
+                                    print(f"[HEALTH] ALERT: {token[:8]} at +{peak_profit_pct:.1f}% but NO PROFIT-TAKE ATTEMPTED!", flush=True)
                                     print(f"[HEALTH] Forcing profit-take check on next iteration...", flush=True)
                                     # Force a price check to trigger profit-take logic
                                     engine.live[token]["force_check"] = True
@@ -519,7 +568,7 @@ def _exit_loop(engine: TradeEngine, stop_event: threading.Event) -> None:
                     
                     # CRITICAL: Skip positions with quantity=0 (failed fills)
                     # These are ghost entries that spam Jupiter and trigger rate limits
-                    from tradingSystem.db import get_open_qty
+                    from src.tradingSystem.db import get_open_qty
                     qty = get_open_qty(pid)
                     if iteration == 1:  # Debug on first iteration
                         print(f"[EXIT_LOOP] Position {token[:8]}... qty={qty} (type={type(qty).__name__})", flush=True)
@@ -538,38 +587,72 @@ def _exit_loop(engine: TradeEngine, stop_event: threading.Event) -> None:
                     
                     # GHOST POSITION CLEANUP: Auto-close positions with repeated price failures
                     # Problem: Dead/rugged tokens keep calling Jupiter API every iteration
-                    # Solution: Track consecutive failures, auto-close after 3 failures
+                    # Solution: Track consecutive failures, auto-close after 10 failures (increased from 3)
+                    # CRITICAL FIX: Must check on-chain balance before closing!
                     if price <= 0:
-                        price_failures = pos_data.get("price_failures", 0) + 1
-                        pos_data["price_failures"] = price_failures
+                        # Try Dexscreener as fallback for pump.fun tokens
+                        try:
+                            import requests
+                            dex_resp = requests.get(f"https://api.dexscreener.com/latest/dex/tokens/{token}", timeout=5)
+                            if dex_resp.status_code == 200:
+                                pairs = dex_resp.json().get("pairs", [])
+                                if pairs:
+                                    price = float(pairs[0].get("priceUsd", 0))
+                                    if price > 0:
+                                        print(f"[EXIT_LOOP] Got price from Dexscreener for {token[:8]}: ${price:.10f}", flush=True)
+                                        pos_data["price_failures"] = 0  # Reset on success
+                        except:
+                            pass
                         
-                        if price_failures >= 3:
-                            print(f"[EXIT_LOOP] 👻 GHOST POSITION: {token[:8]}... - {price_failures} consecutive price failures, auto-closing", flush=True)
-                            from .db import close_position
-                            close_position(pid)
-                            if token in engine.live:
-                                del engine.live[token]
-                            engine._log("ghost_position_auto_closed", token=token, pid=pid, price_failures=price_failures)
-                            continue
-                        else:
-                            # Skip this iteration, will retry next time
-                            if iteration % 60 == 0:  # Log every 5 minutes
-                                print(f"[EXIT_LOOP] ⚠️ Price unavailable for {token[:8]}... (failure {price_failures}/3)", flush=True)
-                            continue
+                        if price <= 0:
+                            price_failures = pos_data.get("price_failures", 0) + 1
+                            pos_data["price_failures"] = price_failures
+                            
+                            # CRITICAL: Check on-chain balance BEFORE closing as ghost!
+                            if price_failures >= 10:  # Increased from 3 to 10
+                                # Verify tokens actually don't exist before closing
+                                try:
+                                    from .token_balance import get_token_balance_simple
+                                    # PERF FIX: Reuse engine.broker instead of creating new Broker()
+                                    # per iteration (was leaking SolanaClient connections)
+                                    wallet_address = str(engine.broker._kp.pubkey()) if engine.broker._kp else None
+                                    actual_balance = get_token_balance_simple(engine.broker._rpc, wallet_address, token) if wallet_address else None
+                                    
+                                    if actual_balance and actual_balance > 0.01:
+                                        # TOKENS EXIST! Don't close, just log warning
+                                        print(f"[EXIT_LOOP] Can't price {token[:8]} but {actual_balance:.2f} tokens on-chain - NOT closing!", flush=True)
+                                        pos_data["price_failures"] = 0  # Reset to prevent spam
+                                        continue
+                                except Exception as e:
+                                    print(f"[EXIT_LOOP] Balance check failed for {token[:8]}: {e}", flush=True)
+                                
+                                print(f"[EXIT_LOOP] GHOST POSITION: {token[:8]}... - {price_failures} price failures + 0 on-chain balance, closing", flush=True)
+                                from .db import close_position
+                                close_position(pid)
+                                if token in engine.live:
+                                    del engine.live[token]
+                                engine._log("ghost_position_auto_closed", token=token, pid=pid, price_failures=price_failures)
+                                continue
+                            else:
+                                # Skip this iteration, will retry next time
+                                if iteration % 60 == 0:  # Log every 5 minutes
+                                    print(f"[EXIT_LOOP] Price unavailable for {token[:8]}... (failure {price_failures}/10)", flush=True)
+                                continue
                     else:
                         # Reset failure counter on successful price fetch
                         if "price_failures" in pos_data:
                             pos_data["price_failures"] = 0
                     
-                    # DUST CLEANUP: Auto-close positions worth <$1 OR with negligible on-chain balance
+                    # DUST CLEANUP: Auto-close positions worth <$0.05 OR with negligible on-chain balance
                     # Problem: 95% sell buffer leaves dust per position
                     # Solution: Force-close positions with negligible value or quantity
+                    # UPDATED: Lower threshold for small capital trading ($0.05 instead of $1)
                     
                     # Check 1: Value-based cleanup (requires price)
                     if price > 0 and qty > 0:
                         position_value_usd = price * qty
-                        if position_value_usd < 1.0:
-                            print(f"[EXIT_LOOP] 🧹 DUST DETECTED (value): {token[:8]}... worth ${position_value_usd:.4f} (<$1)", flush=True)
+                        if position_value_usd < 0.05:  # Lowered from $1 to $0.05 for small capital
+                            print(f"[EXIT_LOOP] DUST DETECTED (value): {token[:8]}... worth ${position_value_usd:.4f} (<$0.05)", flush=True)
                             print(f"[EXIT_LOOP] Force-closing dust position in database", flush=True)
                             from .db import close_position
                             close_position(pid)
@@ -579,25 +662,36 @@ def _exit_loop(engine: TradeEngine, stop_event: threading.Event) -> None:
                     
                     # Check 2: Quantity-based cleanup (for rugged/dead tokens with no price)
                     # If database shows large qty but wallet is nearly empty, it's dust from failed sell
+                    # CRITICAL FIX: Add grace period for new positions (RPC propagation delay)
                     try:
                         from .token_balance import get_token_balance_simple
-                        from .broker_optimized import Broker
-                        # Broker() takes no args - reads config from env
-                        broker = Broker()
-                        wallet_address = str(broker._kp.pubkey()) if broker._kp else None
-                        actual_balance = get_token_balance_simple(broker._rpc, wallet_address, token) if wallet_address else None
+                        # PERF FIX: Reuse engine.broker instead of creating new Broker()
+                        # per iteration (was leaking SolanaClient connections)
+                        wallet_address = str(engine.broker._kp.pubkey()) if engine.broker._kp else None
                         
-                        if actual_balance is not None and actual_balance < 0.01:  # Less than 0.01 tokens
-                            print(f"[EXIT_LOOP] 🧹 DUST DETECTED (quantity): {token[:8]}... only {actual_balance:.6f} tokens on-chain", flush=True)
-                            print(f"[EXIT_LOOP] Force-closing dust position (worthless amount)", flush=True)
-                            from .db import close_position
-                            close_position(pid)
-                            if token in engine.live:
-                                del engine.live[token]
-                            continue
+                        # CRITICAL: Check position age before marking as dust
+                        # New positions (< 60s) may show 0 balance due to RPC load balancing
+                        position_age_seconds = time.time() - entry_time if entry_time > 0 else 999
+                        
+                        if position_age_seconds < 60:
+                            # Skip dust check for new positions
+                            if iteration % 60 == 0:  # Log every 5 minutes
+                                print(f"[EXIT_LOOP] Skipping dust check for {token[:8]} (new position: {position_age_seconds:.0f}s old)", flush=True)
+                        else:
+                            # Position is old enough - check for dust with retries
+                            actual_balance = get_token_balance_simple(engine.broker._rpc, wallet_address, token, retries=3) if wallet_address else None
+                            
+                            if actual_balance is not None and actual_balance < 0.01:  # Less than 0.01 tokens
+                                print(f"[EXIT_LOOP] DUST DETECTED (quantity): {token[:8]}... only {actual_balance:.6f} tokens on-chain", flush=True)
+                                print(f"[EXIT_LOOP] Force-closing dust position (worthless amount)", flush=True)
+                                from .db import close_position
+                                close_position(pid)
+                                if token in engine.live:
+                                    del engine.live[token]
+                                continue
                     except Exception as e:
                         # Don't crash exit loop on balance query errors, but LOG them!
-                        print(f"[EXIT_LOOP] ⚠️ Dust cleanup error for {token[:8]}: {e}", flush=True)
+                        print(f"[EXIT_LOOP] Dust cleanup error for {token[:8]}: {e}", flush=True)
                         engine._log("dust_cleanup_error", token=token, error=str(e))
                     
                     if price > 0:
@@ -613,7 +707,7 @@ def _exit_loop(engine: TradeEngine, stop_event: threading.Event) -> None:
                         
                         if should_check:
                             if iteration % 300 == 0 or "Tier" in reason:
-                                print(f"[EXIT_LOOP] ✓ Checking {token[:8]}... ${price:.8f} ({reason})", flush=True)
+                                print(f"[EXIT_LOOP] [OK] Checking {token[:8]}... ${price:.8f}, PnL: {current_profit_pct:+.1f}%", flush=True)
                             
                             # CRITICAL: check_exits returns True when position is closed (ghost/rugged/sold)
                             # If True, skip remaining processing for this token
@@ -635,10 +729,21 @@ def _exit_loop(engine: TradeEngine, stop_event: threading.Event) -> None:
                                     # Don't crash the exit loop on pyramid failures
                                     pass
                         else:
-                            # Position doesn't need checking yet (saves API limits!)
-                            if iteration % 600 == 0:  # Log every 10 minutes for skipped positions
+                            # Position doesn't need full checking yet (saves API limits!)
+                            # REFACTOR (2026-05-17): Removed hardcoded fast-path stop-loss that
+                            # bypassed RiskPhase. The regular check_exits() cycle handles this
+                            # correctly with phase-aware thresholds. Emergency hard stop in
+                            # check_exits() fires regardless of min_hold for genuine rugs.
+                            #
+                            # If price is catastrophically bad, the EMERGENCY_HARD_STOP in
+                            # check_exits() will catch it on the next full cycle.
+                            emergency_stop_pct = float(os.getenv("TS_EMERGENCY_HARD_STOP_PCT", "50"))
+                            if entry_price > 0 and current_profit_pct <= -emergency_stop_pct:
+                                # Only force-check on genuine catastrophic loss (rug protection)
+                                print(f"[EXIT_LOOP] 🚨 EMERGENCY: {token[:8]} at {current_profit_pct:.1f}% - forcing exit check", flush=True)
+                                engine.check_exits(token, price)
+                            elif iteration % 600 == 0:  # Log every 10 minutes for skipped positions
                                 print(f"[EXIT_LOOP] ⏸️  Skipping {token[:8]}... (${price:.8f}, {reason})", flush=True)
-                            continue
                         # Reset price failure counter on success
                         # NOTE: DO NOT reset sell_failures here - it's managed by check_exits
                         if token in engine.live:
@@ -672,7 +777,7 @@ def _exit_loop(engine: TradeEngine, stop_event: threading.Event) -> None:
                                 
                                 # Force close in database and clear from live
                                 try:
-                                    from tradingSystem.db import close_position
+                                    from src.tradingSystem.db import close_position
                                     data = engine.live.get(token)
                                     if data and data.get("pid"):
                                         close_position(data["pid"])
@@ -721,8 +826,8 @@ def run() -> None:
     print("🔄 WALLET RECONCILIATION")
     print("="*60)
     try:
-        from tradingSystem.wallet_reconciler import reconcile_on_startup
-        from tradingSystem.config_optimized import RPC_URL, WALLET_SECRET
+        from src.tradingSystem.wallet_reconciler import reconcile_on_startup
+        from src.tradingSystem.config_optimized import RPC_URL, WALLET_SECRET
         reconcile_on_startup(RPC_URL, WALLET_SECRET)
     except Exception as e:
         print(f"⚠️  Reconciliation failed (non-critical): {e}")
@@ -788,13 +893,12 @@ def run() -> None:
         print("📡 Using Redis for real-time signal consumption (recommended)")
         signal_source = follow_signals_redis(block_timeout=5)
     else:
-        if args.legacy:
-            engine._log("signal_source", source="file_watcher", real_time=False, reason="user_requested")
-            print("⚠️  Using legacy file watcher (polling mode - slower)")
-        else:
-            engine._log("signal_source", source="file_watcher", real_time=False, reason="no_redis")
-            print("⚠️  Redis not configured, falling back to file watcher")
-        signal_source = follow_decisions(start_at_end=True)
+        # Legacy file watcher removed (2026-05-17 refactor).
+        # Redis is the only supported signal source.
+        print("❌ Redis not configured. Set REDIS_URL environment variable.")
+        print("   Legacy file watcher has been removed -- Redis is required.")
+        engine._log("signal_source", source="none", real_time=False, reason="no_redis_legacy_removed")
+        raise RuntimeError("REDIS_URL not configured. Cannot start without Redis signal source.")
 
     try:
         for ev in signal_source:
@@ -828,8 +932,8 @@ def run() -> None:
                         # CRITICAL: Re-validate before entry (especially for young tokens)
                         # Problem: Token may have matured but could still be a scam
                         # Solution: Run full validation again
-                        from tradingSystem.pre_entry_validator import get_pre_entry_validator
-                        from tradingSystem.rugpull_detector import get_rugpull_detector
+                        from src.tradingSystem.pre_entry_validator import get_pre_entry_validator
+                        from src.tradingSystem.rugpull_detector import get_rugpull_detector
                         
                         pre_validator = get_pre_entry_validator()
                         detector = get_rugpull_detector()
@@ -847,24 +951,42 @@ def run() -> None:
                             print(f"[WATCHLIST] 🚨 REJECTED: {validation_reason}", flush=True)
                             continue
                         
-                        # MOMENTUM VALIDATION (NEW - OCT 31 2025)
-                        # Problem: Entering too early led to -32% loss on DyRAaLJM
-                        # Solution: Wait for momentum confirmation before entry
-                        from tradingSystem.momentum_entry_validator import get_momentum_validator
-                        momentum_val = get_momentum_validator()
-                        has_momentum, momentum_reason = momentum_val.validate_entry_momentum(entry_token, entry_stats)
-                        if not has_momentum:
-                            print(f"[WATCHLIST] ⏸️  NO MOMENTUM: {momentum_reason} - keeping on watchlist", flush=True)
-                            continue
-                        
-                        print(f"[WATCHLIST] ✅ Passed all safety checks + momentum confirmation ({momentum_reason})", flush=True)
-                        
+                        # ENTRY STRATEGY VALIDATION (2026-05-17 REFACTOR)
+                        # Replaced legacy momentum_entry_validator with unified EntryStrategy.
+                        # Watchlist entries now go through the same entry system as main signals.
                         entry_score = entry_rec.get('score', 7)
                         entry_conviction = entry_rec.get('conviction', 'Medium Confidence')
+                        
+                        entry_strat = get_entry_strategy()
+                        size_mult, _, stage_label = get_score_stage(entry_score)
+                        
+                        entry_decision = entry_strat.evaluate(
+                            token=entry_token,
+                            signal_price=entry_price,
+                            current_price=entry_price,
+                            score=entry_score,
+                            stats=entry_stats,
+                        )
+                        
+                        if not entry_decision.should_enter:
+                            print(f"[WATCHLIST] ⏸️  EntryStrategy rejected: {entry_decision.reason}", flush=True)
+                            continue
+                        
+                        print(f"[WATCHLIST] ✅ EntryStrategy approved: {entry_decision.reason} (stage: {stage_label})", flush=True)
+                        
                         entry_plan = decide_trade(entry_stats, entry_score, entry_conviction)
                         
                         if entry_plan:
-                            print(f"[WATCHLIST] 💰 Opening ${entry_plan['usd_size']:.2f} position for {entry_token[:8]}", flush=True)
+                            # INJECT NEW METADATA FOR LOGGING
+                            entry_plan["score"] = entry_score
+                            entry_plan["market_cap"] = entry_stats.get("market_cap_usd")
+                            entry_plan["token_age"] = entry_stats.get("token_age") or entry_stats.get("age") or 0
+                            entry_plan["entry_strategy"] = entry_decision.reason
+                            entry_plan["time_to_entry"] = time.time() - float(entry_stats.get("timestamp") or entry_stats.get("ts") or time.time())
+                            entry_plan["signal_source"] = entry_rec.get("source", "watchlist")
+                            
+                            # NOTE: size_mult already applied inside get_position_size() via SCORE_STAGE_MAP
+                            print(f"[WATCHLIST] 💰 Opening ${entry_plan['usd_size']:.2f} position for {entry_token[:8]} (stage: {stage_label})", flush=True)
                             pid = engine.open_position(entry_token, entry_plan)
                             if pid:
                                 watch_manager.mark_entered(entry_token, pid, entry_price)
@@ -897,10 +1019,36 @@ def run() -> None:
                         
                         reentry_score = reentry_rec.get('score', 7)
                         reentry_conviction = reentry_rec.get('conviction', 'Medium Confidence')
+                        
+                        # ENTRY STRATEGY VALIDATION (2026-05-17 REFACTOR)
+                        entry_strat = get_entry_strategy()
+                        size_mult, _, stage_label = get_score_stage(reentry_score)
+                        
+                        reentry_decision = entry_strat.evaluate(
+                            token=reentry_token,
+                            signal_price=reentry_price,
+                            current_price=reentry_price,
+                            score=reentry_score,
+                            stats=reentry_stats,
+                        )
+                        
+                        if not reentry_decision.should_enter:
+                            print(f"[WATCHLIST] ⏸️  EntryStrategy rejected re-entry: {reentry_decision.reason}", flush=True)
+                            continue
+                        
                         reentry_plan = decide_trade(reentry_stats, reentry_score, reentry_conviction)
                         
                         if reentry_plan:
-                            print(f"[WATCHLIST] 💰 RE-OPENING ${reentry_plan['usd_size']:.2f} position for {reentry_token[:8]}", flush=True)
+                            # INJECT NEW METADATA FOR LOGGING
+                            reentry_plan["score"] = reentry_score
+                            reentry_plan["market_cap"] = reentry_stats.get("market_cap_usd")
+                            reentry_plan["token_age"] = reentry_stats.get("token_age") or reentry_stats.get("age") or 0
+                            reentry_plan["entry_strategy"] = reentry_decision.reason
+                            reentry_plan["time_to_entry"] = time.time() - float(reentry_stats.get("timestamp") or reentry_stats.get("ts") or time.time())
+                            reentry_plan["signal_source"] = reentry_rec.get("source", "watchlist")
+                            
+                            # NOTE: size_mult already applied inside get_position_size() via SCORE_STAGE_MAP
+                            print(f"[WATCHLIST] 💰 RE-OPENING ${reentry_plan['usd_size']:.2f} position for {reentry_token[:8]} (stage: {stage_label})", flush=True)
                             pid = engine.open_position(reentry_token, reentry_plan)
                             if pid:
                                 watch_manager.mark_reentered(reentry_token, pid, reentry_price)
@@ -913,14 +1061,17 @@ def run() -> None:
                 
                 signals_processed += 1
                 
-                # DEBUG: Log every signal received
+                # Log every signal — verbose print is gated behind TS_DEBUG
                 token = ev.get("ca")
                 score = ev.get("score")
                 token_norm = _normalize_token_address(token)
-                print(
-                    f"[DEBUG] Signal received: token_raw={token[:8] if token else 'None'}..., token_norm={token_norm[:8] if token_norm else 'None'}..., score={score}, type={ev.get('type')}",
-                    flush=True,
-                )
+                if _DEBUG:
+                    print(
+                        f"[DEBUG] Signal received: token_raw={token[:8] if token else 'None'}..., "
+                        f"token_norm={token_norm[:8] if token_norm else 'None'}..., "
+                        f"score={score}, type={ev.get('type')}",
+                        flush=True,
+                    )
                 engine._log("signal_received", token=token, score=score, event_type=ev.get("type"))
                 
                 # Log health every 10 minutes
@@ -933,44 +1084,44 @@ def run() -> None:
                     last_health_log = time.time()
                 
                 # Check trading toggle
-                print(f"[DEBUG] Checking trading_enabled()...", flush=True)
                 if not trading_enabled():
-                    print(f"[DEBUG] Trading disabled, skipping {token[:8] if token else 'None'}...", flush=True)
+                    if _DEBUG:
+                        print(f"[DEBUG] Trading disabled, skipping {token[:8] if token else 'None'}...", flush=True)
                     time.sleep(0.2)
                     continue
-                print(f"[DEBUG] Trading is enabled, proceeding with {token[:8] if token else 'None'}...", flush=True)
                 
                 event_type = ev.get("type")
-                print(f"[DEBUG] Event type: {event_type}", flush=True)
+                if _DEBUG:
+                    print(f"[DEBUG] Trading enabled | event_type={event_type} | token={token_norm[:8] if token_norm else 'None'}", flush=True)
                 
                 # Validate token
                 if not token_norm:
-                    print("[DEBUG] No token in event, skipping...", flush=True)
+                    if _DEBUG:
+                        print("[DEBUG] No token in event, skipping...", flush=True)
                     continue
                 if not _is_valid_solana_address(token_norm):
-                    print(f"[DEBUG] Invalid token address after normalization: {token_norm}", flush=True)
+                    if _DEBUG:
+                        print(f"[DEBUG] Invalid token address after normalization: {token_norm}", flush=True)
                     engine._log("token_invalid", token=token_norm)
                     continue
                 
                 # Skip if already have position
-                print(f"[DEBUG] Checking if already have position for {token_norm[:8]}...", flush=True)
                 if engine.has_position(token_norm):
                     print(f"[DEBUG] Already have position for {token_norm[:8]}, skipping...", flush=True)
                     continue
                 
-                # Skip if token is on cooldown (prevents buy-sell-rebuy loops)
-                print(f"[DEBUG] Checking cooldown for {token_norm[:8]}...", flush=True)
                 if engine.is_on_cooldown(token_norm):
                     remaining = engine.get_cooldown_remaining(token_norm)
                     signals_filtered += 1
                     hours = int(remaining // 3600)
                     minutes = int((remaining % 3600) // 60)
-                    engine._log("entry_rejected_cooldown", token=token_norm, 
+                    engine._log("entry_rejected_cooldown", token=token_norm,
                                remaining_seconds=remaining, remaining_hours=hours, remaining_minutes=minutes)
-                    print(f"[DEBUG] Token {token_norm[:8]} on cooldown for {hours}h {minutes}m more", flush=True)
+                    if _DEBUG:
+                        print(f"[DEBUG] Token {token_norm[:8]} on cooldown for {hours}h {minutes}m more", flush=True)
                     continue
-                
-                print(f"[DEBUG] No existing position, continuing to trade logic...", flush=True)
+                if _DEBUG:
+                    print(f"[DEBUG] No existing position, continuing to trade logic...", flush=True)
                 
                 # Check if portfolio is full - evaluate rebalancing
                 if should_use_portfolio_manager() and len(engine.live) >= MAX_CONCURRENT:
@@ -1025,14 +1176,35 @@ def run() -> None:
                     should_rebalance, token_to_replace, reason = pm.evaluate_rebalance(new_signal)
                     
                     if should_rebalance:
+                        # ENTRY STRATEGY VALIDATION (2026-05-17 REFACTOR)
+                        # Rebalance entries must also pass EntryStrategy
+                        entry_strat = get_entry_strategy()
+                        size_mult, _, stage_label = get_score_stage(signal_score)
+                        
+                        rebal_decision = entry_strat.evaluate(
+                            token=token,
+                            signal_price=current_price,
+                            current_price=current_price,
+                            score=signal_score,
+                            stats=stats,
+                        )
+                        
+                        if not rebal_decision.should_enter:
+                            engine._log("rebalance_entry_rejected",
+                                       token=token[:8],
+                                       reason=rebal_decision.reason)
+                            continue
+                        
                         # Make trade decision
                         plan = decide_trade(stats, signal_score, conviction_type)
                         
                         if plan:
+                            # NOTE: size_mult already applied inside get_position_size() via SCORE_STAGE_MAP
                             engine._log("rebalance_attempt", 
                                        old_token=token_to_replace[:8],
                                        new_token=token[:8],
                                        new_score=signal_score,
+                                       stage=stage_label,
                                        reason=reason)
                             
                             # Execute atomic rebalance
@@ -1061,12 +1233,14 @@ def run() -> None:
                     # Continue to next signal after rebalancing attempt
                     continue
                 
-                print(f"[DEBUG] Starting trade execution for {token[:8]}...", flush=True)
+                if _DEBUG:
+                    print(f"[DEBUG] Starting trade execution for {token[:8]}...", flush=True)
                 
                 # Token is now validated as a Solana mint; proceed
                 
                 # Use stats from Redis signal (already contains everything we need!)
-                print(f"[DEBUG] Extracting stats from Redis signal for {token_norm[:8]}...", flush=True)
+                if _DEBUG:
+                    print(f"[DEBUG] Extracting stats from Redis signal for {token_norm[:8]}...", flush=True)
                 stats = {
                     "market_cap_usd": float(ev.get("market_cap") or 0),
                     "liquidity_usd": float(ev.get("liquidity") or 0),
@@ -1081,42 +1255,45 @@ def run() -> None:
                 mcap = stats.get("market_cap_usd") or 1
                 stats["ratio"] = stats["vol24_usd"] / max(mcap, 1) if mcap > 0 else 0
                 
-                # Validate we have minimum required data
                 if not stats.get("market_cap_usd") or stats.get("market_cap_usd") <= 0:
-                    print(f"[DEBUG] Invalid market cap for {token_norm[:8]}, trying fallback fetch...", flush=True)
+                    if _DEBUG:
+                        print(f"[DEBUG] Invalid market cap for {token_norm[:8]}, trying fallback fetch...", flush=True)
                     stats_fallback = _fetch_real_stats(token_norm)
                     if stats_fallback:
                         stats.update(stats_fallback)
                     else:
                         signals_filtered += 1
                         engine._log("stats_invalid", token=token_norm, event_type=event_type)
-                        print(f"[DEBUG] Failed to get valid stats for {token_norm[:8]}", flush=True)
+                        if _DEBUG:
+                            print(f"[DEBUG] Failed to get valid stats for {token_norm[:8]}", flush=True)
                         continue
-                print(f"[DEBUG] Stats extracted successfully: MCap=${stats['market_cap_usd']:.0f}, Liq=${stats.get('liquidity_usd', 0):.0f}", flush=True)
+                if _DEBUG:
+                    print(f"[DEBUG] Stats: MCap=${stats['market_cap_usd']:.0f}, Liq=${stats.get('liquidity_usd', 0):.0f}", flush=True)
                 
                 # Fetch current price ONCE and reuse it (avoids 3+ redundant calls!)
-                print(f"[DEBUG] Fetching current price once for staleness + validation...", flush=True)
                 current_price = _get_last_price_usd(token_norm, use_cache=True)
-                print(f"[DEBUG] Current price: ${current_price:.8f}", flush=True)
+                if _DEBUG:
+                    print(f"[DEBUG] Current price: ${current_price:.8f}", flush=True)
                 
                 # Check if signal is stale (reuse current_price)
-                print(f"[DEBUG] Checking if signal is stale...", flush=True)
                 _blind = os.getenv("TS_BLIND_BUY", "false").strip().lower() == "true"
                 if not _blind:
                     if _is_stale_signal(stats, current_price=current_price):
                         signals_filtered += 1
-                        engine._log("signal_stale", token=token_norm, 
+                        engine._log("signal_stale", token=token_norm,
                                    alert_price=stats.get("price"),
                                    current_price=current_price)
-                        print(f"[DEBUG] Signal is stale for {token_norm[:8]}", flush=True)
+                        if _DEBUG:
+                            print(f"[DEBUG] Signal is stale for {token_norm[:8]}", flush=True)
                         continue
-                print(f"[DEBUG] Signal is fresh (blind={_blind}), continuing...", flush=True)
+                if _DEBUG:
+                    print(f"[DEBUG] Signal fresh (blind={_blind})", flush=True)
                 
                 # Get signal score and conviction
-                print(f"[DEBUG] Extracting signal_score and conviction_type from stats...", flush=True)
                 signal_score = int(stats.get("final_score", 7))
                 conviction_type = stats.get("conviction_type", "High Confidence (Strict)")
-                print(f"[DEBUG] signal_score={signal_score}, conviction_type={conviction_type}", flush=True)
+                if _DEBUG:
+                    print(f"[DEBUG] score={signal_score}, conviction={conviction_type}", flush=True)
                 
                 # Enforce minimum score unless blind mode
                 # LOWERED FROM 8 TO 7: User's signal provider sends score 7 signals consistently
@@ -1124,43 +1301,57 @@ def run() -> None:
                 if os.getenv("TS_BLIND_BUY", "false").strip().lower() == "true":
                     MIN_SCORE = 0
                 if signal_score < MIN_SCORE:
-                    print(f"[DEBUG] ❌ Signal score {signal_score} below minimum {MIN_SCORE} - SKIPPING", flush=True)
                     signals_filtered += 1
-                    engine._log("entry_rejected_low_score", token=token_norm, 
+                    engine._log("entry_rejected_low_score", token=token_norm,
                                score=signal_score, min_score=MIN_SCORE)
+                    if _DEBUG:
+                        print(f"[DEBUG] ❌ Signal score {signal_score} below minimum {MIN_SCORE}", flush=True)
                     continue
                 
+                # === CONFLUENCE CHECK: Multi-bot signal consensus (Phase 1: shadow mode) ===
+                # Checks if other Telegram signal sources also flagged this token.
+                # Phase 2 will build a full confluence gate that enforces min_confirmations >= 2.
+                # For now, we log the count and attach it to stats for future use.
+                try:
+                    from app.signal_aggregator import get_signal_count
+                    consensus_count = get_signal_count(token_norm)
+                    if consensus_count > 0:
+                        print(f"[CONFLUENCE] 🔗 {token_norm[:8]} seen by {consensus_count} other signal source(s)", flush=True)
+                        engine._log("confluence_signal", token=token_norm,
+                                   consensus_count=consensus_count,
+                                   signal_score=signal_score)
+                    stats["consensus_count"] = consensus_count
+                except Exception as e:
+                    stats["consensus_count"] = 0
+                    if _DEBUG:
+                        print(f"[DEBUG] Signal aggregator check failed: {e}", flush=True)
+                
                 # Calculate expected performance
-                print(f"[DEBUG] Calling get_expected_win_rate({signal_score}, {conviction_type})...", flush=True)
                 try:
                     exp_wr = get_expected_win_rate(signal_score, conviction_type)
-                    print(f"[DEBUG] exp_wr={exp_wr}", flush=True)
                 except Exception as e:
-                    print(f"[DEBUG] ❌ EXCEPTION in get_expected_win_rate: {e}", flush=True)
+                    print(f"[WARN] get_expected_win_rate failed: {e}", flush=True)
                     raise
                 
-                print(f"[DEBUG] Calling get_expected_avg_gain({signal_score}, {conviction_type})...", flush=True)
                 try:
                     exp_gain = get_expected_avg_gain(signal_score, conviction_type)
-                    print(f"[DEBUG] exp_gain={exp_gain}", flush=True)
                 except Exception as e:
-                    print(f"[DEBUG] ❌ EXCEPTION in get_expected_avg_gain: {e}", flush=True)
+                    print(f"[WARN] get_expected_avg_gain failed: {e}", flush=True)
                     raise
                 
                 # Make trade decision
-                print(f"[DEBUG] Calling decide_trade(stats, {signal_score}, {conviction_type})...", flush=True)
                 try:
                     plan = decide_trade(stats, signal_score, conviction_type)
-                    print(f"[DEBUG] decide_trade returned: {plan}", flush=True)
+                    if _DEBUG:
+                        print(f"[DEBUG] decide_trade plan: {plan}", flush=True)
                 except Exception as e:
-                    print(f"[DEBUG] ❌ EXCEPTION in decide_trade: {e}", flush=True)
+                    print(f"[WARN] decide_trade failed: {e}", flush=True)
                     raise
                 
                 if not plan:
                     signals_filtered += 1
-                    engine._log("strategy_rejected", token=token, score=signal_score, 
+                    engine._log("strategy_rejected", token=token, score=signal_score,
                                conviction=conviction_type, reason="failed_filters")
-                    print(f"[DEBUG] Plan is None, signal rejected", flush=True)
                     continue
                 
                 # Final validation: double-check price hasn't moved too much
@@ -1192,7 +1383,7 @@ def run() -> None:
                 # === RUGPULL DETECTION: Prevent -$268 in complete wipeouts ===
                 # Analysis: 8 rugpulls (10.4% of trades) = -$268.65 lost
                 # This check runs BEFORE buying to prevent -100% losses
-                from tradingSystem.rugpull_detector import get_rugpull_detector
+                from src.tradingSystem.rugpull_detector import get_rugpull_detector
                 detector = get_rugpull_detector()
                 liquidity_usd = float(stats.get("liquidity_usd", 0))
                 
@@ -1212,7 +1403,7 @@ def run() -> None:
                 #   - #380, #379, #378: $104 to rugpulls (brand new tokens)
                 #   - #387, #386: $108 to ghost buys (untradeable tokens)
                 # Solution: Validate token age, recent dumps, and tradeability
-                from tradingSystem.pre_entry_validator import get_pre_entry_validator
+                from src.tradingSystem.pre_entry_validator import get_pre_entry_validator
                 pre_validator = get_pre_entry_validator()
                 
                 is_valid, validation_reason = pre_validator.validate_token(token_norm, stats)
@@ -1252,78 +1443,95 @@ def run() -> None:
                 else:
                     print(f"[VALIDATOR] ✅ {validation_reason}", flush=True)
                 
-                # === TIERED ENTRY SYSTEM: Watch & Strike ===
-                # === ULTRA AGGRESSIVE STRATEGY: HIGH CONVICTION INSTANT BUY ===
-                # Score 7-10/10 → INSTANT BUY (trust the signal, catch moonshots early!)
-                # Score 6/10 → Watch List (lower conviction needs momentum confirmation)
-                #
-                # Why aggressive for high scores:
-                # 1. Score 7-10/10 = High quality signals (smart money, conviction)
-                # 2. By waiting 2-5min, tokens already up 20-30% (missed the boat!)
-                # 3. Analysis shows 44% of signals are score 7-9, can't afford to miss them
-                # 4. Safety filters already applied (age, rugpull, Jupiter, dumps)
-                #
-                # Why still cautious for score 6:
-                # 1. Score 6/10 = Moderate signal, needs confirmation
-                # 2. Watch list filters out fake pumps that stall
-                # 3. Only buys if shows real momentum
+                # === ENTRY STRATEGY SYSTEM (2026-05-17 REFACTOR) ===
+                # Replaces the hardcoded tiered system (instant for score>=7, watchlist for score>=6).
+                # Uses pluggable entry strategies routed by score stage.
                 
-                if signal_score >= 7:
-                    # TIER 1: INSTANT ENTRY (Score 7-10/10 - Premium Signals)
-                    conviction_label = "ULTRA HIGH CONVICTION" if signal_score >= 10 else "HIGH QUALITY"
-                    
-                    # MOMENTUM VALIDATION (NOV 2 2025 - ULTRA AGGRESSIVE FOR MOONSHOTS)
-                    # Score 7-10: Instant entry, NO safety check (catch 2x, 5x, 10x runners EARLY!)
-                    print(f"[ENTRY] 🚀🚀 {conviction_label} (Score {signal_score}/10) → INSTANT ENTRY", flush=True)
-                    print(f"[ENTRY] Strategy: Trust premium signal, catch moonshot early with ${plan['usd_size']:.2f}", flush=True)
-                    # Continue to position opening below
-                    
-                elif signal_score >= 6:
-                    # TIER 2: WATCH LIST (Score 6/10 - Needs Momentum Confirmation)
-                    print(f"[WATCHLIST] 📊 MEDIUM CONVICTION SIGNAL: {token_norm[:8]} (score {signal_score}/10)", flush=True)
-                    print(f"[WATCHLIST] 💡 Strategy: Track movement for 2-5min, enter if shows real momentum", flush=True)
-                    
-                    # Add to watch list
-                    signal_timestamp = float(stats.get("timestamp") or stats.get("ts") or time.time())
-                    signal_price = current_price if current_price > 0 else float(stats.get("price", 0))
-                    
-                    watch_manager.add_signal(
-                        token=token_norm,
-                        signal_time=signal_timestamp,
-                        signal_price=signal_price,
-                        signal_score=signal_score,
-                        conviction=conviction_type
-                    )
-                    
+                # Get score stage metadata
+                size_mult, preferred_strategy, stage_label = get_score_stage(signal_score)
+                
+                entry_strat = get_entry_strategy()
+                signal_price_for_entry = float(stats.get("price", 0)) or current_price
+                
+                entry_decision = entry_strat.evaluate(
+                    token=token_norm,
+                    signal_price=signal_price_for_entry,
+                    current_price=current_price,
+                    score=signal_score,
+                    stats=stats,
+                )
+                
+                print(
+                    f"[ENTRY] {token_norm[:8]} | score={signal_score} | "
+                    f"stage={stage_label} | strategy={type(entry_strat).__name__} | "
+                    f"decision={entry_decision.should_enter} | {entry_decision.reason}",
+                    flush=True,
+                )
+                engine._log(
+                    "entry_strategy_eval",
+                    token=token_norm,
+                    score=signal_score,
+                    stage_label=stage_label,
+                    size_mult=size_mult,
+                    strategy=type(entry_strat).__name__,
+                    should_enter=entry_decision.should_enter,
+                    reason=entry_decision.reason,
+                )
+                
+                if not entry_decision.should_enter:
+                    # Not entering yet -- strategy wants to delay/watch
                     signals_filtered += 1
-                    engine._log("signal_watchlisted", 
-                               token=token_norm, 
-                               score=signal_score,
-                               conviction=conviction_type,
-                               signal_price=signal_price,
-                               strategy="watch_and_strike")
-                    print(f"[WATCHLIST] ✅ Tracking {token_norm[:8]} | Will buy if +5% at 2%/min velocity", flush=True)
-                    continue  # Don't buy yet! Watch list monitor will recommend when ready
+                    
+                    # If strategy needs re-evaluation, add to watchlist
+                    if entry_decision.delay_seconds > 0:
+                        signal_timestamp = float(stats.get("timestamp") or stats.get("ts") or time.time())
+                        watch_manager.add_signal(
+                            token=token_norm,
+                            signal_time=signal_timestamp,
+                            signal_price=signal_price_for_entry,
+                            signal_score=signal_score,
+                            conviction=conviction_type,
+                        )
+                        engine._log(
+                            "entry_deferred",
+                            token=token_norm,
+                            delay_seconds=entry_decision.delay_seconds,
+                            reason=entry_decision.reason,
+                        )
+                    continue
+                
+                # NOTE: size_mult already applied inside get_position_size() via SCORE_STAGE_MAP.
+                # No secondary adjustment needed -- single source of truth for sizing.
                 
                 # Execute trade
-                print(f"[DEBUG] Logging trade decision for {token_norm[:8]}...", flush=True)
                 engine._log("trade_decision", token=token_norm, score=signal_score,
                            conviction=conviction_type, usd_size=plan["usd_size"],
                            trail_pct=plan["trail_pct"], expected_wr=exp_wr,
                            expected_gain=exp_gain)
-                print(f"[DEBUG] Trade decision logged, attempting to open position for {token_norm[:8]}...", flush=True)
-                print(f"[DEBUG] Plan details: {plan}", flush=True)
+                if _DEBUG:
+                    print(f"[DEBUG] Trade decision logged | {plan}", flush=True)
+                
+                # INJECT NEW METADATA FOR LOGGING
+                plan["score"] = signal_score
+                plan["market_cap"] = stats.get("market_cap_usd")
+                plan["token_age"] = stats.get("token_age") or stats.get("age") or 0
+                plan["entry_strategy"] = entry_decision.reason
+                plan["time_to_entry"] = time.time() - float(stats.get("timestamp") or stats.get("ts") or time.time())
+                plan["signal_source"] = ev.get("source", "unknown")
                 
                 try:
-                    print(f"[DEBUG] Calling engine.open_position({token_norm[:8]}, plan)...", flush=True)
+                    if _DEBUG:
+                        print(f"[DEBUG] Calling engine.open_position({token_norm[:8]}, plan)...", flush=True)
                     pid = engine.open_position(token_norm, plan)
-                    print(f"[DEBUG] engine.open_position returned: {pid}", flush=True)
+                    if _DEBUG:
+                        print(f"[DEBUG] engine.open_position returned: {pid}", flush=True)
                     
                     if pid:
                         positions_opened += 1
                         engine._log("position_opened_success", token=token_norm, pid=pid,
                                    total_positions=positions_opened)
-                        print(f"[DEBUG] ✅ Position opened successfully: {pid}", flush=True)
+                        if _DEBUG:
+                            print(f"[DEBUG] ✅ Position opened successfully: {pid}", flush=True)
                         
                         # Mark in watch list (for high-conviction instant entries)
                         if signal_score >= 8:
@@ -1331,17 +1539,17 @@ def run() -> None:
                             print(f"[WATCHLIST] ✅ Marked {token_norm[:8]} as entered (instant entry)", flush=True)
                     else:
                         engine._log("position_open_failed", token=token_norm)
-                        print(f"[DEBUG] ❌ Position open failed (returned None)", flush=True)
+                        print(f"[⚠️ TRADE] open_position returned None for {token_norm[:8]}", flush=True)
                 except Exception as e:
                     engine._log("position_open_exception", token=token_norm, error=str(e))
-                    print(f"[DEBUG] ❌ Exception in engine.open_position: {e}", flush=True)
+                    print(f"[⚠️ TRADE] Exception in open_position for {token_norm[:8]}: {e}", flush=True)
                     import traceback
                     traceback.print_exc()
                 
             except Exception as e:
-                print(f"[DEBUG] ❌ EXCEPTION in signal processing loop: {e}", flush=True)
+                print(f"[⚠️ LOOP] Signal processing error: {e}", flush=True)
                 import traceback
-                print(f"[DEBUG] Traceback: {traceback.format_exc()}", flush=True)
+                traceback.print_exc()
                 engine._log("signal_processing_error", error=str(e), token=token)
                 continue
     

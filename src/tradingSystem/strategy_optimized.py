@@ -158,7 +158,16 @@ def get_expected_avg_gain(signal_score: int, conviction_type: str) -> float:
     Returns avg gain as percentage (e.g., 96.0 for 96%)
     """
     # Based on verified data
-    if signal_score >= 8:
+    # CRITICAL: Check highest scores first to avoid unreachable branches
+    if signal_score >= 9:
+        if "Smart Money" in conviction_type:
+            return 254.0  # Score 9 Smart Money = premium
+        elif "Strict" in conviction_type:
+            return 103.0  # Strict can moon
+        else:
+            return 37.0  # Score 9 proven baseline
+    
+    elif signal_score >= 8:
         if "Smart Money" in conviction_type:
             return 254.0  # Score 8 Smart Money = BEST
         elif "Strict" in conviction_type:
@@ -171,9 +180,6 @@ def get_expected_avg_gain(signal_score: int, conviction_type: str) -> float:
             return 68.0  # Score 7 Smart Money proven
         else:
             return 50.0  # Conservative
-    
-    elif signal_score >= 9:
-        return 37.0  # Score 9 proven
     
     # Overall baseline
     return 96.0

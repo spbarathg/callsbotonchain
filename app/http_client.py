@@ -1,11 +1,12 @@
 from typing import Any, Dict, Optional, Tuple
 from datetime import datetime, timedelta
+import time
 
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 from app.config_unified import HTTP_MAX_RETRIES, HTTP_BACKOFF_FACTOR
-from app.config_unified import HTTP_ALLOW_HOSTS
+from app.config_unified import HTTP_ALLOW_HOSTS, HTTP_REQUEST_JITTER_MS, HTTP_PROXY, HTTPS_PROXY
 from app.metrics import inc_api_call
 from app.http_headers import merge_headers
 
@@ -178,8 +179,29 @@ def request_json(method: str, url: str, *, params: Optional[Dict[str, Any]] = No
         }
     except Exception:
         pass
+    # Optional jitter to reduce burst patterns and CF/WAF blocks
+    if HTTP_REQUEST_JITTER_MS > 0:
+        try:
+            import random
+            time.sleep(random.uniform(0, HTTP_REQUEST_JITTER_MS) / 1000.0)
+        except Exception:
+            pass
     try:
-        resp = sess.request(method.upper(), url, params=params, headers=merged_headers, json=json, timeout=timeout)
+        proxies = None
+        if HTTP_PROXY or HTTPS_PROXY:
+            proxies = {
+                "http": HTTP_PROXY or HTTPS_PROXY,
+                "https": HTTPS_PROXY or HTTP_PROXY,
+            }
+        resp = sess.request(
+            method.upper(),
+            url,
+            params=params,
+            headers=merged_headers,
+            json=json,
+            timeout=timeout,
+            proxies=proxies,
+        )
         result: Dict[str, Any] = {"status_code": resp.status_code}
         try:
             result["json"] = resp.json()

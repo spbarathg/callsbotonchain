@@ -2,7 +2,7 @@
 import time
 import json
 import os
-from app.config_unified import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, TELEGRAM_ENABLED
+from app.config_unified import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, TELEGRAM_ENABLED, TELEGRAM_TRADE_ONLY
 from app.config_unified import HTTP_TIMEOUT_TELEGRAM
 from app.http_client import request_json
 
@@ -108,6 +108,11 @@ def send_telegram_alert(message: str) -> bool:
     # If Telegram is not configured, no-op so the rest of the pipeline continues
     if not TELEGRAM_ENABLED:
         return True
+    # Optional: only allow trade execution alerts
+    if TELEGRAM_TRADE_ONLY:
+        allowed_prefixes = ("✅ BUY", "✅ SELL", "✅ PARTIAL SELL")
+        if not any(message.startswith(prefix) for prefix in allowed_prefixes):
+            return True
 
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     data = {

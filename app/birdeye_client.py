@@ -2,6 +2,7 @@
 Birdeye API client with global rate limiting (Lite plan safe defaults).
 """
 import time
+import os
 import threading
 from typing import Dict, Any, Optional
 
@@ -44,9 +45,14 @@ def get_price(token_address: str) -> Dict[str, Any]:
     if not birdeye_enabled():
         return {}
     _enforce_rate_limit(max(1, int(BIRDEYE_RPS or 0)))
-    url = "https://public-api.birdeye.so/defi/price"
+    base_url = os.getenv("BIRDEYE_API_BASE_URL", "https://public-api.birdeye.so")
+    url = f"{base_url}/defi/price"
     headers = {"X-API-KEY": BIRDEYE_API_KEY}
     result = request_json("GET", url, params={"address": token_address}, headers=headers, timeout=10)
+    if result.get("status_code") == 401 and "public-api.birdeye.so" in base_url:
+        # Retry on the paid endpoint if public key scope differs
+        url = "https://api.birdeye.so/defi/price"
+        result = request_json("GET", url, params={"address": token_address}, headers=headers, timeout=10)
     if result.get("status_code") != 200:
         return {}
     data = result.get("json") or {}

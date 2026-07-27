@@ -32,12 +32,14 @@ def _get_bool(name: str, default: bool) -> bool:
 
 
 # ==================== WALLET & EXECUTION ====================
-RPC_URL = os.getenv("TS_RPC_URL", "https://api.mainnet-beta.solana.com")
+# CRITICAL FIX: Use Helius/Triton private RPC by default. Public RPC causes load-balancing 
+# ghost positions and false "dust closures".
+RPC_URL = os.getenv("TS_RPC_URL", "https://mainnet.helius-rpc.com/?api-key=YOUR_HELIUS_API_KEY")
 WALLET_SECRET = os.getenv("TS_WALLET_SECRET", "")
 SLIPPAGE_BPS = _get_int("TS_SLIPPAGE_BPS", 2000)  # 20.0% default per strategy
 # Priority fee policy (free/low-cost): dynamic bump within [min,max]
 # INCREASED from 5000 to 10000 min to improve transaction success rate
-# Error 6024 often caused by low priority → transaction gets dropped
+# Error 6024 often caused by low priority -> transaction gets dropped
 PRIORITY_FEE_MIN_MICROLAMPORTS = _get_int("TS_PRIORITY_FEE_MIN_MICROLAMPORTS", 10000)
 PRIORITY_FEE_MAX_MICROLAMPORTS = _get_int("TS_PRIORITY_FEE_MAX_MICROLAMPORTS", 50000)
 # Backward-compat constant if referenced elsewhere
@@ -64,7 +66,7 @@ BANKROLL_USD = _get_float("TS_BANKROLL_USD", 20)
 # NOTE: Position sizing uses get_position_size() which will query actual balance
 # This default is only used for circuit breaker calculations
 
-MAX_CONCURRENT = _get_int("TS_MAX_CONCURRENT", 5)  # 5 positions for NET STRATEGY ($100+ per position)
+MAX_CONCURRENT = _get_int("TS_MAX_CONCURRENT", 3)  # REDUCED: 3 positions for BIGGER bets (~$30 each)
 
 # NET STRATEGY MODE: Equal-weighted portfolio for compounding
 # ENABLED: Cast wide net, equal-weight all signals, close net at 5x portfolio gain
@@ -89,12 +91,28 @@ SCORE_9_MULT = _get_float("TS_SCORE_9_MULT", 1.0)   # 100%
 SCORE_8_MULT = _get_float("TS_SCORE_8_MULT", 1.3)   # 130% - BEST PERFORMER!
 SCORE_7_MULT = _get_float("TS_SCORE_7_MULT", 0.9)   # 90%
 
-# Max position size (safety) - AGGRESSIVE MODE for maximum impact
-MAX_POSITION_SIZE_PCT = _get_float("TS_MAX_POSITION_SIZE_PCT", 33.0)  # Max 33% of bankroll - GO BIG!
-MAX_POSITION_SIZE_USD = BANKROLL_USD * (MAX_POSITION_SIZE_PCT / 100.0)
+# Max position size (safety) - percentage of CURRENT balance
+MAX_POSITION_SIZE_PCT = _get_float("TS_MAX_POSITION_SIZE_PCT", 33.0)  # Max 33% of bankroll
+# NOTE: MAX_POSITION_SIZE_USD is now DYNAMIC - use get_max_position_usd() instead
+# This legacy constant is kept for backward compatibility but should not be used
+MAX_POSITION_SIZE_USD = 100.0  # Placeholder - use get_max_position_usd() for actual value
 
 # ==================== STOPS & TRAILS ====================
 # Optimized for 96% avg gain and 42% WR
+
+# ==================== SMART PROFIT TAKING MODE 💰 ====================
+# Based on trade analysis: Trail exits profitable, but need to lock gains earlier
+# SOLUTION: Aggressive profit taking + tight trails to protect gains
+
+# SCAM DETECTION: DISABLED by default - it was wrong 96% of the time!
+SCAM_DETECTION_ENABLED = _get_bool("TS_SCAM_DETECTION_ENABLED", False)
+
+# MINIMUM HOLD TIME: 2 minutes (allow quick exits on real dumps)
+MIN_HOLD_SECONDS = _get_float("TS_MIN_HOLD_SECONDS", 120.0)  # 2 minutes minimum
+
+# TRAIL ONLY IN PROFIT: Don't trail positions that are underwater
+# This prevents trailing stops from triggering on losing positions
+TRAIL_ONLY_IN_PROFIT = _get_bool("TS_TRAIL_ONLY_IN_PROFIT", True)
 
 # ==================== MOONSHOT MODE - LET WINNERS RUN! 🚀 ====================
 # PHILOSOPHY: Your signal bot finds 5-10x movers. The trading bot should RIDE them,
@@ -129,10 +147,10 @@ EMERGENCY_HARD_STOP_PCT = _get_float("TS_EMERGENCY_HARD_STOP_PCT", 30.0)  # -30%
 #
 # Example (Mika token):
 # - Entry: $1.19
-# - At +50% ($1.78): Use 50% trail → needs -50% drop to exit (won't happen in pump)
-# - At +100% ($2.38): Use 35% trail → needs -35% drop to exit
-# - At +200% ($3.57): Use 25% trail → needs -25% drop to exit  
-# - At +400% ($5.95): Use 20% trail → locks in 300%+ profit on pullback
+# - At +50% ($1.78): Use 50% trail -> needs -50% drop to exit (won't happen in pump)
+# - At +100% ($2.38): Use 35% trail -> needs -35% drop to exit
+# - At +200% ($3.57): Use 25% trail -> needs -25% drop to exit  
+# - At +400% ($5.95): Use 20% trail -> locks in 300%+ profit on pullback
 #
 # Result: Rides the full pump, exits on real reversal, not small dips!
 
@@ -150,9 +168,9 @@ PROFIT_TIER_5 = _get_float("TS_PROFIT_TIER_5", 800.0)  # Fifth milestone: +800% 
 # CRITICAL FIX: Don't exit winners on normal volatility!
 # Key insight: Memecoins dip 15-25% routinely before 10x - trails must accommodate this
 # Strategy: Hard stop-loss at entry (-12%) protects capital, wide trails let runners breathe
-TRAIL_TIER_0 = _get_float("TS_TRAIL_TIER_0", 20.0)  # 0-30% profit: 20% trail - room to breathe!
-TRAIL_TIER_1 = _get_float("TS_TRAIL_TIER_1", 25.0)  # 30-80% profit: 25% trail - confirmed runner
-TRAIL_TIER_2 = _get_float("TS_TRAIL_TIER_2", 30.0)  # 80-150% profit: 30% trail - strong runner
+TRAIL_TIER_0 = _get_float("TS_TRAIL_TIER_0", 30.0)  # 0-30% profit: 30% trail - WIDER to survive shakeouts!
+TRAIL_TIER_1 = _get_float("TS_TRAIL_TIER_1", 28.0)  # 30-80% profit: 28% trail - confirmed runner
+TRAIL_TIER_2 = _get_float("TS_TRAIL_TIER_2", 32.0)  # 80-150% profit: 32% trail - strong runner
 TRAIL_TIER_3 = _get_float("TS_TRAIL_TIER_3", 35.0)  # 150-300% profit: 35% trail - mega runner
 TRAIL_TIER_4 = _get_float("TS_TRAIL_TIER_4", 42.0)  # 300-800% profit: 42% trail - approaching 10x
 TRAIL_TIER_5 = _get_float("TS_TRAIL_TIER_5", 50.0)  # 800-5000% profit: 50% trail - moonshot (10x-50x)
@@ -221,10 +239,11 @@ EXIT_CHECK_INTERVAL_SEC = _get_float("TS_EXIT_CHECK_INTERVAL", 10.0)  # Increase
 # Signal detection uses DexScreener + ATM (proven win rates)
 JUPITER_PRICE_CACHE_TTL = _get_int("TS_JUPITER_PRICE_CACHE_TTL", 10)
 
-# ==================== CIRCUIT BREAKERS ====================
-# DISABLED: Let the bot trade freely (Jupiter oracle will protect with proper stop losses)
-MAX_DAILY_LOSS_PCT = _get_float("TS_MAX_DAILY_LOSS_PCT", 999999.0)  # Effectively disabled
-MAX_CONSECUTIVE_LOSSES = _get_int("TS_MAX_CONSECUTIVE_LOSSES", 999999)  # Effectively disabled
+# ==================== CIRCUIT BREAKERS (LEGACY - see circuit_breaker.py) ====================
+# NOTE: Actual circuit breaker logic is in circuit_breaker.py with DYNAMIC limits
+# These are kept for backward compatibility but should not be used directly
+MAX_DAILY_LOSS_PCT = _get_float("TS_DAILY_LOSS_LIMIT_PCT", 3.0)  # 3% of equity per day
+MAX_CONSECUTIVE_LOSSES = _get_int("TS_MAX_CONSECUTIVE_LOSSES", 4)  # Cooldown after 4 losses
 
 # ==================== ENTRY FILTERS ====================
 # These are for additional validation beyond signal score
@@ -246,11 +265,13 @@ PYRAMIDING_ENABLED = _get_bool("TS_PYRAMIDING_ENABLED", True)  # Default enabled
 PYRAMIDING_MAX_ADDS = int(os.getenv("TS_PYRAMIDING_MAX_ADDS", "2"))  # Max 2 adds per position
 PYRAMIDING_MIN_PROFIT_PCT = float(os.getenv("TS_PYRAMIDING_MIN_PROFIT_PCT", "40.0"))  # Add at 40%+ profit
 
-# ==================== CIRCUIT BREAKER & LOSS LIMITS ====================
-CIRCUIT_BREAKER_ENABLED = _get_bool("TS_CIRCUIT_BREAKER_ENABLED", True)  # Default enabled
-DAILY_LOSS_LIMIT_USD = float(os.getenv("TS_DAILY_LOSS_LIMIT_USD", "100.0"))  # $100 per day
-WEEKLY_LOSS_LIMIT_USD = float(os.getenv("TS_WEEKLY_LOSS_LIMIT_USD", "300.0"))  # $300 per week
-CONSECUTIVE_LOSS_LIMIT = int(os.getenv("TS_CONSECUTIVE_LOSS_LIMIT", "3"))  # Halt after 3 losses
+# ==================== CIRCUIT BREAKER & LOSS LIMITS (DYNAMIC) ====================
+# NOTE: The actual CircuitBreaker class (circuit_breaker.py) uses PERCENTAGE-based limits
+# that scale automatically when you add capital. These are fallback defaults.
+CIRCUIT_BREAKER_ENABLED = _get_bool("TS_CIRCUIT_BREAKER_ENABLED", True)
+DAILY_LOSS_LIMIT_PCT = _get_float("TS_DAILY_LOSS_LIMIT_PCT", 3.0)  # 3% of equity per day
+WEEKLY_LOSS_LIMIT_PCT = _get_float("TS_WEEKLY_LOSS_LIMIT_PCT", 10.0)  # 10% of equity per week
+CONSECUTIVE_LOSS_LIMIT = int(os.getenv("TS_CONSECUTIVE_LOSS_LIMIT", "4"))  # 4 losses -> cooldown
 EXCESSIVE_SLIPPAGE_THRESHOLD = float(os.getenv("TS_EXCESSIVE_SLIPPAGE_THRESHOLD", "10.0"))  # 10% slippage
 SLIPPAGE_EVENT_LIMIT = int(os.getenv("TS_SLIPPAGE_EVENT_LIMIT", "5"))  # 5 events in 1 hour
 
@@ -263,11 +284,184 @@ PORTFOLIO_REBALANCE_COOLDOWN = _get_int("PORTFOLIO_REBALANCE_COOLDOWN", 300)  # 
 PORTFOLIO_MIN_POSITION_AGE = _get_int("PORTFOLIO_MIN_POSITION_AGE", 600)  # 10 min before can be replaced
 
 
+# ==================== EQUITY CURVE TRACKING (PERSISTENT) ====================
+# Track high water mark and current equity for drawdown-based sizing
+# High water mark is persisted to survive restarts
+
+_EQUITY_STATE_FILE = os.getenv("TS_EQUITY_STATE_FILE", "var/equity_state.json")
+_equity_high_water_mark = None
+_last_equity_check = 0.0
+_initial_capital = None  # Track starting capital for ROI calculation
+
+
+def _load_equity_state() -> dict:
+    """Load persisted equity state from disk"""
+    try:
+        if os.path.exists(_EQUITY_STATE_FILE):
+            with open(_EQUITY_STATE_FILE, 'r') as f:
+                import json
+                return json.load(f)
+    except Exception:
+        pass
+    return {}
+
+
+def _save_equity_state(state: dict) -> None:
+    """Persist equity state to disk"""
+    try:
+        os.makedirs(os.path.dirname(_EQUITY_STATE_FILE), exist_ok=True)
+        with open(_EQUITY_STATE_FILE, 'w') as f:
+            import json
+            json.dump(state, f, indent=2)
+    except Exception as e:
+        print(f"[EQUITY] Could not save state: {e}")
+
+
+def _get_equity_state() -> dict:
+    """
+    Get current equity state including drawdown percentage.
+    
+    PERSISTENT: High water mark survives restarts.
+    DYNAMIC: Automatically detects when you add capital.
+    """
+    global _equity_high_water_mark, _last_equity_check, _initial_capital
+    import time
+    
+    current_equity = get_current_bankroll()
+    now = time.time()
+    
+    # Load persisted state on first call
+    if _equity_high_water_mark is None:
+        saved = _load_equity_state()
+        _equity_high_water_mark = saved.get("high_water_mark", current_equity)
+        _initial_capital = saved.get("initial_capital", current_equity)
+    
+    # IMPORTANT: Detect capital injection (user adding funds)
+    # If current equity > high water mark, it could be:
+    # 1. Profits (good!) - high water mark should update
+    # 2. Capital injection - initial capital should update too
+    # We detect injection if jump is >20% in a short period
+    if current_equity > _equity_high_water_mark:
+        jump_pct = ((current_equity - _equity_high_water_mark) / _equity_high_water_mark) * 100
+        if jump_pct > 20:
+            # Likely capital injection - update initial capital too
+            print(f"[EQUITY] Capital injection detected: ${_equity_high_water_mark:.2f} -> ${current_equity:.2f} (+{jump_pct:.1f}%)")
+            _initial_capital = current_equity
+        
+        _equity_high_water_mark = current_equity
+        _save_equity_state({
+            "high_water_mark": _equity_high_water_mark,
+            "initial_capital": _initial_capital,
+            "last_updated": now
+        })
+    
+    # Calculate drawdown from peak
+    drawdown_pct = 0.0
+    if _equity_high_water_mark > 0:
+        drawdown_pct = ((_equity_high_water_mark - current_equity) / _equity_high_water_mark) * 100
+    
+    # Calculate ROI from initial capital
+    roi_pct = 0.0
+    if _initial_capital and _initial_capital > 0:
+        roi_pct = ((current_equity - _initial_capital) / _initial_capital) * 100
+    
+    return {
+        "current_equity": current_equity,
+        "high_water_mark": _equity_high_water_mark,
+        "initial_capital": _initial_capital,
+        "drawdown_pct": drawdown_pct,
+        "roi_pct": roi_pct,
+        "is_in_drawdown": drawdown_pct > 5.0,  # >5% from peak = drawdown
+        "is_severe_drawdown": drawdown_pct > 10.0,  # >10% = severe
+        "is_profitable": roi_pct > 0,
+    }
+
+
+def get_drawdown_multiplier() -> float:
+    """
+    Get position size multiplier based on equity curve health.
+    
+    ASYMMETRIC RISK MANAGEMENT:
+    - In profit/flat: 1.0x (full size)
+    - 5-10% drawdown: 0.7x (reduce risk)
+    - 10-15% drawdown: 0.5x (significant reduction)
+    - >15% drawdown: 0.3x (survival mode)
+    
+    This ensures we survive consecutive losses while preserving
+    capital for when conditions improve.
+    """
+    state = _get_equity_state()
+    dd = state["drawdown_pct"]
+    
+    if dd <= 5.0:
+        return 1.0  # Full size
+    elif dd <= 10.0:
+        return 0.7  # Reduce by 30%
+    elif dd <= 15.0:
+        return 0.5  # Reduce by 50%
+    else:
+        return 0.3  # Survival mode
+
+
+def reset_equity_tracking(new_initial_capital: float = None) -> dict:
+    """
+    Reset equity tracking after adding significant capital.
+    
+    Call this when you add a lot of new capital and want to
+    start tracking ROI from the new baseline.
+    
+    Args:
+        new_initial_capital: New starting capital (or None to use current balance)
+    
+    Returns:
+        New equity state
+    """
+    import time as _time
+    global _equity_high_water_mark, _initial_capital
+    
+    current = get_current_bankroll()
+    _equity_high_water_mark = new_initial_capital or current
+    _initial_capital = new_initial_capital or current
+    
+    _save_equity_state({
+        "high_water_mark": _equity_high_water_mark,
+        "initial_capital": _initial_capital,
+        "last_updated": _time.time(),
+        "reset_reason": "manual_reset"
+    })
+    
+    print(f"[EQUITY] Tracking reset: Initial=${_initial_capital:.2f}, HWM=${_equity_high_water_mark:.2f}")
+    return _get_equity_state()
+
+
+def get_profitability_summary() -> dict:
+    """
+    Get a summary of overall profitability for monitoring.
+    
+    Use this to check if the bot is profitable over time.
+    """
+    state = _get_equity_state()
+    
+    return {
+        "current_equity": state["current_equity"],
+        "initial_capital": state["initial_capital"],
+        "roi_pct": state["roi_pct"],
+        "is_profitable": state["is_profitable"],
+        "high_water_mark": state["high_water_mark"],
+        "drawdown_pct": state["drawdown_pct"],
+        "drawdown_multiplier": get_drawdown_multiplier(),
+        "position_size": get_net_position_size() if NET_STRATEGY_MODE else None,
+    }
+
+
 # ==================== HELPER FUNCTIONS ====================
 def get_current_bankroll() -> float:
     """
     Get current wallet balance dynamically.
     Reads actual SOL+USDC balance instead of using hardcoded value.
+    
+    CRITICAL: This is the source of truth for all position sizing.
+    When you add capital, this automatically detects it.
     """
     # Try to read actual balance
     try:
@@ -282,101 +476,120 @@ def get_current_bankroll() -> float:
     return BANKROLL_USD
 
 
-def get_net_position_size() -> float:
+def get_max_position_usd() -> float:
     """
-    NET STRATEGY: Equal-weight all positions for maximum diversification
+    Get maximum position size in USD based on CURRENT balance.
     
-    Formula:
-      Position Size = Total Balance / Max Positions / 2
-      
-    Example:
-      $100 balance / 15 positions / 2 = $3.33 per position
-      
-    Divide by 2 to keep 50% reserve for pyramiding, gas, and compounding
-    
-    Benefits:
-    - Captures cumulative returns across entire market
-    - No position too small (misses gains) or too large (concentrated risk)
-    - Automatic scaling as balance grows
+    DYNAMIC: Automatically scales when you add capital.
+    Example: If you add $100, max position instantly increases.
     """
     current_balance = get_current_bankroll()
-    net_size = current_balance / MAX_CONCURRENT / 2.0
+    max_usd = current_balance * (MAX_POSITION_SIZE_PCT / 100.0)
+    return max_usd
+
+
+def get_net_position_size() -> float:
+    """
+    NET STRATEGY: Equal-weight all positions with EQUITY-CURVE AWARENESS
     
-    # Minimum $0.50 (gas + slippage), Maximum $200 per position (increased for user request)
-    # User wants $100+ per signal, so increased cap from $50 to $200
-    net_size = max(0.50, min(net_size, 200.0))
+    Formula:
+      Base Size = Total Balance / Max Positions / 1.5
+      Final Size = Base Size × Drawdown Multiplier
+      
+    Example (healthy equity):
+      $26 balance / 2 positions / 1.5 = $8.67 per position × 1.0 = $8.67
+      
+    Example (10% drawdown):
+      $26 balance / 2 positions / 1.5 = $8.67 per position × 0.7 = $6.07
     
-    print(f"[NET] Position size: ${net_size:.2f} (balance=${current_balance:.2f}, max_pos={MAX_CONCURRENT})", flush=True)
+    ASYMMETRIC SIZING:
+    - Reduces position size during drawdowns
+    - Preserves capital for recovery
+    - Full size when equity curve is healthy
+    """
+    current_balance = get_current_bankroll()
+    dd_mult = get_drawdown_multiplier()
+    state = _get_equity_state()
+    
+    # Base size: balance / positions / 1.5 (use ~67% of balance)
+    base_size = current_balance / MAX_CONCURRENT / 1.5
+    
+    # Apply drawdown multiplier
+    net_size = base_size * dd_mult
+    
+    # Minimum $2.00 (covers gas + meaningful position), Maximum $200 per position
+    net_size = max(2.00, min(net_size, 200.0))
+    
+    # Log equity state for monitoring
+    dd_pct = state["drawdown_pct"]
+    if dd_pct > 0:
+        print(f"[NET] Position: ${net_size:.2f} (base=${base_size:.2f} × {dd_mult}x) | DD: {dd_pct:.1f}% from ${state['high_water_mark']:.2f}", flush=True)
+    else:
+        print(f"[NET] Position: ${net_size:.2f} (balance=${current_balance:.2f}, max_pos={MAX_CONCURRENT})", flush=True)
     
     return net_size
 
 
 def get_position_size(score: int, conviction_type: str) -> float:
     """
-    Calculate optimal position size based on proven performance AND current balance.
+    Calculate optimal position size with EQUITY-CURVE AWARENESS.
     
-    NET STRATEGY MODE: Equal weighting (ignore score/conviction)
-    STANDARD MODE: Score-based sizing
+    NET STRATEGY MODE: Equal weighting with drawdown scaling
+    STANDARD MODE: Score-based sizing with drawdown scaling
+    
+    ASYMMETRIC RISK MANAGEMENT:
+    - Full size when equity curve healthy
+    - Reduced size during drawdowns (preserve capital)
+    - Never risk more than can survive 30 consecutive losses
     
     Based on actual data:
     - Score 8: 50% WR, 254% avg gain
     - Score 7: 50% WR, 68% avg gain
     - Score 9: 33% WR, 37% avg gain
-    - Smart Money: 57% WR
-    - Strict: 30% WR
     """
-    # NET STRATEGY: Equal-weighted positions (cast wide net)
+    # NET STRATEGY: Equal-weighted positions with drawdown awareness
     if NET_STRATEGY_MODE:
         return get_net_position_size()
     
-    # STANDARD MODE: Score-based sizing (old logic)
-    # Get ACTUAL current bankroll (not hardcoded)
+    # STANDARD MODE: Score-based sizing with drawdown awareness
     current_bankroll = get_current_bankroll()
+    dd_mult = get_drawdown_multiplier()
+    state = _get_equity_state()
     
-    # Calculate base percentage (not absolute USD)
-    # This way it scales with balance automatically
-    # AGGRESSIVE MODE: 20-25% base sizes for MAXIMUM IMPACT
-    # With $1000 balance: $200-325 per trade (GO BIG!)
-    # Philosophy: Fewer positions, bigger bets, extraordinary returns
+    # Calculate base percentage (conservative for small capital)
+    # With $26 balance: max ~35% = $9 per position
     if "Smart Money" in conviction_type:
-        base_pct = 25.0  # 25% of balance - SMART MONEY PREMIUM
+        base_pct = 35.0  # 35% of balance - SMART MONEY
     elif "Strict" in conviction_type:
-        base_pct = 22.0  # 22% of balance - HIGH CONVICTION
+        base_pct = 30.0  # 30% of balance - HIGH CONVICTION
     else:
-        base_pct = 20.0  # 20% of balance - SOLID BASE
+        base_pct = 25.0  # 25% of balance - STANDARD
     
-    # Apply score multiplier
-    if score >= 10:
-        multiplier = SCORE_10_MULT
-    elif score >= 9:
-        multiplier = SCORE_9_MULT
-    elif score >= 8:
-        multiplier = SCORE_8_MULT  # Best performer!
-    else:
-        multiplier = SCORE_7_MULT
+    # Apply score-based size multiplier from SCORE_STAGE_MAP
+    # REFACTOR (2026-05-17): Replaced inverted SCORE_*_MULT constants.
+    # Forensic data shows: low score = early stage = best performers = larger size.
+    # High score = late stage = already pumped = smaller size.
+    stage_mult, _, stage_label = get_score_stage(score)
+    multiplier = stage_mult
     
-    # Calculate size as percentage of CURRENT balance
+    # Calculate base size as percentage of CURRENT balance
     size_pct = base_pct * multiplier
-    size = current_bankroll * (size_pct / 100.0)
+    base_size = current_bankroll * (size_pct / 100.0)
     
-    # AGGRESSIVE MODE: Kelly overlay DISABLED - go for maximum impact!
-    # In standard mode, Kelly limits size for "safety"
-    # In aggressive mode, we TRUST the signal and size for EXTRAORDINARY returns
-    # Comment out Kelly cap to let big positions through
-    # try:
-    #     from .strategy_optimized import get_expected_win_rate, get_expected_avg_gain, get_kelly_fraction
-    #     win_rate = get_expected_win_rate(score, conviction_type)
-    #     avg_gain = get_expected_avg_gain(score, conviction_type)
-    #     kelly = get_kelly_fraction(win_rate, avg_gain)
-    #     fractional_kelly = max(0.0, min(kelly * 0.25, 0.25))
-    #     kelly_size = current_bankroll * fractional_kelly
-    #     size = min(size, kelly_size)
-    # except Exception:
-    #     pass
+    # Apply drawdown multiplier (reduces size when losing)
+    size = base_size * dd_mult
     
     # Cap at max percentage of current balance
     max_size = current_bankroll * (MAX_POSITION_SIZE_PCT / 100.0)
     size = min(size, max_size)
+    
+    # Minimum $2 to cover fees + have meaningful position
+    size = max(2.0, size)
+    
+    # Log if in drawdown
+    dd_pct = state["drawdown_pct"]
+    if dd_pct > 5:
+        print(f"[SIZE] ${size:.2f} (base=${base_size:.2f} × {dd_mult}x DD mult) | Score:{score} | Stage:{stage_label} | DD:{dd_pct:.1f}%", flush=True)
     
     return size
 
@@ -452,11 +665,11 @@ Overall Expected Performance:
 By Score:
 - Score 10: 0% WR (sample too small)
 - Score 9: 33% WR, 37% avg gain
-- Score 8: 50% WR, 254% avg gain ← PRIORITIZE
+- Score 8: 50% WR, 254% avg gain  <-- PRIORITIZE
 - Score 7: 50% WR, 68% avg gain
 
 By Conviction:
-- Smart Money: 57% WR, 99% avg gain ← PRIORITIZE
+- Smart Money: 57% WR, 99% avg gain  <-- PRIORITIZE
 - Strict: 30% WR, 103% avg gain
 
 Expected Monthly Performance (with 30 signals/day):
@@ -464,7 +677,7 @@ Expected Monthly Performance (with 30 signals/day):
 - Signals: ~900/month (focus on Score 8-9 = ~270 quality signals)
 - Winners at 42% WR: ~113 winners
 - Average gain: 96%
-- With compounding: $500 → $700-800 Month 1 (+40-60%)
+- With compounding: $500 -> $700-800 Month 1 (+40-60%)
 
 Risk Management:
 - Circuit breaker prevents >20% daily loss
@@ -472,4 +685,86 @@ Risk Management:
 - Max 5 concurrent positions
 - Trailing stops capture 60-70% of peaks
 """
+
+# ==================== SCORE STAGE MAP (2026-05-17 REFACTOR) ====================
+# CRITICAL: Score is a STAGE INDICATOR, not confidence.
+# Forensic data (73 trades):
+#   Score 3-5: 28.6% WR, +$7.71 net  (BEST -- early stage, good entry timing)
+#   Score 7:   22.2% WR, -$10.46 net
+#   Score 9:    0.0% WR, -$2.54 net
+#   Score 10:  15.8% WR, -$28.66 net  (WORST -- late stage, already pumped)
+#
+# Lower score = earlier discovery = better entry = more profit.
+# Higher score = more hype already = buying the top = loss.
+#
+# Each entry: (position_size_multiplier, preferred_entry_strategy, stage_label)
+
+SCORE_STAGE_MAP = {
+    0:  (1.0, "instant",  "unknown"),
+    1:  (1.0, "instant",  "very_early"),
+    2:  (1.0, "instant",  "very_early"),
+    3:  (1.3, "instant",  "early_stage"),
+    4:  (1.3, "instant",  "early_stage"),
+    5:  (1.1, "instant",  "mid_stage"),
+    6:  (1.0, "delayed",  "mid_stage"),
+    7:  (0.9, "delayed",  "late_stage"),
+    8:  (0.8, "delayed",  "late_stage"),
+    9:  (0.6, "dip",      "very_late"),
+    10: (0.5, "dip",      "very_late"),
+}
+
+
+def get_score_stage(score: int):
+    """Get (size_mult, entry_strategy, label) for a signal score."""
+    return SCORE_STAGE_MAP.get(score, (1.0, "instant", "unknown"))
+
+
+# ==================== STRATEGY PROFILES ====================
+# Switch full configurations via TS_STRATEGY_PROFILE env var.
+# This makes the system experiment-driven.
+
+STRATEGY_PROFILES = {
+    "conservative": {
+        "entry_strategy": "dip",
+        "entry_dip_pct": 15.0,
+        "early_phase_sec": 300,
+        "early_stop_pct": 60.0,
+        "mid_stop_pct": 30.0,
+        "score_usage": "stage_indicator",
+        "min_score": 0,
+    },
+    "balanced": {
+        "entry_strategy": "hybrid",
+        "early_phase_sec": 180,
+        "early_stop_pct": 50.0,
+        "mid_stop_pct": 25.0,
+        "score_usage": "stage_indicator",
+        "min_score": 0,
+    },
+    "aggressive": {
+        "entry_strategy": "delayed",
+        "entry_delay_sec": 60,
+        "early_phase_sec": 120,
+        "early_stop_pct": 40.0,
+        "mid_stop_pct": 20.0,
+        "score_usage": "stage_indicator",
+        "min_score": 0,
+    },
+    "legacy": {
+        "entry_strategy": "instant",
+        "early_phase_sec": 0,
+        "early_stop_pct": 25.0,
+        "mid_stop_pct": 25.0,
+        "score_usage": "confidence",
+        "min_score": 7,
+    },
+}
+
+ACTIVE_STRATEGY_PROFILE = os.getenv("TS_STRATEGY_PROFILE", "balanced")
+
+
+def get_active_profile():
+    """Get the active strategy profile dict."""
+    return STRATEGY_PROFILES.get(ACTIVE_STRATEGY_PROFILE, STRATEGY_PROFILES["balanced"])
+
 

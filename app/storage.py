@@ -10,8 +10,11 @@ from app.alert_cache import get_alert_cache
 def _get_conn() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_FILE, timeout=10)
     try:
-        # Use rollback journal to avoid cross-container/WAL file issues on some hosts
-        conn.execute("PRAGMA journal_mode=DELETE")
+        # WAL mode: enables concurrent reads while writing (safe for multi-container
+        # Docker setups when all containers mount the same host volume).
+        # Upgraded from DELETE journal (2026-05-17) to prevent data corruption
+        # under concurrent writes from worker/trader/tracker containers.
+        conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA busy_timeout=5000")
         conn.execute("PRAGMA synchronous=NORMAL")
         conn.execute("PRAGMA temp_store=MEMORY")

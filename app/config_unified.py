@@ -137,6 +137,16 @@ if not ATM_TELETHON_API_HASH:
     ATM_TELETHON_API_HASH = TELEGRAM_USER_API_HASH
 ATM_TELETHON_SESSION_FILE = os.getenv("ATM_TELETHON_SESSION_FILE", "").strip()
 ATM_CHANNEL_IDS = _get_list_of_ints("ATM_CHANNEL_IDS")
+
+# Known Channel ID mapping for attribution
+CHANNEL_ID_MAP = {
+    "7621472519": "Cielo Smart Money",
+    "7710129239": "ATM Premium",
+    "7822692800": "ATM Scanner",
+    "8492857337": "Alpha Alerts",
+    "8118238194": "Whale Tracker",
+}
+
 ATM_INGEST_ENABLED = _get_bool("ATM_INGEST_ENABLED", False)
 ATM_DEFAULT_USD_VALUE = _get_int("ATM_DEFAULT_USD_VALUE", 1200)  # synthetic usd_value for ATM signals
 ATM_RATE_LIMIT_PER_MIN = _get_int("ATM_RATE_LIMIT_PER_MIN", 120)  # per-channel guard
@@ -363,7 +373,7 @@ REQUIRE_MINT_REVOKED = _get_bool("REQUIRE_MINT_REVOKED", False)
 ALLOW_UNKNOWN_SECURITY = _get_bool("ALLOW_UNKNOWN_SECURITY", True)
 
 # Holder Concentration - OPTIMIZED FOR 2X+ WIN RATE
-# TIGHTENED to reduce whale manipulation and rug risk (51.9% → 35-40% target)
+# TIGHTENED to reduce whale manipulation and rug risk (51.9% ΓåÆ 35-40% target)
 # Lower concentration = better distribution = more sustainable pumps
 MAX_TOP10_CONCENTRATION = _get_float("MAX_TOP10_CONCENTRATION", 30.0)
 MAX_BUNDLERS_PERCENT = _get_float("MAX_BUNDLERS_PERCENT", 15.0)  # TIGHTENED: 15% (was 20%) - reduce bot/bundler risk
@@ -537,6 +547,35 @@ TRADING_MIN_VOL_TO_MCAP_RATIO = _get_float("TRADING_MIN_VOL_TO_MCAP_RATIO", 0.1)
 TRADING_DB_PATH = os.getenv("TRADING_DB_PATH", "var/trading.db")
 TRADING_LOG_FILE = os.getenv("TRADING_LOG_FILE", "data/logs/trading.log")
 TRADING_JSONL_FILE = os.getenv("TRADING_JSONL_FILE", "data/logs/trading.jsonl")
+
+# Telegram trade alerts (forwarded to trading channel)
+TRADING_TELEGRAM_ALERTS = _get_bool("TRADING_TELEGRAM_ALERTS", True)
+TELEGRAM_TRADE_ONLY = _get_bool("TELEGRAM_TRADE_ONLY", False)
+
+# Daily limits & cooldown
+TRADING_MAX_TRADES_PER_DAY = _get_int("TRADING_MAX_TRADES_PER_DAY", 20)
+TRADING_MAX_DAILY_USD = _get_float("TRADING_MAX_DAILY_USD", 5000.0)
+TRADING_MAX_POSITION_PCT = _get_float("TRADING_MAX_POSITION_PCT", 25.0)
+TRADING_MIN_COOLDOWN_SEC = _get_int("TRADING_MIN_COOLDOWN_SEC", 30)
+TRADING_LIMITS_STATE_FILE = os.getenv("TRADING_LIMITS_STATE_FILE", "var/trading_limits.json")
+
+# Volatility-based trailing stop
+TRADING_VOLATILITY_TRAIL_ENABLED = _get_bool("TRADING_VOLATILITY_TRAIL_ENABLED", True)
+TRADING_VOLATILITY_WINDOW_SEC = _get_int("TRADING_VOLATILITY_WINDOW_SEC", 300)
+TRADING_VOLATILITY_MIN_SAMPLES = _get_int("TRADING_VOLATILITY_MIN_SAMPLES", 5)
+TRADING_VOLATILITY_BASE_TRAIL_PCT = _get_float("TRADING_VOLATILITY_BASE_TRAIL_PCT", 15.0)
+TRADING_VOLATILITY_MULTIPLIER = _get_float("TRADING_VOLATILITY_MULTIPLIER", 2.0)
+TRADING_VOLATILITY_MAX_TRAIL_PCT = _get_float("TRADING_VOLATILITY_MAX_TRAIL_PCT", 40.0)
+
+# Max hold time
+TRADING_MAX_HOLD_SEC = _get_int("TRADING_MAX_HOLD_SEC", 86400)
+TRADING_FORCE_MAX_HOLD = _get_bool("TRADING_FORCE_MAX_HOLD", True)
+
+# HTTP proxy & jitter (used by http_client.py)
+HTTP_PROXY = os.getenv("HTTP_PROXY", "").strip()
+HTTPS_PROXY = os.getenv("HTTPS_PROXY", "").strip()
+HTTP_REQUEST_JITTER_MS = _get_int("HTTP_REQUEST_JITTER_MS", 100)
+HTTP_TIMEOUT_STATS = _get_int("HTTP_TIMEOUT_STATS", 20)
 
 
 # ============================================================================

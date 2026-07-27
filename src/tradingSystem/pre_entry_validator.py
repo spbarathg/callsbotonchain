@@ -14,6 +14,7 @@ Solution: Validate tokens BEFORE buying, not after
 Impact: Prevents 50% of recent losses ($104 + $108 = $212 saved per 10 trades)
 """
 import time
+import os
 from typing import Dict, Tuple, Optional
 import requests
 
@@ -35,6 +36,13 @@ class PreEntryValidator:
         # API endpoints
         # REMOVED: DexScreener API (user requirement: Jupiter API only)
         self.SOLSCAN_API = "https://api.solscan.io/v2/token/meta"
+        self._tradeability_cache = {}  # token -> (is_tradeable, reason, ts, ttl)
+        self._tradeability_cache_ttl = int(
+            os.getenv("JUP_TRADEABLE_CACHE_TTL_SEC", "180")
+        )
+        self._tradeability_rate_limit_ttl = int(
+            os.getenv("JUP_TRADEABLE_RATE_LIMIT_TTL_SEC", "30")
+        )
         
     def validate_token(self, token: str, stats: Dict) -> Tuple[bool, str]:
         """
@@ -164,6 +172,35 @@ class PreEntryValidator:
             from .config_optimized import SOL_MINT
             
             jupiter = get_jupiter_client()
+
+            now = time.time()
+            cached = self._tradeability_cache.get(token)
+            if cached:
+                cached_ok, cached_reason, cached_ts, cached_ttl = cached
+                if (now - cached_ts) < cached_ttl:
+                    return cached_ok, cached_reason
+
+            def _cache_result(ok: bool, reason: str, ttl_override: Optional[int] = None):
+                ttl = ttl_override if ttl_override is not None else self._tradeability_cache_ttl
+                self._tradeability_cache[token] = (ok, reason, time.time(), ttl)
+
+            def _is_rate_limited(result: Dict) -> bool:
+                if result.get("status_code") == 429:
+                    return True
+                err = str(result.get("error") or "").lower()
+                return "rate limit" in err or "429" in err
+
+            def _should_retry(result: Dict) -> bool:
+                err = str(result.get("error") or "")
+                if result.get("status_code") in (429, None):
+                    return False
+                if "TOKEN_NOT_TRADABLE" in err:
+                    return False
+                if "COULD_NOT_FIND_ANY_ROUTE" in err or "NO_ROUTES_FOUND" in err:
+                    return True
+                if result.get("status_code") in (400, 404):
+                    return True
+                return False
             
             # Strategy 1: Direct routes only with conservative slippage (fastest path)
             # This works for most liquid tokens with SOL pairs
@@ -176,7 +213,8 @@ class PreEntryValidator:
                     output_mint=token,
                     amount=test_amount_lamports,
                     slippage_bps=2000,  # 20% slippage
-                    only_direct_routes=True
+                    only_direct_routes=True,
+                    priority="medium"
                 )
                 
                 if result["status_code"] == 200 and result.get("json"):
@@ -184,9 +222,18 @@ class PreEntryValidator:
                     out_amount = quote_data.get("outAmount")
                     if out_amount and int(out_amount) > 0:
                         print(f"[VALIDATOR] ✅ Direct route found! Output: {out_amount} tokens", flush=True)
+                        _cache_result(True, "Direct Jupiter route available (most reliable)")
                         return True, "Direct Jupiter route available (most reliable)"
                 
                 print(f"[VALIDATOR] ⚠️ Strategy 1 failed: {result.get('error', 'No direct route')}", flush=True)
+                if _is_rate_limited(result):
+                    reason = "Rate limited during tradeability check"
+                    _cache_result(False, reason, ttl_override=self._tradeability_rate_limit_ttl)
+                    return False, reason
+                if not _should_retry(result):
+                    reason = result.get("error", "Direct route unavailable")
+                    _cache_result(False, reason)
+                    return False, reason
                 
             except Exception as e:
                 print(f"[VALIDATOR] ⚠️ Strategy 1 error: {e}", flush=True)
@@ -201,7 +248,8 @@ class PreEntryValidator:
                     amount=test_amount_lamports,
                     slippage_bps=5000,  # 50% slippage (aggressive)
                     only_direct_routes=False,
-                    max_accounts=64  # Allow more complex routes
+                    max_accounts=64,  # Allow more complex routes
+                    priority="medium"
                 )
                 
                 if result["status_code"] == 200 and result.get("json"):
@@ -209,9 +257,18 @@ class PreEntryValidator:
                     out_amount = quote_data.get("outAmount")
                     if out_amount and int(out_amount) > 0:
                         print(f"[VALIDATOR] ✅ Multi-hop route found! Output: {out_amount} tokens", flush=True)
+                        _cache_result(True, "Multi-hop Jupiter route available (requires higher slippage)")
                         return True, "Multi-hop Jupiter route available (requires higher slippage)"
                 
                 print(f"[VALIDATOR] ⚠️ Strategy 2 failed: {result.get('error', 'No multi-hop route')}", flush=True)
+                if _is_rate_limited(result):
+                    reason = "Rate limited during tradeability check"
+                    _cache_result(False, reason, ttl_override=self._tradeability_rate_limit_ttl)
+                    return False, reason
+                if not _should_retry(result):
+                    reason = result.get("error", "Multi-hop route unavailable")
+                    _cache_result(False, reason)
+                    return False, reason
                 
             except Exception as e:
                 print(f"[VALIDATOR] ⚠️ Strategy 2 error: {e}", flush=True)
@@ -227,7 +284,8 @@ class PreEntryValidator:
                     amount=micro_amount,
                     slippage_bps=5000,  # 50% slippage
                     only_direct_routes=False,
-                    max_accounts=64
+                    max_accounts=64,
+                    priority="medium"
                 )
                 
                 if result["status_code"] == 200 and result.get("json"):
@@ -235,9 +293,14 @@ class PreEntryValidator:
                     out_amount = quote_data.get("outAmount")
                     if out_amount and int(out_amount) > 0:
                         print(f"[VALIDATOR] ✅ Micro-trade route found! Output: {out_amount} tokens", flush=True)
+                        _cache_result(True, "Tradeable with micro amounts (very low liquidity)")
                         return True, "Tradeable with micro amounts (very low liquidity)"
                 
                 print(f"[VALIDATOR] ⚠️ Strategy 3 failed: {result.get('error', 'Not tradeable even with micro amount')}", flush=True)
+                if _is_rate_limited(result):
+                    reason = "Rate limited during tradeability check"
+                    _cache_result(False, reason, ttl_override=self._tradeability_rate_limit_ttl)
+                    return False, reason
                 
             except Exception as e:
                 print(f"[VALIDATOR] ⚠️ Strategy 3 error: {e}", flush=True)
@@ -250,7 +313,9 @@ class PreEntryValidator:
             print(f"[VALIDATOR]    - Scam token (accepts buys but can't sell)", flush=True)
             print(f"[VALIDATOR]    - Requires direct Raydium integration", flush=True)
             
-            return False, "Not tradeable on Jupiter (tried 3 strategies: direct, multi-hop, micro)"
+            reason = "Not tradeable on Jupiter (tried 3 strategies: direct, multi-hop, micro)"
+            _cache_result(False, reason)
+            return False, reason
         
         except Exception as e:
             print(f"[VALIDATOR] ⚠️ Tradeability check system error: {e}", flush=True)

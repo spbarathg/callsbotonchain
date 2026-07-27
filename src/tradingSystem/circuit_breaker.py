@@ -1,4 +1,4 @@
-"""
+﻿"""
 Circuit Breaker and Loss Limits
 Prevents catastrophic losses by halting trading when risk thresholds are exceeded
 """
@@ -170,7 +170,7 @@ class CircuitBreaker:
         self.is_tripped = True
         self.trip_reason = reason
         self.trip_time = time.time()
-        print(f"[CIRCUIT_BREAKER] 🛑 TRIPPED: {reason}", flush=True)
+        print(f"[CIRCUIT_BREAKER] ≡ƒ¢æ TRIPPED: {reason}", flush=True)
     
     def reset(self):
         """Reset the circuit breaker (admin action)"""
@@ -182,7 +182,7 @@ class CircuitBreaker:
             self.excessive_slippage_count = 0
             self.slippage_events = []
             
-            print(f"[CIRCUIT_BREAKER] ✅ Reset - trading resumed", flush=True)
+            print(f"[CIRCUIT_BREAKER] Γ£à Reset - trading resumed", flush=True)
     
     def emergency_stop(self):
         """Manual emergency stop (requires manual reset)"""
@@ -190,7 +190,7 @@ class CircuitBreaker:
             self.manual_override = True
             self._trip("Manual emergency stop")
             
-            print(f"[CIRCUIT_BREAKER] 🛑 EMERGENCY STOP ACTIVATED", flush=True)
+            print(f"[CIRCUIT_BREAKER] ≡ƒ¢æ EMERGENCY STOP ACTIVATED", flush=True)
             print(f"[CIRCUIT_BREAKER] Requires manual reset to resume trading", flush=True)
     
     def get_status(self) -> Dict:

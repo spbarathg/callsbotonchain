@@ -1,4 +1,4 @@
-"""
+﻿"""
 Jupiter Price Oracle for Exit Monitoring
 Uses real Jupiter sell quotes to get accurate, sellable prices
 """
@@ -85,10 +85,10 @@ class JupiterPriceOracle:
             in_amount = int(holdings * (10 ** token_decimals))
             
             # FIXED: Single quote with moderate slippage to avoid rate limits
-            # Problem: Multiple slippage attempts (50%→75%→100%) cause API burst
+            # Problem: Multiple slippage attempts (50%ΓåÆ75%ΓåÆ100%) cause API burst
             # Solution: Use 50% slippage for price quotes (matches most successful sells)
             # Result: 1 API call per position instead of 3, avoids rate limits
-            # Note: Sell execution still uses graduated slippage (25%→50%→75%→100%)
+            # Note: Sell execution still uses graduated slippage (25%ΓåÆ50%ΓåÆ75%ΓåÆ100%)
             result = jupiter.get_quote(
                 input_mint=token,
                 output_mint=SOL_MINT,

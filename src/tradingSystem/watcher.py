@@ -52,23 +52,32 @@ def follow_signals_redis(block_timeout: int = 5) -> Iterator[Dict]:
 	print(f"📡 Watching Redis for trading signals (blocking mode, timeout={block_timeout}s)...")
 	
 	# Track processed signals to avoid true duplicates
-	processed_tokens = set()
+	# Use OrderedDict for FIFO eviction (set.pop() removes random element!)
+	from collections import OrderedDict
+	processed_tokens: OrderedDict = OrderedDict()
 	
 	while True:
 		try:
 			# BRPOP: Blocking right pop - waits for new signals
 			# Returns: [list_name, json_payload] or None on timeout
-			result = _redis_client.brpop("trading_signals", timeout=block_timeout)
+			# Try both queue names - callsbot:signal_queue (ATM) and trading_signals (legacy)
+			# KNOWN LIMITATION (2026-05-17): signal_queue.py uses lpush (stack order)
+			# while we consume with brpop (right-pop = FIFO order). The in-memory
+			# heap's score-based priority ordering is only maintained within the
+			# running process. After a restart, signals replay in FIFO order from
+			# Redis, not score order. Accepted trade-off at current scale. To fix,
+			# migrate Redis persistence to a Sorted Set (ZADD/ZPOPMAX).
+			result = _redis_client.brpop(["callsbot:signal_queue", "trading_signals"], timeout=block_timeout)
 			
 			if result is None:
 				# Timeout - no new signals, continue waiting
 				continue
 			
-			_, payload = result
+			queue_name, payload = result
 			signal = json.loads(payload)
 			
-			# Get token and timestamp
-			token = signal.get("token", "unknown")
+			# Get token and timestamp - handle both ATM format and legacy format
+			token = signal.get("token_address") or signal.get("token", "unknown")
 			# Try both 'timestamp' and 'ts' fields, parse ISO format if needed
 			signal_time = signal.get("timestamp") or signal.get("ts")
 			if signal_time and isinstance(signal_time, str):
@@ -92,27 +101,34 @@ def follow_signals_redis(block_timeout: int = 5) -> Iterator[Dict]:
 				print(f"[DEBUG] Skipping duplicate signal: {token[:8]}...", flush=True)
 				continue
 			
-			# Add to processed set (keep last 1000 to prevent memory bloat)
-			processed_tokens.add(token)
+			# Add to processed tracker (keep last 1000 to prevent memory bloat)
+			# OrderedDict preserves insertion order so eviction removes the TRUE oldest
+			processed_tokens[token] = True
 			if len(processed_tokens) > 1000:
-				processed_tokens.pop()  # Remove oldest
+				processed_tokens.popitem(last=False)  # Remove oldest (FIFO)
 			
 			print(f"[DEBUG] Processing fresh signal: {token[:8]}... (age: {age_seconds:.0f}s)", flush=True)
 			
 			# Normalize to format expected by paper trader
+			# Handle both ATM format (token_address, raw_score, atm_meta) and legacy format
+			atm_meta = signal.get("atm_meta") or {}
+			score = signal.get("raw_score") or signal.get("final_score") or 0
+			
 			normalized = {
 				"type": "signal",
-				"ca": signal.get("token"),
-				"score": signal.get("final_score"),  # Use final_score from worker
-				"final_score": signal.get("final_score"),  # Also include as final_score
+				"ca": token,
+				"score": score,
+				"final_score": score,
 				"conviction_type": signal.get("conviction_type"),
-				"price": signal.get("price"),
-				"market_cap": signal.get("market_cap"),
+				"price": atm_meta.get("price_usd") or signal.get("price"),
+				"market_cap": atm_meta.get("market_cap_usd") or signal.get("market_cap"),
 				"liquidity": signal.get("liquidity"),
 				"volume_24h": signal.get("volume_24h"),
-				"change_1h": signal.get("change_1h"),
+				"change_1h": atm_meta.get("price_change", {}).get("1h") or signal.get("change_1h"),
 				"smart_money_detected": signal.get("smart_money_detected"),
 				"timestamp": signal_time,
+				"atm_meta": atm_meta,  # Pass through for trader use
+				"source": signal.get("source"),
 			}
 			
 			yield normalized
@@ -126,51 +142,8 @@ def follow_signals_redis(block_timeout: int = 5) -> Iterator[Dict]:
 			continue
 
 
-def follow_decisions(start_at_end: bool = True) -> Iterator[Dict[str, str]]:
-	"""Yield normalized events from stdout.log in near-real-time (LEGACY).
-	
-	⚠️ DEPRECATED: Use follow_signals_redis() for real-time signal consumption.
-	This method polls a log file and may have stale data.
-
-	Events:
-	- {type: 'final', ca, final:int, prelim:int, vel:int}
-	- {type: 'pass_strict_smart', ca}
-	- {type: 'reject_junior', ca}
-	"""
-	path = BOT_STDOUT_LOG
-	with open(path, "r", errors="ignore") as f:
-		if start_at_end:
-			f.seek(0, 2)
-		while True:
-			line = f.readline()
-			if not line:
-				time.sleep(0.2)
-				continue
-			m = _FINAL_RE.search(line)
-			if m:
-				ca = m.group(1)
-				if not _valid_ca(ca):
-					continue
-				yield {
-					"type": "final",
-					"ca": ca,
-					"final": m.group(2),
-					"prelim": m.group(4),
-					"vel": m.group(5),
-				}
-				continue
-			m = _PASS_RE.search(line)
-			if m:
-				ca = m.group(1)
-				if not _valid_ca(ca):
-					continue
-				yield {"type": "pass_strict_smart", "ca": ca}
-				continue
-			m = _REJECT_RE.search(line)
-			if m:
-				ca = m.group(1)
-				if not _valid_ca(ca):
-					continue
-				yield {"type": "reject_junior", "ca": ca}
 
 
+# Legacy follow_decisions() removed (2026-05-17 refactor).
+# It was a deprecated stdout.log file-tailer that has been fully replaced
+# by follow_signals_redis() for real-time Redis-based signal consumption.

@@ -16,7 +16,7 @@ services:
       - CALLSBOT_METRICS_ENABLED=true
       - CALLSBOT_FORCE_FALLBACK=false
       - REDIS_URL=redis://redis:6379/0
-      - TELEGRAM_USER_SESSION_FILE=sessions/relay_user.session
+      - TELEGRAM_USER_SESSION_FILE=var/atm_ingest.session
       - TS_BLIND_BUY=true
       - MIN_VOLUME_24H_USD=10000
       - MIN_VOL_TO_MCAP_RATIO=0.3
@@ -27,7 +27,7 @@ services:
     volumes:
       - ./var:/app/var
       - worker_sessions:/app/sessions
-      - ./data/logs:/app/data/logs
+      - ../data/logs:/app/data/logs
     ports:
       - "9108:9108"
     depends_on:
@@ -53,7 +53,7 @@ services:
       - CALLSBOT_SQL_KEY=${CALLSBOT_SQL_KEY}
     volumes:
       - ./var:/app/var
-      - ./data/logs:/app/data/logs:ro
+      - ../data/logs:/app/data/logs:ro
     expose:
       - "8080"
     healthcheck:
@@ -73,12 +73,6 @@ services:
     user: root
     command: ["python", "-m", "src.tradingSystem.cli_optimized"]
     restart: unless-stopped  # ENABLED for live trading
-    extra_hosts:
-      - "quote-api.jup.ag:104.26.11.139"
-      - "api.jup.ag:104.26.11.139"
-    dns:
-      - 8.8.8.8
-      - 1.1.1.1
     env_file:
       - .env
     environment:
@@ -136,7 +130,7 @@ services:
       - TS_EXIT_CHECK_INTERVAL=15.0 # CRITICAL: 15s = 4 calls/min + 60s cache = <1 API call/min/position
     volumes:
       - ./var:/app/var
-      - ./data/logs:/app/data/logs
+      - ../data/logs:/app/data/logs
     depends_on:
       - worker
       - web
@@ -160,11 +154,11 @@ services:
       - .env
     environment:
       - CALLSBOT_LOG_STDOUT=true
-      - SIGNAL_AGGREGATOR_SESSION_FILE=var/relay_user.session
+      - SIGNAL_AGGREGATOR_SESSION_FILE=var/atm_ingest.session
       - SIGNAL_AGGREGATOR_ALLOW_LEGACY_CHANNELS=false
     volumes:
       - ./var:/app/var
-      - ./data/logs:/app/data/logs
+      - ../data/logs:/app/data/logs
     depends_on:
       - redis
     logging:
@@ -188,7 +182,7 @@ services:
       - REDIS_URL=redis://redis:6379/0
     volumes:
       - ./var:/app/var
-      - ./data/logs:/app/data/logs
+      - ../data/logs:/app/data/logs
     depends_on:
       - worker
       - redis
@@ -212,9 +206,10 @@ services:
     environment:
       - CALLSBOT_LOG_STDOUT=true
       - ATM_INGEST_ENABLED=true
+      - ATM_TELETHON_SESSION_FILE=var/atm_ingest.session
     volumes:
       - ./var:/app/var
-      - ./data/logs:/app/data/logs
+      - ../data/logs:/app/data/logs
     depends_on:
       - worker
       - redis

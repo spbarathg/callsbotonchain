@@ -1,4 +1,4 @@
-"""
+﻿"""
 PRIORITY-BASED POSITION MONITORING
 Adjust check frequency based on RISK and OPPORTUNITY
 
@@ -8,13 +8,13 @@ ANALYSIS OF 77 TRADES (16 hours):
 - Solution: Priority-based checking catches dumps 3x faster!
 
 PRIORITY LEVELS:
-🔴 CRITICAL (1s): Near stop loss (-10% to -20%) → Save $200+
-🟡 IMPORTANT (2s): Near profit targets (95-105%, 195-205%, etc) → Lock gains
-🟢 FAST (3s): New positions (<1h) or volatile (<50% profit)
-⚪ MEDIUM/SLOW (30m-4h): Stable/mature positions
+≡ƒö┤ CRITICAL (1s): Near stop loss (-10% to -20%) ΓåÆ Save $200+
+≡ƒƒí IMPORTANT (2s): Near profit targets (95-105%, 195-205%, etc) ΓåÆ Lock gains
+≡ƒƒó FAST (3s): New positions (<1h) or volatile (<50% profit)
+ΓÜ¬ MEDIUM/SLOW (30m-4h): Stable/mature positions
 
 API EFFICIENCY:
-- Current: 1.67 RPS (5 positions × 1 check per 3s)
+- Current: 1.67 RPS (5 positions ├ù 1 check per 3s)
 - With priorities: ~3-4 RPS (still well under 10 RPS limit)
 - Critical positions monitored 3x faster where it matters!
 """
@@ -34,13 +34,13 @@ class AdaptiveMonitor:
         # Problem: 0.5s checks = 120 calls/min per position, 6 positions = 12 RPS (exceeds 10 RPS limit)
         # Solution: 5s checks with price caching = 12 calls/min per position = 1.2 RPS total (safe)
         # Price cache (60s TTL) ensures fresh-enough data while respecting rate limits
-        self.ULTRA_FAST_INTERVAL = 5.0   # 🔴🔴 First 10 min - Scam protection (was 0.5s)
-        self.CRITICAL_INTERVAL = 3.0     # 🔴 Near stop loss / flash dump risk (was 1.0s)
-        self.IMPORTANT_INTERVAL = 5.0    # 🟡 Near profit targets (95-105%) (was 2.0s)
-        self.FAST_INTERVAL = 10.0        # 🟢 New/volatile positions (10-60 min) (was 3.0s)
-        self.MEDIUM_INTERVAL = 1800      # ⚪ 30 min - Established positions
-        self.SLOW_INTERVAL = 7200        # ⚪ 2 hours - Confirmed moonshots
-        self.ULTRA_SLOW_INTERVAL = 14400 # ⚪ 4 hours - Mega pumpers (500%+)
+        self.ULTRA_FAST_INTERVAL = 5.0   # ≡ƒö┤≡ƒö┤ First 10 min - Scam protection (was 0.5s)
+        self.CRITICAL_INTERVAL = 3.0     # ≡ƒö┤ Near stop loss / flash dump risk (was 1.0s)
+        self.IMPORTANT_INTERVAL = 5.0    # ≡ƒƒí Near profit targets (95-105%) (was 2.0s)
+        self.FAST_INTERVAL = 10.0        # ≡ƒƒó New/volatile positions (10-60 min) (was 3.0s)
+        self.MEDIUM_INTERVAL = 1800      # ΓÜ¬ 30 min - Established positions
+        self.SLOW_INTERVAL = 7200        # ΓÜ¬ 2 hours - Confirmed moonshots
+        self.ULTRA_SLOW_INTERVAL = 14400 # ΓÜ¬ 4 hours - Mega pumpers (500%+)
         
         # Track last check time per position
         self.last_check: Dict[str, float] = {}
@@ -71,7 +71,7 @@ class AdaptiveMonitor:
         time_since_last_check = now - self.last_check[token]
         position_age_minutes = position_age_hours * 60  # For 10-min threshold
         
-        # === PRIORITY 🔴🔴 ULTRA FAST: FIRST 10 MINUTES (0.5 second checks) ===
+        # === PRIORITY ≡ƒö┤≡ƒö┤ ULTRA FAST: FIRST 10 MINUTES (0.5 second checks) ===
         # CRITICAL FIX (Oct 27): Most scams dump in first 10 minutes
         # Problem: Ghost buy #387 (-$54), #386 (-$54), #385 lost -37% vs -10% target
         # Solution: Check every 500ms to catch stop losses before -15% max
@@ -87,10 +87,10 @@ class AdaptiveMonitor:
                 self.last_check[token] = now
                 self.check_count += 1
                 self.priority_checks["critical"] += 1  # Use critical bucket
-                return True, f"🔴🔴 ULTRA FAST: New position ({position_age_minutes:.1f}min, {current_profit_pct:.1f}%)"
+                return True, f"≡ƒö┤≡ƒö┤ ULTRA FAST: New position ({position_age_minutes:.1f}min, {current_profit_pct:.1f}%)"
             return False, "Ultra Fast: Too soon"
         
-        # === PRIORITY 🔴 CRITICAL: NEAR STOP LOSS (1 second checks) ===
+        # === PRIORITY ≡ƒö┤ CRITICAL: NEAR STOP LOSS (1 second checks) ===
         # Analysis showed: 32 positions lost -40% (should've stopped at -30%)
         # These positions need INSTANT monitoring to prevent catastrophic losses
         if -20.0 <= current_profit_pct <= -10.0:
@@ -99,10 +99,10 @@ class AdaptiveMonitor:
                 self.last_check[token] = now
                 self.check_count += 1
                 self.priority_checks["critical"] += 1
-                return True, f"🔴 CRITICAL: Near stop loss ({current_profit_pct:.1f}%)"
+                return True, f"≡ƒö┤ CRITICAL: Near stop loss ({current_profit_pct:.1f}%)"
             return False, "Critical: Too soon"
         
-        # === PRIORITY 🟡 IMPORTANT: NEAR PROFIT TARGETS (2 second checks) ===
+        # === PRIORITY ≡ƒƒí IMPORTANT: NEAR PROFIT TARGETS (2 second checks) ===
         # Lock in gains at 100%, 200%, 300%, 500%, 1000% targets
         profit_targets = [100, 200, 300, 500, 1000]
         for target in profit_targets:
@@ -112,10 +112,10 @@ class AdaptiveMonitor:
                     self.last_check[token] = now
                     self.check_count += 1
                     self.priority_checks["important"] += 1
-                    return True, f"🟡 IMPORTANT: Near {target}% target ({current_profit_pct:.1f}%)"
+                    return True, f"≡ƒƒí IMPORTANT: Near {target}% target ({current_profit_pct:.1f}%)"
                 return False, "Important: Too soon"
         
-        # === PRIORITY 🟢 FAST: NEW & VOLATILE (3 second checks) ===
+        # === PRIORITY ≡ƒƒó FAST: NEW & VOLATILE (3 second checks) ===
         # Age 10-60 minutes OR profit < 50%
         # Most failures happen in first hour - need frequent monitoring
         if position_age_hours < 1.0 or current_profit_pct < 50.0:
@@ -123,20 +123,20 @@ class AdaptiveMonitor:
                 self.last_check[token] = now
                 self.check_count += 1
                 self.priority_checks["fast"] += 1
-                return True, f"🟢 FAST: New/Volatile (age={position_age_hours:.1f}h, profit={current_profit_pct:.1f}%)"
+                return True, f"≡ƒƒó FAST: New/Volatile (age={position_age_hours:.1f}h, profit={current_profit_pct:.1f}%)"
             return False, "Fast: Too soon"
         
-        # === ⚪ MEDIUM: ESTABLISHED (30 min checks) ===
+        # === ΓÜ¬ MEDIUM: ESTABLISHED (30 min checks) ===
         # Age 1-4 hours AND profit 50-200%
         if position_age_hours < 4.0 and 50.0 <= current_profit_pct < 200.0:
             if time_since_last_check >= self.MEDIUM_INTERVAL:
                 self.last_check[token] = now
                 self.check_count += 1
                 self.priority_checks["medium"] += 1
-                return True, f"⚪ MEDIUM: Established (age={position_age_hours:.1f}h, profit={current_profit_pct:.1f}%)"
+                return True, f"ΓÜ¬ MEDIUM: Established (age={position_age_hours:.1f}h, profit={current_profit_pct:.1f}%)"
             return False, "Medium: Too soon"
         
-        # === ⚪ SLOW: CONFIRMED MOONSHOT (2 hour checks) ===
+        # === ΓÜ¬ SLOW: CONFIRMED MOONSHOT (2 hour checks) ===
         # Profit 200-500% OR age > 4 hours with profit > 100%
         if (200.0 <= current_profit_pct < 500.0) or \
            (position_age_hours > 4.0 and current_profit_pct > 100.0):
@@ -144,17 +144,17 @@ class AdaptiveMonitor:
                 self.last_check[token] = now
                 self.check_count += 1
                 self.priority_checks["slow"] += 1
-                return True, f"⚪ SLOW: Moonshot (age={position_age_hours:.1f}h, profit={current_profit_pct:.1f}%)"
+                return True, f"ΓÜ¬ SLOW: Moonshot (age={position_age_hours:.1f}h, profit={current_profit_pct:.1f}%)"
             return False, "Slow: Too soon"
         
-        # === ⚪ ULTRA SLOW: MEGA PUMPER (4 hour checks) ===
+        # === ΓÜ¬ ULTRA SLOW: MEGA PUMPER (4 hour checks) ===
         # Profit >= 500% - These are stable mooners, check every 4 hours
         if current_profit_pct >= 500.0:
             if time_since_last_check >= self.ULTRA_SLOW_INTERVAL:
                 self.last_check[token] = now
                 self.check_count += 1
                 self.priority_checks["slow"] += 1  # Use 'slow' bucket for ultra slow
-                return True, f"⚪ ULTRA: Mega Pumper (age={position_age_hours:.1f}h, profit={current_profit_pct:.1f}%)"
+                return True, f"ΓÜ¬ ULTRA: Mega Pumper (age={position_age_hours:.1f}h, profit={current_profit_pct:.1f}%)"
             return False, "Ultra: Too soon"
         
         # Default: Use medium interval

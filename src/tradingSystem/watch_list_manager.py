@@ -1,9 +1,9 @@
-"""
+﻿"""
 WATCH LIST MANAGER
 Smart signal tracking without buying everything
 
 STRATEGY:
-1. ALL signals → Watch list (track prices)
+1. ALL signals ΓåÆ Watch list (track prices)
 2. Identify "movers" (pumping >5% in 2min)
 3. Enter best movers with big positions ($80-100)
 4. Exit losers at -10% BUT keep watching
@@ -16,7 +16,7 @@ API EFFICIENCY:
 - Smart intervals: New signals = 30s, stable = 90s
 
 CAPITAL MANAGEMENT:
-- $600 balance → Max 6 positions @ $100 each
+- $600 balance ΓåÆ Max 6 positions @ $100 each
 - Only enter signals showing REAL movement
 - Exit bad trades quickly, reallocate capital
 
@@ -120,9 +120,9 @@ class WatchListManager:
             redis_url = os.getenv("REDIS_URL") or os.getenv("CALLSBOT_REDIS_URL") or "redis://localhost:6379/0"
             self._redis = redis.from_url(redis_url, decode_responses=True, socket_timeout=5)
             self._redis.ping()
-            print("[WATCHLIST] ✅ Redis persistence enabled", flush=True)
+            print("[WATCHLIST] Γ£à Redis persistence enabled", flush=True)
         except Exception as e:
-            print(f"[WATCHLIST] ⚠️ Redis unavailable, watch list won't persist: {e}", flush=True)
+            print(f"[WATCHLIST] ΓÜá∩╕Å Redis unavailable, watch list won't persist: {e}", flush=True)
             self._redis = None
     
     def _save_to_redis(self):
@@ -148,7 +148,7 @@ class WatchListManager:
                 self._save_errors = 0
             self._save_errors += 1
             if self._save_errors % 10 == 1:  # Log every 10 failures
-                print(f"[WATCHLIST] ⚠️ Redis save error (#{self._save_errors}): {e}", flush=True)
+                print(f"[WATCHLIST] ΓÜá∩╕Å Redis save error (#{self._save_errors}): {e}", flush=True)
     
     def _load_from_redis(self):
         """Load watch list from Redis on startup"""
@@ -189,10 +189,10 @@ class WatchListManager:
                 self.watch_list[token] = signal
                 count += 1
             
-            print(f"[WATCHLIST] ✅ Loaded {count} signals from Redis (survived restart!)", flush=True)
+            print(f"[WATCHLIST] Γ£à Loaded {count} signals from Redis (survived restart!)", flush=True)
             
         except Exception as e:
-            print(f"[WATCHLIST] ⚠️ Failed to load from Redis: {e}", flush=True)
+            print(f"[WATCHLIST] ΓÜá∩╕Å Failed to load from Redis: {e}", flush=True)
     
     def add_signal(self, token: str, signal_time: float, signal_price: float, 
                    signal_score: int, conviction: str):
@@ -206,7 +206,7 @@ class WatchListManager:
                 conviction=conviction
             )
             self.signals_added += 1
-            print(f"[WATCHLIST] ➕ Added {token[:8]} (score {signal_score}) to watch list", flush=True)
+            print(f"[WATCHLIST] Γ₧ò Added {token[:8]} (score {signal_score}) to watch list", flush=True)
             
             # CRITICAL: Save to Redis immediately
             self._save_to_redis()
@@ -240,7 +240,7 @@ class WatchListManager:
                 self._price_failures[token] = self._price_failures.get(token, 0) + 1
                 
                 if self._price_failures[token] % 10 == 1:  # Log 1st, 11th, 21st...
-                    print(f"[WATCHLIST] ⚠️ Price unavailable for {token[:8]} (failure #{self._price_failures[token]})", flush=True)
+                    print(f"[WATCHLIST] ΓÜá∩╕Å Price unavailable for {token[:8]} (failure #{self._price_failures[token]})", flush=True)
                 
                 return None
             
@@ -251,7 +251,7 @@ class WatchListManager:
             
             error_key = f"{token[:8]}:{type(e).__name__}"
             if error_key not in self._logged_errors:
-                print(f"[WATCHLIST] ❌ Price fetch error for {token[:8]}: {e}", flush=True)
+                print(f"[WATCHLIST] Γ¥î Price fetch error for {token[:8]}: {e}", flush=True)
                 self._logged_errors.add(error_key)
             
             return None
@@ -381,7 +381,7 @@ class WatchListManager:
                     pumping_ok = signal.is_pumping
                 
                 if score_ok and gain_ok and velocity_ok and pumping_ok:
-                    print(f"[WATCHLIST_DEBUG] ✅ ENTRY TRIGGERED for {token[:8]} | "
+                    print(f"[WATCHLIST_DEBUG] Γ£à ENTRY TRIGGERED for {token[:8]} | "
                           f"+{signal.current_gain:.1f}% at {signal.velocity:.1f}%/min (score {signal.signal_score})", flush=True)
                     
                     recommendations["enter"].append({
@@ -400,7 +400,7 @@ class WatchListManager:
                     if not velocity_ok: failed_checks.append(f"vel={signal.velocity:.1f}<{self.ENTRY_MIN_VELOCITY}")
                     if not pumping_ok: failed_checks.append("not_pumping")
                     
-                    print(f"[WATCHLIST_DEBUG] ❌ {token[:8]} not ready: {', '.join(failed_checks)}", flush=True)
+                    print(f"[WATCHLIST_DEBUG] Γ¥î {token[:8]} not ready: {', '.join(failed_checks)}", flush=True)
             
             # === RE-ENTRY LOGIC ===
             elif signal.exited and signal.exit_reason == "stop_loss":
@@ -428,7 +428,7 @@ class WatchListManager:
             signal.position_id = position_id
             signal.entry_price = entry_price
             self.entries_made += 1
-            print(f"[WATCHLIST] ✅ Entered {token[:8]} at ${entry_price:.8f}", flush=True)
+            print(f"[WATCHLIST] Γ£à Entered {token[:8]} at ${entry_price:.8f}", flush=True)
             
             # Save state change to Redis
             self._save_to_redis()
@@ -440,8 +440,8 @@ class WatchListManager:
             signal.exited = True
             signal.exit_price = exit_price
             signal.exit_reason = reason
-            print(f"[WATCHLIST] 🚪 Exited {token[:8]} at ${exit_price:.8f} ({reason})", flush=True)
-            print(f"[WATCHLIST] 👀 Still watching for re-entry opportunity...", flush=True)
+            print(f"[WATCHLIST] ≡ƒÜ¬ Exited {token[:8]} at ${exit_price:.8f} ({reason})", flush=True)
+            print(f"[WATCHLIST] ≡ƒæÇ Still watching for re-entry opportunity...", flush=True)
             
             # Save state change to Redis
             self._save_to_redis()
@@ -455,7 +455,7 @@ class WatchListManager:
             signal.position_id = position_id
             signal.entry_price = entry_price
             self.reentries_made += 1
-            print(f"[WATCHLIST] 🔄 RE-ENTERED {token[:8]} at ${entry_price:.8f}", flush=True)
+            print(f"[WATCHLIST] ≡ƒöä RE-ENTERED {token[:8]} at ${entry_price:.8f}", flush=True)
     
     def get_watch_summary(self) -> str:
         """Get summary of watch list"""
@@ -501,27 +501,27 @@ class WatchListManager:
             
             # Remove deeply rugged signals (>70% down after 30 min)
             if signal_age > 1800 and signal.current_gain < -70.0:
-                print(f"[WATCHLIST] 💀 Removing rugged signal {token[:8]}: {signal.current_gain:.1f}% after {signal_age/60:.0f}min", flush=True)
+                print(f"[WATCHLIST] ≡ƒÆÇ Removing rugged signal {token[:8]}: {signal.current_gain:.1f}% after {signal_age/60:.0f}min", flush=True)
                 to_remove.append(token)
                 continue
             
             # Remove stale losers (>50% down, not moving, >1 hour old)
             if signal_age > 3600:  # 1 hour
                 if signal.current_gain < -50.0 and abs(signal.velocity) < 0.5:
-                    print(f"[WATCHLIST] 💀 Removing dead signal {token[:8]}: {signal.current_gain:.1f}% after {signal_age/60:.0f}min", flush=True)
+                    print(f"[WATCHLIST] ≡ƒÆÇ Removing dead signal {token[:8]}: {signal.current_gain:.1f}% after {signal_age/60:.0f}min", flush=True)
                     to_remove.append(token)
                     continue
             
             # Remove never-entered signals after 6 hours
             if not signal.entered and signal_age > 21600:  # 6 hours
-                print(f"[WATCHLIST] ⏰ Removing stale signal {token[:8]}: {signal_age/3600:.1f}h old, never entered", flush=True)
+                print(f"[WATCHLIST] ΓÅ░ Removing stale signal {token[:8]}: {signal_age/3600:.1f}h old, never entered", flush=True)
                 to_remove.append(token)
         
         # Remove and persist
         if to_remove:
             for token in to_remove:
                 del self.watch_list[token]
-            print(f"[WATCHLIST] 🗑️ Pruned {len(to_remove)} dead/stale signals", flush=True)
+            print(f"[WATCHLIST] ≡ƒùæ∩╕Å Pruned {len(to_remove)} dead/stale signals", flush=True)
             self._save_to_redis()  # Persist after pruning
     
     def cleanup_old_signals(self, max_age_hours: int = 24):
@@ -539,7 +539,7 @@ class WatchListManager:
                     removed += 1
         
         if removed > 0:
-            print(f"[WATCHLIST] 🧹 Cleaned up {removed} old signals", flush=True)
+            print(f"[WATCHLIST] ≡ƒº╣ Cleaned up {removed} old signals", flush=True)
 
 
 # Global instance

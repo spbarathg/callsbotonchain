@@ -1,4 +1,4 @@
-# analyze_token.py
+﻿# analyze_token.py
 import time
 import os
 import json
@@ -477,16 +477,16 @@ def score_token(stats: Dict[str, Any], smart_money_detected: bool = False, token
     
     # === 2X SWEET SPOT BONUS (OPTIMIZED: $20k-$200k) ===
     # Why? Tokens in this range need minimal capital to 2x
-    # $50k → $100k = needs $50k | $200k → $400k = needs $200k
+    # $50k ΓåÆ $100k = needs $50k | $200k ΓåÆ $400k = needs $200k
     if market_cap and MICROCAP_SWEET_MIN <= market_cap <= MICROCAP_SWEET_MAX:
         score = min(score + 1, 10)
-        scoring_details.append(f"🎯 2X Sweet Spot: +1 (${market_cap:,.0f} - optimized for quick 2x!)")
+        scoring_details.append(f"≡ƒÄ» 2X Sweet Spot: +1 (${market_cap:,.0f} - optimized for quick 2x!)")
     
     # === ULTRA-MICRO BONUS: $20k-$50k (HIGHEST 2X POTENTIAL) ===
     # Extra bonus for the tiniest tokens with explosive potential
     if market_cap and 20_000 <= market_cap <= 50_000:
         score = min(score + 1, 10)
-        scoring_details.append(f"💎 Ultra-Micro Gem: +1 (${market_cap:,.0f} - 10x+ potential!)")
+        scoring_details.append(f"≡ƒÆÄ Ultra-Micro Gem: +1 (${market_cap:,.0f} - 10x+ potential!)")
 
     # === LIQUIDITY ANALYSIS (ANALYST FINDING: #1 PREDICTOR OF WINNERS!) ===
     # Winner median liquidity: $17,811 | Loser median: $0
@@ -504,31 +504,31 @@ def score_token(stats: Dict[str, Any], smart_money_detected: bool = False, token
     # Weight liquidity HEAVILY as it's the #1 predictor
     if liquidity_usd >= 50_000:  # Premium tier - EXCELLENT
         score += 5  # RAISED from +4 to +5
-        scoring_details.append(f"✅ Liquidity: +5 (${liquidity_usd:,.0f} - EXCELLENT)")
+        scoring_details.append(f"Γ£à Liquidity: +5 (${liquidity_usd:,.0f} - EXCELLENT)")
     elif liquidity_usd >= 20_000:  # NEW TIER - Very Good
         score += 4  # NEW: Above winner median
-        scoring_details.append(f"✅ Liquidity: +4 (${liquidity_usd:,.0f} - VERY GOOD)")
+        scoring_details.append(f"Γ£à Liquidity: +4 (${liquidity_usd:,.0f} - VERY GOOD)")
     elif liquidity_usd >= 18_000:  # Winner median tier - Good
         score += 3  # At winner median
-        scoring_details.append(f"✅ Liquidity: +3 (${liquidity_usd:,.0f} - GOOD)")
+        scoring_details.append(f"Γ£à Liquidity: +3 (${liquidity_usd:,.0f} - GOOD)")
     elif liquidity_usd >= 15_000:  # Minimum threshold - Fair
         score += 2  # LOWERED from +3 to +2
-        scoring_details.append(f"⚠️ Liquidity: +2 (${liquidity_usd:,.0f} - FAIR)")
+        scoring_details.append(f"ΓÜá∩╕Å Liquidity: +2 (${liquidity_usd:,.0f} - FAIR)")
     elif liquidity_usd >= 5_000:  # Below threshold - Low
         score += 1  # LOWERED from +2 to +1
-        scoring_details.append(f"⚠️ Liquidity: +1 (${liquidity_usd:,.0f} - LOW)")
+        scoring_details.append(f"ΓÜá∩╕Å Liquidity: +1 (${liquidity_usd:,.0f} - LOW)")
     elif liquidity_usd > 0:  # Very low liquidity
         score += 0  # No bonus
-        scoring_details.append(f"❌ Liquidity: +0 (${liquidity_usd:,.0f} - VERY LOW)")
+        scoring_details.append(f"Γ¥î Liquidity: +0 (${liquidity_usd:,.0f} - VERY LOW)")
     else:  # Zero liquidity - will be filtered out
         score -= 2
-        scoring_details.append(f"❌ Liquidity: -2 (${liquidity_usd:,.0f} - ZERO/RUG RISK)")
+        scoring_details.append(f"Γ¥î Liquidity: -2 (${liquidity_usd:,.0f} - ZERO/RUG RISK)")
     
     # === LIQUIDITY STABILITY BONUS (NEW!) ===
     # Extra bonus for being at or above winner median
     if liquidity_usd >= 18_000:
         score += 1
-        scoring_details.append("✨ Winner-Tier Liquidity: +1 (≥$18k median)")
+        scoring_details.append("Γ£¿ Winner-Tier Liquidity: +1 (ΓëÑ$18k median)")
     # === END LIQUIDITY ANALYSIS ===
 
     # Volume analysis (24h volume indicates activity)
@@ -554,15 +554,15 @@ def score_token(stats: Dict[str, Any], smart_money_detected: bool = False, token
         # Data shows these are dead/inactive tokens with minimal 2x potential
         if vol_to_liq_ratio < 2.0:
             score -= 2
-            scoring_details.append(f"❌ DEAD TOKEN: -2 (vol/liq: {vol_to_liq_ratio:.1f} - no activity)")
+            scoring_details.append(f"Γ¥î DEAD TOKEN: -2 (vol/liq: {vol_to_liq_ratio:.1f} - no activity)")
         elif vol_to_liq_ratio >= 48:  # High precision rule from analyst
             score += 1
-            scoring_details.append(f"⚡ Vol/Liq Ratio: +1 ({vol_to_liq_ratio:.1f} - EXCELLENT)")
+            scoring_details.append(f"ΓÜí Vol/Liq Ratio: +1 ({vol_to_liq_ratio:.1f} - EXCELLENT)")
         elif vol_to_liq_ratio >= 10:  # Good threshold
-            scoring_details.append(f"✅ Vol/Liq Ratio: ({vol_to_liq_ratio:.1f} - GOOD)")
+            scoring_details.append(f"Γ£à Vol/Liq Ratio: ({vol_to_liq_ratio:.1f} - GOOD)")
         elif vol_to_liq_ratio >= 5.0:  # NEW: High activity bonus
             score += 1
-            scoring_details.append(f"🔥 HIGH ACTIVITY: +1 (vol/liq: {vol_to_liq_ratio:.1f}x)")
+            scoring_details.append(f"≡ƒöÑ HIGH ACTIVITY: +1 (vol/liq: {vol_to_liq_ratio:.1f}x)")
     
     # === LOW ACTIVITY PENALTY (ENHANCED!) ===
     # Penalize tokens with very low trading activity
@@ -570,7 +570,7 @@ def score_token(stats: Dict[str, Any], smart_money_detected: bool = False, token
         vol_to_mcap = volume_24h / market_cap
         if vol_to_mcap < 0.05:  # Very low activity
             score -= 1
-            scoring_details.append(f"⚠️  Low Activity: -1 (vol/mcap: {vol_to_mcap:.3f})")
+            scoring_details.append(f"ΓÜá∩╕Å  Low Activity: -1 (vol/mcap: {vol_to_mcap:.3f})")
         elif vol_to_liq_ratio > 0:  # Only log if we have valid ratio
             scoring_details.append(f"Vol/Liq Ratio: ({vol_to_liq_ratio:.1f})")
     # === END VOLUME-TO-LIQUIDITY RATIO ===
@@ -599,11 +599,11 @@ def score_token(stats: Dict[str, Any], smart_money_detected: bool = False, token
     if -20 <= (change_24h or 0) <= 300:  # EXPANDED from 5-100%
         score += 2  # Big bonus for entry opportunities
         if (change_24h or 0) < 0:
-            scoring_details.append(f"🎯 Dip Buy: +2 ({(change_24h or 0):.1f}% - BUY THE DIP!)")
+            scoring_details.append(f"≡ƒÄ» Dip Buy: +2 ({(change_24h or 0):.1f}% - BUY THE DIP!)")
         elif (change_24h or 0) <= 100:
-            scoring_details.append(f"🎯 Early Entry: +2 ({(change_24h or 0):.1f}% - MOMENTUM ZONE!)")
+            scoring_details.append(f"≡ƒÄ» Early Entry: +2 ({(change_24h or 0):.1f}% - MOMENTUM ZONE!)")
         else:
-            scoring_details.append(f"🎯 Mid-Pump Entry: +2 ({(change_24h or 0):.1f}% - ONGOING PUMP!)")
+            scoring_details.append(f"≡ƒÄ» Mid-Pump Entry: +2 ({(change_24h or 0):.1f}% - ONGOING PUMP!)")
     # === END EARLY MOMENTUM BONUS ===
     
     # Short-term momentum (1h) - REVISED TO REWARD DIP BUYING
@@ -617,19 +617,19 @@ def score_token(stats: Dict[str, Any], smart_money_detected: bool = False, token
     # NEW: Reward dip buying (negative 1h but positive 24h trend)
     elif (change_1h or 0) < 0 and (change_24h or 0) > 0:
         score += 1  # Same bonus as positive momentum
-        scoring_details.append(f"🎯 Dip Buy: +1 ({(change_1h or 0):.1f}% 1h, {(change_24h or 0):.1f}% 24h - buying the dip!)")
+        scoring_details.append(f"≡ƒÄ» Dip Buy: +1 ({(change_1h or 0):.1f}% 1h, {(change_24h or 0):.1f}% 24h - buying the dip!)")
 
     # === SOFT RANKING PREFERENCE (DATA-DRIVEN: 35.5% and 29.3% win rates!) ===
     # Specific momentum patterns that correlate with 2x+ returns
-    # Pattern 1: Consolidation after pump (24h[50,200], 1h≤0) = 35.5% win rate, 503.8% avg gain
-    # Pattern 2: Dip buy opportunity (24h[-50,-20], 1h≤0) = 29.3% win rate, 279.6% avg gain
+    # Pattern 1: Consolidation after pump (24h[50,200], 1hΓëñ0) = 35.5% win rate, 503.8% avg gain
+    # Pattern 2: Dip buy opportunity (24h[-50,-20], 1hΓëñ0) = 29.3% win rate, 279.6% avg gain
     if (change_1h or 0) <= 0:  # Negative or flat 1h momentum
         if 50 <= (change_24h or 0) <= 200:
             score += 1
-            scoring_details.append(f"⭐ CONSOLIDATION PATTERN: +1 (24h:{(change_24h or 0):.1f}%, 1h:{(change_1h or 0):.1f}% - 35.5% win rate!)")
+            scoring_details.append(f"Γ¡É CONSOLIDATION PATTERN: +1 (24h:{(change_24h or 0):.1f}%, 1h:{(change_1h or 0):.1f}% - 35.5% win rate!)")
         elif -50 <= (change_24h or 0) <= -20:
             score += 1
-            scoring_details.append(f"⭐ DIP BUY PATTERN: +1 (24h:{(change_24h or 0):.1f}%, 1h:{(change_1h or 0):.1f}% - 29.3% win rate!)")
+            scoring_details.append(f"Γ¡É DIP BUY PATTERN: +1 (24h:{(change_24h or 0):.1f}%, 1h:{(change_1h or 0):.1f}% - 29.3% win rate!)")
     
     # === 6H MOMENTUM SWEET SPOT (DATA-DRIVEN: 40% win rate!) ===
     # Pattern 3: Moderate 6h pump (20-50%) = 40.0% win rate (BEST predictor!)
@@ -640,7 +640,7 @@ def score_token(stats: Dict[str, Any], smart_money_detected: bool = False, token
             change_6h = float(change_6h)
             if 20 <= change_6h <= 50:
                 score += 1
-                scoring_details.append(f"⭐ OPTIMAL 6H MOMENTUM: +1 ({change_6h:.1f}% - 40% win rate!)")
+                scoring_details.append(f"Γ¡É OPTIMAL 6H MOMENTUM: +1 ({change_6h:.1f}% - 40% win rate!)")
         except (ValueError, TypeError):
             pass
     # === END SOFT RANKING PREFERENCE ===
@@ -656,19 +656,19 @@ def score_token(stats: Dict[str, Any], smart_money_detected: bool = False, token
             if age_hours is not None:
                 if age_hours < 2:
                     score -= 1
-                    scoring_details.append(f"⚠️ TOO NEW: -1 ({age_hours:.1f}h - high risk)")
+                    scoring_details.append(f"ΓÜá∩╕Å TOO NEW: -1 ({age_hours:.1f}h - high risk)")
                 elif 2 <= age_hours <= 72:
                     score += 1
-                    scoring_details.append(f"⏰ OPTIMAL AGE: +1 ({age_hours:.1f}h - sweet spot)")
+                    scoring_details.append(f"ΓÅ░ OPTIMAL AGE: +1 ({age_hours:.1f}h - sweet spot)")
                 elif age_hours > 168:  # > 1 week
                     score -= 1
-                    scoring_details.append(f"⚠️ TOO OLD: -1 ({age_hours:.0f}h - stale)")
+                    scoring_details.append(f"ΓÜá∩╕Å TOO OLD: -1 ({age_hours:.0f}h - stale)")
             
             # DexScreener boosted status (marketing active)
             if metadata.get('is_boosted'):
                 score += 1
                 boost_count = metadata.get('boost_count', 1)
-                scoring_details.append(f"📢 BOOSTED: +1 ({boost_count} boost(s) - marketing active!)")
+                scoring_details.append(f"≡ƒôó BOOSTED: +1 ({boost_count} boost(s) - marketing active!)")
         except Exception:
             pass  # Don't fail scoring if metadata fetch fails
     # === END TOKEN AGE & METADATA ===
@@ -685,10 +685,10 @@ def score_token(stats: Dict[str, Any], smart_money_detected: bool = False, token
                 
                 if growth_rate > 0.10:  # 10%+ growth
                     score += 1
-                    scoring_details.append(f"📈 HOLDER GROWTH: +1 ({growth_rate*100:.1f}% growth - community expanding!)")
+                    scoring_details.append(f"≡ƒôê HOLDER GROWTH: +1 ({growth_rate*100:.1f}% growth - community expanding!)")
                 elif growth_rate < -0.05:  # 5%+ decline
                     score -= 1
-                    scoring_details.append(f"📉 HOLDER DECLINE: -1 ({growth_rate*100:.1f}% - early exits!)")
+                    scoring_details.append(f"≡ƒôë HOLDER DECLINE: -1 ({growth_rate*100:.1f}% - early exits!)")
         except Exception:
             pass  # Don't fail scoring if holder tracking fails
     # === END HOLDER GROWTH ===
@@ -702,14 +702,14 @@ def score_token(stats: Dict[str, Any], smart_money_detected: bool = False, token
             
             if other_signals >= 3:
                 score += 2
-                scoring_details.append(f"🤝 MULTI-BOT CONSENSUS: +2 ({other_signals} bots - strong validation!)")
+                scoring_details.append(f"≡ƒñ¥ MULTI-BOT CONSENSUS: +2 ({other_signals} bots - strong validation!)")
             elif other_signals == 2:
                 score += 1
-                scoring_details.append(f"🤝 MULTI-BOT: +1 ({other_signals} bots)")
+                scoring_details.append(f"≡ƒñ¥ MULTI-BOT: +1 ({other_signals} bots)")
             elif other_signals == 0:
                 # Only you see it - could be early or could be wrong
                 score -= 1
-                scoring_details.append(f"⚠️ SOLO SIGNAL: -1 (no other bots)")
+                scoring_details.append(f"ΓÜá∩╕Å SOLO SIGNAL: -1 (no other bots)")
         except ImportError:
             # Signal aggregator module not available - skip this bonus
             pass
@@ -723,7 +723,7 @@ def score_token(stats: Dict[str, Any], smart_money_detected: bool = False, token
     # === END MULTI-BOT VALIDATION ===
     
     # === RECOVERY PATTERN DETECTION (NEW!) ===
-    # Detect "dip and rip" patterns: ATH → -30% drop → recovery to ATH+10%
+    # Detect "dip and rip" patterns: ATH ΓåÆ -30% drop ΓåÆ recovery to ATH+10%
     # These are high-conviction signals showing strong buying pressure
     if token_address:
         try:
@@ -734,7 +734,7 @@ def score_token(stats: Dict[str, Any], smart_money_detected: bool = False, token
             
             if has_recovery_pattern:
                 score += 3  # Big bonus for proven recovery pattern
-                scoring_details.append(f"🎯 RECOVERY PATTERN: +3 (dip and rip confirmed!)")
+                scoring_details.append(f"≡ƒÄ» RECOVERY PATTERN: +3 (dip and rip confirmed!)")
         except ImportError:
             # Recovery detector module not available - skip this bonus
             pass

@@ -29,10 +29,10 @@ def fetch_solana_feed(cursor=None, smart_money_only: bool = False) -> Dict[str, 
                 return {"transactions": items, "next_cursor": None, "error": None}
         except Exception:
             return {"transactions": [], "next_cursor": None, "error": "forced_fallback_failed"}
-    # Primary source: DexScreener trending
-    primary = _fallback_feed_from_dexscreener(limit=40, smart_money_only=smart_money_only)
+    # Primary source: GeckoTerminal trending (DexScreener trending often 403s on servers)
+    primary = _fallback_feed_from_geckoterminal(limit=40)
     if not primary:
-        primary = _fallback_feed_from_geckoterminal(limit=40)
+        primary = _fallback_feed_from_dexscreener(limit=40, smart_money_only=smart_money_only)
     
     if primary:
         try:
@@ -52,6 +52,9 @@ def _fallback_feed_from_dexscreener(limit: int = 30, smart_money_only: bool = Fa
     GeckoTerminal is the preferred fallback.
     """
     from app.http_client import request_json as _rq
+
+    if os.getenv("CALLSBOT_DEXSCREENER_TRENDING_ENABLED", "false").strip().lower() != "true":
+        return []
     
     # Try trending first (may get 403 from Cloudflare)
     r = _rq("GET", "https://api.dexscreener.com/latest/dex/trending", timeout=HTTP_TIMEOUT_FEED)
@@ -91,6 +94,8 @@ def _fallback_feed_from_dexscreener(limit: int = 30, smart_money_only: bool = Fa
             "dex": p.get("dexId", "dexscreener"),
             "tx_type": "trending_fallback",
             "is_synthetic": True,
+            "source": "dexscreener:trending",
+            "channel_name": "Dex Trending",
         })
         
         if len(txs) >= limit:

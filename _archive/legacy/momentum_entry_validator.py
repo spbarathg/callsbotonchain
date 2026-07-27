@@ -1,4 +1,16 @@
 """
+DEAD CODE — Do Not Use (2026-05-17)
+=====================================
+`MomentumEntryValidator` has been superseded by the `EntryStrategy` ABC in
+`entry_strategy.py`, which provides pluggable `Instant / Delayed / Dip /
+Hybrid` routing based on signal score.  This class is no longer instantiated
+or called from any active code path.
+
+It is kept here to avoid unexpected import errors from any external scripts
+that may reference this module.  Do NOT use it in new code.
+
+Original docstring follows:
+----------------------------
 Momentum-Based Entry Validator
 
 Prevents early entries by requiring momentum confirmation.

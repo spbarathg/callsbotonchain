@@ -8,10 +8,17 @@ Uses free APIs (DexScreener, Jupiter, GeckoTerminal) for tracking.
 import sys
 import os
 import time
-from datetime import datetime
+import json
+from typing import Optional
+from datetime import datetime, timezone
 
-# Add parent directory to path
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Add parent and src directory to path
+repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if repo_root not in sys.path:
+    sys.path.insert(0, repo_root)
+src_dir = os.path.join(repo_root, "src")
+if src_dir not in sys.path:
+    sys.path.insert(0, src_dir)
 
 from app.storage import (
     get_alerted_tokens_for_tracking,
@@ -198,6 +205,132 @@ def get_token_price_free(token_address: str) -> dict:
     return {}
 
 
+def _load_rejection_state(state_path: str) -> dict:
+    try:
+        import json
+        if os.path.exists(state_path):
+            with open(state_path, "r", encoding="utf-8") as f:
+                return json.load(f) or {}
+    except Exception:
+        pass
+    return {}
+
+
+def _save_rejection_state(state_path: str, state: dict) -> None:
+    try:
+        import json
+        with open(state_path, "w", encoding="utf-8") as f:
+            json.dump(state, f)
+    except Exception:
+        pass
+
+
+def _parse_ts(ts: str) -> Optional[datetime]:
+    try:
+        return datetime.fromisoformat(ts.replace("Z", "+00:00"))
+    except Exception:
+        return None
+
+
+def evaluate_rejected_signals() -> None:
+    enabled = os.getenv("REJECTION_WINNER_TRACKING_ENABLED", "true").strip().lower() == "true"
+    if not enabled:
+        return
+    log_path = os.getenv("REJECTION_LOG_PATH", "data/logs/rejections.jsonl")
+    if not os.path.exists(log_path):
+        return
+    state_path = os.getenv("REJECTION_STATE_PATH", "data/logs/rejection_state.json")
+    min_age_min = float(os.getenv("REJECTION_WINNER_MIN_AGE_MINUTES", "30"))
+    max_age_h = float(os.getenv("REJECTION_WINNER_MAX_AGE_HOURS", "24"))
+    min_mult = float(os.getenv("REJECTION_WINNER_MULTIPLIER", "2.0"))
+    max_per_cycle = int(os.getenv("REJECTION_WINNER_MAX_PER_CYCLE", "30"))
+    
+    state = _load_rejection_state(state_path)
+    processed = state.get("processed", {})
+    now = datetime.now(timezone.utc)
+    processed_count = 0
+    winners = 0
+    
+    try:
+        with open(log_path, "r", encoding="utf-8") as f:
+            for line in f:
+                if processed_count >= max_per_cycle:
+                    break
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    event = json.loads(line)
+                except Exception:
+                    continue
+                token = event.get("token")
+                ts = event.get("ts")
+                if not token or not ts:
+                    continue
+                key = f"{token}|{ts}|{event.get('source','')}"
+                if key in processed:
+                    continue
+                ts_dt = _parse_ts(ts)
+                if not ts_dt:
+                    continue
+                age_min = (now - ts_dt).total_seconds() / 60.0
+                if age_min < min_age_min or age_min > (max_age_h * 60):
+                    continue
+                base_price = event.get("price_usd")
+                try:
+                    base_price = float(base_price)
+                except Exception:
+                    base_price = None
+                if not base_price or base_price <= 0:
+                    continue
+                
+                stats = get_token_price_free(token)
+                current_price = None
+                try:
+                    current_price = float(((stats.get("price") or {}).get("price_usd") or 0))
+                except Exception:
+                    current_price = None
+                if not current_price or current_price <= 0:
+                    continue
+                
+                multiple = current_price / base_price if base_price > 0 else 0
+                is_winner = multiple >= min_mult
+                if is_winner:
+                    winners += 1
+                log_tracking({
+                    "type": "rejection_winner_check",
+                    "token": token,
+                    "source": event.get("source"),
+                    "reason": event.get("reason"),
+                    "base_price": base_price,
+                    "current_price": current_price,
+                    "multiple": multiple,
+                    "age_minutes": int(age_min),
+                    "winner": is_winner,
+                })
+                processed[key] = ts
+                processed_count += 1
+    except Exception as e:
+        _out(f"Rejection winner tracking error: {e}")
+        return
+    
+    if processed_count:
+        log_process({
+            "type": "rejection_winner_cycle",
+            "checked": processed_count,
+            "winners": winners,
+        })
+    
+    # Prune state older than max_age_h
+    pruned = {}
+    for k, v in processed.items():
+        ts_dt = _parse_ts(str(v))
+        if ts_dt and (now - ts_dt).total_seconds() <= (max_age_h * 3600):
+            pruned[k] = v
+    state["processed"] = pruned
+    _save_rejection_state(state_path, state)
+
+
 def track_token_performance(token_address: str, retry_count: int = 0) -> bool:
     """
     Fetch current stats for a token and update performance metrics.
@@ -260,9 +393,9 @@ def track_token_performance(token_address: str, retry_count: int = 0) -> bool:
 
 def track_open_positions() -> int:
     """Track price movements for open positions using Jupiter oracle."""
-    from tradingSystem.db import init as init_trading_db
-    from tradingSystem.db import get_open_positions, record_position_price_snapshot
-    from tradingSystem.jupiter_price_oracle import get_jupiter_oracle
+    from src.tradingSystem.db import init as init_trading_db
+    from src.tradingSystem.db import get_open_positions, record_position_price_snapshot
+    from src.tradingSystem.jupiter_price_oracle import get_jupiter_oracle
 
     # Ensure trading DB schema exists before inserting snapshots
     init_trading_db()
@@ -460,6 +593,12 @@ def main():
                         "status": "error",
                         "error": str(e),
                     })
+            
+            # Evaluate rejected signals for missed winners
+            try:
+                evaluate_rejected_signals()
+            except Exception as e:
+                _out(f"❌ Error evaluating rejected signals: {e}")
             
             # Print summary every 6 cycles (roughly every hour)
             if cycle % 6 == 0:

@@ -30,7 +30,8 @@ class RugpullDetector:
     """Detect likely rugpulls before entry to prevent -$268 losses"""
     
     def __init__(self, rpc_url: Optional[str] = None):
-        self.rpc_url = rpc_url or os.getenv("TS_RPC_URL", "https://api.mainnet-beta.solana.com")
+        from .config_optimized import RPC_URL
+        self.rpc_url = rpc_url or RPC_URL
         self.client = Client(self.rpc_url)
         
         # Cache for token analysis (15 min TTL)

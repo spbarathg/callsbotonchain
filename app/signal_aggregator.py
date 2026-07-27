@@ -113,9 +113,9 @@ def extract_token_address(text: str) -> Optional[str]:
         # Standard formats
         r'(?:CA|Contract|Token|Address)[\s:]+([1-9A-HJ-NP-Za-km-z]{32,44})',
         # With emoji/symbols
-        r'💎\s*([1-9A-HJ-NP-Za-km-z]{32,44})',
-        r'🔥\s*([1-9A-HJ-NP-Za-km-z]{32,44})',
-        r'📢\s*([1-9A-HJ-NP-Za-km-z]{32,44})',
+        r'≡ƒÆÄ\s*([1-9A-HJ-NP-Za-km-z]{32,44})',
+        r'≡ƒöÑ\s*([1-9A-HJ-NP-Za-km-z]{32,44})',
+        r'≡ƒôó\s*([1-9A-HJ-NP-Za-km-z]{32,44})',
         # Code blocks
         r'`([1-9A-HJ-NP-Za-km-z]{32,44})`',
         # URLs (dexscreener, birdeye, etc)
@@ -391,7 +391,6 @@ async def start_monitoring():
             TELEGRAM_USER_API_HASH,
             TELETHON_ENABLED
         )
-        import os
         
         if not TELETHON_ENABLED:
             print("[WARN] Signal Aggregator: Telethon not enabled", flush=True)
@@ -423,7 +422,7 @@ async def start_monitoring():
                         group_name = "unknown"
                     
                     # Log all messages (for debugging)
-                    print(f"📨 Signal Aggregator: New message from @{group_name}", flush=True)
+                    print(f"≡ƒô¿ Signal Aggregator: New message from @{group_name}", flush=True)
                     if message_text:
                         # Show first 100 chars of message
                         preview = message_text[:100].replace('\n', ' ')
@@ -433,12 +432,12 @@ async def start_monitoring():
                     token_address = extract_token_address(message_text)
                     
                     if token_address:
-                        print(f"🔍 Signal Aggregator: Extracted token {token_address[:8]}... from @{group_name}", flush=True)
+                        print(f"≡ƒöì Signal Aggregator: Extracted token {token_address[:8]}... from @{group_name}", flush=True)
                         await record_signal(token_address, group_name)
                         signal_count = get_signal_count(token_address)
                         
                         if signal_count > 0:  # Only log if validated
-                            print(f"[OK] Signal Aggregator: {group_name} → {token_address[:8]}... "
+                            print(f"[OK] Signal Aggregator: {group_name} ΓåÆ {token_address[:8]}... "
                                   f"(total groups: {signal_count})", flush=True)
                     else:
                         print(f"   No token address found in message", flush=True)

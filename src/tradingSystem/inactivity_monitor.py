@@ -7,6 +7,7 @@ KEY INSIGHT: Some tokens pump for 8-10 days to 800x
 - DO exit when price is dead/stagnant (pump is over)
 - Track price velocity and movement patterns
 """
+import os
 import time
 from typing import Dict, Optional, Tuple
 from collections import deque
@@ -21,9 +22,9 @@ class InactivityMonitor:
         
         # Thresholds
         # USER REQUIREMENT: "auto close positions with less than 5% movement in 10 minutes"
-        self.MIN_SAMPLES = 10  # Need 10 price checks before judging
-        self.INACTIVITY_THRESHOLD_PCT = 5.0  # <5% movement = inactive
-        self.INACTIVITY_DURATION_MINUTES = 10.0  # 10 minutes of no movement = exit (AGGRESSIVE)
+        self.MIN_SAMPLES = int(os.getenv("TS_INACTIVITY_MIN_SAMPLES", "10"))
+        self.INACTIVITY_THRESHOLD_PCT = float(os.getenv("TS_INACTIVITY_THRESHOLD_PCT", "5.0"))
+        self.INACTIVITY_DURATION_MINUTES = float(os.getenv("TS_INACTIVITY_DURATION_MIN", "10.0"))
         self.INACTIVITY_DURATION_HOURS = self.INACTIVITY_DURATION_MINUTES / 60.0  # Convert to hours for internal use
         # This automatically closes positions that are dead/stagnant
         
@@ -39,6 +40,31 @@ class InactivityMonitor:
             self.price_history[token] = deque(maxlen=50)  # Keep last 50 samples
         
         self.price_history[token].append((timestamp, price))
+
+    def _get_recent_samples(self, token: str, window_sec: int) -> Optional[list]:
+        if token not in self.price_history:
+            return None
+        now = time.time()
+        cutoff = now - float(window_sec)
+        samples = [(t, p) for t, p in self.price_history[token] if t >= cutoff]
+        return samples or None
+
+    def get_volatility_pct(self, token: str, window_sec: int, min_samples: int) -> Optional[float]:
+        """
+        Compute simple price range volatility percentage over a recent window.
+        Returns None if insufficient data.
+        """
+        samples = self._get_recent_samples(token, window_sec)
+        if not samples or len(samples) < max(2, min_samples):
+            return None
+        prices = [p for _, p in samples if p and p > 0]
+        if len(prices) < max(2, min_samples):
+            return None
+        min_price = min(prices)
+        max_price = max(prices)
+        if min_price <= 0:
+            return None
+        return ((max_price - min_price) / min_price) * 100.0
     
     def check_inactivity(self, token: str) -> Tuple[bool, str]:
         """

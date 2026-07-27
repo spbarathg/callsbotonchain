@@ -1,0 +1,16 @@
+[Unit]
+Description=AntBot Unbiased Logger: Depth Tracker
+After=network.target redis-server.service
+Requires=redis-server.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/yesv2/callsbotonchain
+Environment="REDIS_URL=redis://localhost:6379/0"
+ExecStart=/usr/bin/python3 scripts/unbiased_logger/depth_tracker.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
